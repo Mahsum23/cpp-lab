@@ -1,0 +1,15 @@
+# binaries
+server
+client
+*.o
+*.out
+a.out
+
+# build dirs (phase 3)
+build/
+cmake-build-*/
+
+# editor
+.vscode/
+.idea/
+*.swp
