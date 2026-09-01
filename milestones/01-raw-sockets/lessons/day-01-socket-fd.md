@@ -102,6 +102,14 @@ That's the whole program — no address, no `bind()`, no network activity yet.
 - Compile: `g++ -std=c++20 -Wall -Wextra -o day1 src/main.cpp` — zero warnings
 - You'll need `<unistd.h>` for `close()`, in addition to `<sys/socket.h>`
 
+### Checklist
+
+- [ ] `socket()` return value checked before use
+- [ ] `strerror(errno)` printed on failure
+- [ ] non-zero exit status on failure
+- [ ] `close(fd)` called on success
+- [ ] zero warnings under `-Wall -Wextra`
+
 ## Quiz
 
 Run when you type `quiz`:

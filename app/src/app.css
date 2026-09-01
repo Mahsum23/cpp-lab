@@ -1,0 +1,410 @@
+/* JetBrains Mono, latin only, two weights. Ligatures make ->, ::, <=, >> read
+   as single glyphs, which matters a lot at phone sizes. */
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-600.css';
+
+:root {
+  /* Light. Warm off-white rather than #fff — easier on the eyes at a bus stop. */
+  --bg: #f6f6f3;
+  --bg-elev: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #eeeee9;
+  --border: #e0e0d9;
+  --border-strong: #cbcbc2;
+  --text: #15181c;
+  --text-dim: #5c6672;
+  --text-faint: #8b95a1;
+
+  /* One accent for primary action. The flame keeps its own orange — putting the
+     CTA in orange too would sit a hair away from the wrong-answer red. */
+  --accent: #5b3fd6;
+  --accent-ink: #ffffff;
+  --accent-soft: #ece8ff;
+  --flame: #e8722a;
+  --ok: #1a7f37;
+  --ok-soft: #e6f4ea;
+  --bad: #cf222e;
+  --bad-soft: #fceded;
+
+  --radius: 14px;
+  --radius-lg: 20px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 8px 24px -12px rgb(0 0 0 / 14%);
+  --shadow-lift: 0 2px 6px rgb(0 0 0 / 8%), 0 18px 40px -16px rgb(0 0 0 / 22%);
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Inter,
+    Roboto, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --tab-h: 56px;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0e1116;
+    --bg-elev: #151a21;
+    --surface: #161c24;
+    --surface-2: #1e252f;
+    --border: #29313c;
+    --border-strong: #3a4552;
+    --text: #e6edf3;
+    --text-dim: #9aa7b6;
+    --text-faint: #6e7d8d;
+
+    --accent: #8b6cff;
+    --accent-ink: #0e1116;
+    --accent-soft: #221d3d;
+    --flame: #ff8a3d;
+    --ok: #4ec26b;
+    --ok-soft: #14291b;
+    --bad: #f0616d;
+    --bad-soft: #2c1518;
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 28px -14px rgb(0 0 0 / 70%);
+    --shadow-lift: 0 2px 8px rgb(0 0 0 / 45%), 0 22px 48px -18px rgb(0 0 0 / 80%);
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0e1116;
+  --bg-elev: #151a21;
+  --surface: #161c24;
+  --surface-2: #1e252f;
+  --border: #29313c;
+  --border-strong: #3a4552;
+  --text: #e6edf3;
+  --text-dim: #9aa7b6;
+  --text-faint: #6e7d8d;
+  --accent: #8b6cff;
+  --accent-ink: #0e1116;
+  --accent-soft: #221d3d;
+  --flame: #ff8a3d;
+  --ok: #4ec26b;
+  --ok-soft: #14291b;
+  --bad: #f0616d;
+  --bad-soft: #2c1518;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 28px -14px rgb(0 0 0 / 70%);
+  --shadow-lift: 0 2px 8px rgb(0 0 0 / 45%), 0 22px 48px -18px rgb(0 0 0 / 80%);
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.55;
+  /* No rubber-band bounce revealing white behind the app in standalone mode. */
+  overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A grey flash on every tap is the single loudest "this is a website" tell. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+:where(button, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Big numerals — streak, XP, day count. Tabular so they don't jitter as they tick. */
+.numeral {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.screen {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: calc(var(--safe-t) + 12px) 16px calc(var(--tab-h) + var(--safe-b) + 28px);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+/* ---------------------------------------------------------------- prose --- */
+
+.prose {
+  font-size: 16.5px;
+  line-height: 1.62;
+  overflow-wrap: break-word;
+}
+
+.prose > *:first-child {
+  margin-top: 0;
+}
+
+.prose h2 {
+  font-size: 22px;
+  margin: 32px 0 10px;
+}
+
+.prose h3 {
+  font-size: 18px;
+  margin: 30px 0 8px;
+  letter-spacing: -0.01em;
+}
+
+.prose h4 {
+  font-size: 16px;
+  margin: 22px 0 6px;
+  color: var(--text-dim);
+}
+
+.prose p,
+.prose ul,
+.prose ol {
+  margin: 0 0 14px;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 22px;
+}
+
+.prose li {
+  margin-bottom: 6px;
+}
+
+.prose li::marker {
+  color: var(--text-faint);
+}
+
+.prose strong {
+  font-weight: 650;
+}
+
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 26px 0;
+}
+
+/* Inline code sits in running prose constantly here (`recv()`, `SO_REUSEADDR`),
+   so it has to be quiet — tinted, not boxed and shouting. */
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--surface-2);
+  border-radius: 5px;
+  padding: 0.12em 0.36em;
+  word-break: break-word;
+}
+
+.prose pre.code {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 13px 14px;
+  margin: 0 0 16px;
+  /* Long syscall lines scroll inside the block; the page itself never does. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.prose pre.code code {
+  font-family: inherit;
+  background: none;
+  padding: 0;
+}
+
+.prose blockquote.aside {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+  background: var(--accent-soft);
+  color: var(--text-dim);
+  font-size: 15.5px;
+}
+
+.prose blockquote.aside > *:last-child {
+  margin-bottom: 0;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  margin-bottom: 16px;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  text-align: left;
+}
+
+/* ------------------------------------------------------- syntax colours --- */
+/* Hand-tuned against the palette instead of importing a highlight.js theme, so
+   the code blocks belong to the app in both schemes. */
+
+.hljs-keyword,
+.hljs-built_in {
+  color: #a626a4;
+}
+.hljs-type {
+  color: #0184bc;
+}
+.hljs-string,
+.hljs-char.escape_ {
+  color: #50a14f;
+}
+.hljs-number,
+.hljs-literal {
+  color: #b76b01;
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.hljs-meta,
+.hljs-meta .hljs-string {
+  color: #4078f2;
+}
+.hljs-title,
+.hljs-title.function_ {
+  color: #c1600a;
+}
+.hljs-variable,
+.hljs-params,
+.hljs-attr {
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    .hljs-keyword,
+    .hljs-built_in {
+      color: #c792ea;
+    }
+    .hljs-type {
+      color: #62b6f0;
+    }
+    .hljs-string,
+    .hljs-char.escape_ {
+      color: #98d18a;
+    }
+    .hljs-number,
+    .hljs-literal {
+      color: #f5b76b;
+    }
+    .hljs-meta,
+    .hljs-meta .hljs-string {
+      color: #7aa2f7;
+    }
+    .hljs-title,
+    .hljs-title.function_ {
+      color: #ffb281;
+    }
+  }
+}
+
+:root[data-theme='dark'] {
+  .hljs-keyword,
+  .hljs-built_in {
+    color: #c792ea;
+  }
+  .hljs-type {
+    color: #62b6f0;
+  }
+  .hljs-string,
+  .hljs-char.escape_ {
+    color: #98d18a;
+  }
+  .hljs-number,
+  .hljs-literal {
+    color: #f5b76b;
+  }
+  .hljs-meta,
+  .hljs-meta .hljs-string {
+    color: #7aa2f7;
+  }
+  .hljs-title,
+  .hljs-title.function_ {
+    color: #ffb281;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

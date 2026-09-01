@@ -1,9 +1,19 @@
 # cpp-lab — Learning App Design Doc
 
-**Status:** draft for review (no code yet)
+**Status:** locked — v1 built (2026-09-01). Code in `app/`, how-to in `app/README.md`.
 **Type:** installable PWA (Progressive Web App) — runs in the browser, "Add to Home
 Screen" on iPhone gives it a full-screen icon, offline support, and a native-ish feel.
 No Mac, Xcode, App Store, or developer account required.
+
+> **On "I want an iOS app":** asked and answered — there's no Mac, so native SwiftUI
+> was never actually on the table (no Xcode, no simulator, no signing, and nothing on
+> the Linux box could even compile it). React Native and Capacitor both hit the same
+> wall for a permanent install. The PWA is the only path that produces a real
+> home-screen app on that hardware, and on iOS it genuinely gets full-screen launch,
+> offline, and its own icon. What it does not get: the App Store, and storage iOS
+> promises to keep — hence the export in §3.5, which is load-bearing rather than nice
+> to have.
+
 **Owner of content:** this repo. The app is a *delivery vehicle* for the C++
 curriculum in `milestones/` — it does not contain the learning; it presents it.
 
@@ -447,30 +457,47 @@ clean swap at this stage.
 
 ---
 
-## 11. Open decisions for your review
+## 11. Decisions (settled 2026-09-01)
 
-Everything above is a proposal. The specific things I'd like you to confirm or redirect:
+1. **Content authoring** — two files per day, `.md` + `.quiz.yaml`, compiled to week
+   JSON by `app/scripts/build-content.mjs`. The answer key stays out of the file he'd
+   naturally open mid-lesson. Adopted; `week.yaml` was added alongside them to carry
+   the week roster so unwritten days can still appear on the map as locked steps.
+2. **Tech stack** — Svelte 5 + Vite + `vite-plugin-pwa`. No preference expressed, so
+   the §10 recommendation stands: small runtime, and I'm the one maintaining it.
+3. **Gamification** — as designed. Streak with earned freezes, 3-segment day ring,
+   week bar, XP, badges in the mentor's voice, re-drillable past quizzes.
+4. **Peek-ahead** — days ahead locked by default, with an explicit "Let me jump ahead"
+   toggle on the map and in Settings. Gentle, not a nanny.
+5. **v1 scope** — chat held to v2. Everything in §3.1–3.5 is in and built.
 
-1. **Content authoring** (§6.3): two files per day (`.md` + `.quiz.yaml`) compiled to
-   JSON — good, or do you want a different split?
-2. **Tech stack** (§10): Svelte vs React. I lean Svelte; your call if you have a
-   preference.
-3. **Gamification scope** (§4): is the streak + XP + badges + spaced-repetition set
-   right, too much, or too little for your taste?
-4. **Peek-ahead** (§3.3): lock days ahead by default (gentle) vs. fully open the whole
-   loaded week to jump around freely?
-5. **v1 scope line:** confirm chat is out of v1 and everything else in §3.1–3.5 is in.
+### Where the build knowingly departs from this doc
 
-Once you've reacted to these, I'll lock the doc and start building v1.
-
----
+- **Accent colour.** §5 wanted one accent for both primary actions and the flame. Built
+  with two: violet for actions, orange kept for the flame only. An orange CTA sat a
+  hair away from the wrong-answer red, and a quiz app cannot afford that confusion.
+- **Week 1 is 8 days, not 7.** The §6.1 example said 7; milestone 01 actually has
+  eight sessions. The content follows the milestone.
+- **Locked days show their teaser**, with a single note at the foot of the week
+  explaining they're not written yet — rather than stamping "Not written yet" on
+  every row.
+- **Streak freezes cap at 2** and are earned every 7th day. §4 said "earn one every 7
+  days" without a ceiling; uncapped, a long run banks enough freezes to make the
+  streak meaningless.
+- **A test file exists** (`app/scripts/test-streak.mjs`, `npm test`). The streak rules
+  are the one piece of logic here subtle enough — freezes, gaps, DST-proof date maths
+  — to fail silently and only be noticed by losing a real 40-day run. Node's own
+  runner, no framework, no new dependencies. It is not a general testing setup, and it
+  does not pre-empt milestone 09.
 
 ## 12. Build plan
 
-- **v0** — this design doc. ← we are here
+- **v0** — this design doc. ✅
 - **v1** — core PWA: Today, session player (theory/quiz/task), week map, progress +
-  streak + XP + badges, Week 1 (raw sockets Days 1–7) preloaded, update mechanism,
-  offline, both themes. Installable, beautiful.
+  streak + XP + badges, update mechanism, offline, both themes, installable. ✅ built
+  2026-09-01. Week 1 ships with Day 1 written and Days 2–8 rostered as locked steps —
+  lessons stay written one at a time, calibrated on how the last one went, per
+  `README.md`. ← we are here
 - **v2** — mentor chat (§8).
 - **v3 (optional)** — richer spaced-repetition review, more badges, note→PROGRESS.md
   export polish.

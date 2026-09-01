@@ -1,0 +1,65 @@
+# Week manifest for milestone 01. The build script (app/scripts/build-content.mjs)
+# reads this plus each day-NN-*.md (+ .quiz.yaml) and emits the app's week JSON.
+#
+# A day with a matching day-NN-*.md is "available". A day listed here without one is
+# "upcoming": the app shows the title and teaser, locked, so the map reads as a real
+# path instead of a cliff. Lessons stay written one at a time, per README.md.
+id: week-01
+title: Raw Sockets
+milestone: 01-raw-sockets
+intro: >
+  You already await async I/O at work. What you haven't done is see what's underneath
+  it. Eight sessions, and by the last one you're assembling pieces you've already
+  built — not writing an echo server from a blank page.
+
+days:
+  - id: day-01
+    day: 1
+    title: A socket is a file descriptor
+    estMinutes: 25
+    teaser: What socket() actually allocates, and why it hands you an int.
+
+  - id: day-02
+    day: 2
+    title: Addresses and byte order
+    estMinutes: 25
+    teaser: struct sockaddr_in, why network byte order exists, htons/htonl, INADDR_ANY.
+
+  - id: day-03
+    day: 3
+    title: bind() and listen()
+    estMinutes: 30
+    teaser: Claiming a port, the backlog queue, and reproducing "Address already in use" on purpose.
+
+  - id: day-04
+    day: 4
+    title: accept()
+    estMinutes: 25
+    teaser: Why accept() hands back a different fd — the single most-missed fact in hand-rolled socket code.
+
+  - id: day-05
+    day: 5
+    title: recv() and send(), once each
+    estMinutes: 25
+    teaser: What the return value actually means. Bytes transferred, not "the message".
+
+  - id: day-06
+    day: 6
+    title: The echo loop for one client
+    estMinutes: 30
+    teaser: TCP is a byte stream, not a message stream. Short reads and short writes.
+
+  - id: day-07
+    day: 7
+    title: The outer loop, and the client
+    estMinutes: 30
+    teaser: Accept, serve, disconnect, accept again — then connect() from the other side.
+
+  - id: day-08
+    day: 8
+    title: Hardening pass
+    estMinutes: 25
+    teaser: Every syscall checked, every warning gone. Rigor, not new material.
+    teachBack: >
+      Explain the socket lifecycle end to end, and why accept() returns a new fd rather
+      than reusing the listening one. Then: what breaks if you get that wrong?

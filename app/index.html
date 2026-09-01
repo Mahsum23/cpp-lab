@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover lets the app paint under the notch / home indicator;
+         the CSS then pays it back with env(safe-area-inset-*) padding. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta name="description" content="One C++ session a day. Theory, quiz, task — 25 minutes." />
+
+    <!-- Standalone home-screen launch on iOS. The first is Apple's original spelling,
+         the second is the standardised one every other browser reads. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="cpp-lab" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Safari tints the status bar from theme-color; give it both schemes. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f7f5" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1116" />
+    <meta name="color-scheme" content="dark light" />
+
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+
+    <title>cpp-lab</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -28,6 +28,17 @@ The third column is the valuable one. Be honest in it.
 
 _(write here as you go — what you tried, what confused you, what you got wrong)_
 
-**Side track:** started designing an installable PWA learning app to deliver this
-curriculum on the phone — design doc at `app/DESIGN.md`, awaiting review of the 5 open
-decisions in §11. This is Claude's build, not practice; it doesn't replace writing C++.
+**Side track — the phone app (2026-09-01):** built. Installable PWA in `app/` that
+delivers this curriculum a day at a time: Today screen, Theory → Quiz → Task player,
+week map, streak/XP/badges, offline, light + dark. The five open decisions in
+`app/DESIGN.md` §11 are settled and the doc is locked — PWA (no Mac, so native was
+never really an option), Svelte, gamification as designed, chat held to v2, and lessons
+authored as `.md` + `.quiz.yaml` compiled into the app's JSON.
+
+Day 1 is loaded; Days 2–8 show as locked steps on the map and fill in as they're
+written. Deploy: push to `main` → GitHub Actions → Pages → open in **Safari** → Share →
+Add to Home Screen. (Needs a one-time repo setting: Settings → Pages → Source: GitHub
+Actions.)
+
+This is Claude's build, not practice; it doesn't replace writing C++. The Task screen
+is a briefing — `src/main.cpp` still gets written on the laptop.

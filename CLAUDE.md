@@ -143,6 +143,29 @@ only — see below), and `## Task` sections. The durable copy lives there, not o
 a chat transcript he can't grep later. Post it in chat too as you normally would; the
 file is in addition to that, not instead of it.
 
+**Every lesson is two files, and the answer key is never in the `.md`.** Alongside
+`day-NN-<slug>.md`, write `day-NN-<slug>.quiz.yaml` holding the quiz key: each
+question's `prompt`, its 2–4 `options` with `correct: true/false`, and a `why` on
+*every* option — including the wrong ones, since explaining why a plausible
+misconception is wrong is the part that teaches. The `.md`'s `## Quiz` section stays
+question-text-only, because that's the file he'd have open while doing the lesson.
+
+The phone app (`app/`, see `app/DESIGN.md`) is built from these files, so:
+
+- Keep `milestones/<m>/lessons/week.yaml` current — it's the week roster (day ids,
+  titles, `estMinutes`, one-line `teaser`, optional `teachBack`). Days listed there
+  without a `.md` yet render as locked, titled steps on the app's map, which is how
+  the path looks whole while lessons stay written one at a time.
+- In `## Task`, use the parsed conventions so the app can build real UI from them:
+  `- File: \`path\``, `- Compile: \`command\``, and a `### Checklist` of `- [ ]`
+  items. Everything else in the section stays free prose.
+- After writing or editing any lesson, run `cd app && npm run content`. It regenerates
+  the app's JSON and warns about missing `why` text, bad option counts, and drift
+  between the `.md` and the key. Commit the regenerated `app/public/content/`.
+
+None of this replaces running the session in chat — it's the same lesson, written down
+so it also reaches his phone.
+
 **Quiz is a command, and it's interactive, not chat Q&A.** When he types `quiz` (or
 otherwise asks for the quiz), don't just type questions into chat and wait for prose
 answers. Use the `AskUserQuestion` tool: one call, one entry per question, 2–4 options

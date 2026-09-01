@@ -1,0 +1,91 @@
+# Answer key for day-01. Deliberately NOT in the .md — that's the file you'd open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+questions:
+  - id: q1
+    prompt: What does it mean if socket() returns -1 versus returning 3?
+    options:
+      - text: "-1 is failure and errno says why; 3 is a valid fd — the lowest free slot in the table"
+        correct: true
+        why: >
+          Both halves matter. -1 is a sentinel meaning "look at errno" — the specific
+          reason (EMFILE, ENFILE, EACCES, EAFNOSUPPORT) lives there, not in the return
+          value. And 3 isn't arbitrary: POSIX guarantees the lowest available fd, and
+          0/1/2 are already stdin/stdout/stderr, so a first socket in a normal process
+          is almost always 3.
+      - text: "-1 means no client has connected yet; 3 means one has"
+        correct: false
+        why: >
+          socket() hasn't touched the network at all — no address, no port, no packet.
+          It cannot possibly know anything about clients. That's accept()'s job, four
+          days from now.
+      - text: "-1 is success and 3 is an error code, like functions that return 0 on success"
+        correct: false
+        why: >
+          Inverted, and it's a real confusion because POSIX has both conventions.
+          Calls that *return a resource* (socket, open, accept) return the resource and
+          use -1 for failure. Calls that only report status (pthread_create, most of
+          the pthreads API) return 0 on success and an error number directly.
+      - text: "-1 specifically means the kernel is out of memory"
+        correct: false
+        why: >
+          -1 is generic on purpose. Collapsing every failure into one return value is
+          exactly why errno exists as a second channel — one bit of "it broke" plus a
+          separate "here's which way".
+
+  - id: q2
+    prompt: >
+      Why is the fd from socket(AF_INET, SOCK_STREAM, 0) not yet listening or connected
+      to anything — what's missing?
+    options:
+      - text: "It has no address. socket() allocates the object; bind()/connect() give it a role"
+        correct: true
+        why: >
+          Allocate, then configure, then use — the three-step shape that repeats all
+          over this API. Right now the kernel has a TCP socket in state CLOSED with no
+          local address, no remote address, and nothing in its buffers.
+      - text: "Nothing's missing — the kernel already picked an ephemeral port for it"
+        correct: false
+        why: >
+          No port is reserved until bind(), or until connect() does an implicit bind on
+          your behalf. Until then the socket owns no part of the port space, which is
+          why two processes can both call socket() and neither conflicts.
+      - text: "The protocol argument is 0, which leaves it unusable until you pass IPPROTO_TCP"
+        correct: false
+        why: >
+          0 means "the default protocol for this family and type" — which for
+          AF_INET + SOCK_STREAM is exactly IPPROTO_TCP. Passing it explicitly changes
+          nothing. You'd only set it for exotic cases like raw ICMP sockets.
+      - text: "It isn't backed by a file yet, and every fd ultimately refers to a file on disk"
+        correct: false
+        why: >
+          An fd is a handle to any kernel object that implements the file interface —
+          sockets, pipes, terminals, epoll instances, timers. No disk is involved. That
+          unification is the best design decision in the whole API: read/write/close
+          work on all of them.
+
+  - id: q3
+    prompt: If you called socket(AF_INET, SOCK_DGRAM, 0) instead, what changes about the guarantees?
+    options:
+      - text: "You lose reliability and ordering, but gain message boundaries: one send is one recv"
+        correct: true
+        why: >
+          UDP datagrams can be dropped, duplicated, or arrive out of order, and nothing
+          retransmits them. In exchange each datagram stays a discrete unit — the exact
+          opposite of the byte-stream problem that will bite you on Day 6.
+      - text: "Nothing changes until you call sendto() — the type only picks which functions are legal"
+        correct: false
+        why: >
+          The type selects the transport protocol right there in socket(). The kernel
+          builds a UDP socket, not a TCP one, from that call onward — different state
+          machine, different everything.
+      - text: "It's still reliable, just faster, because UDP skips the three-way handshake"
+        correct: false
+        why: >
+          This conflates latency with delivery guarantee. Skipping the handshake is
+          real, but there are also no acknowledgements and no retransmission, so the
+          network is entirely free to drop your datagram and never tell you.
+      - text: "You still get an ordered byte stream, just without connection setup"
+        correct: false
+        why: >
+          Ordered byte stream is the one thing UDP is not. Datagrams preserve message
+          boundaries precisely because there's no stream to order them into.
