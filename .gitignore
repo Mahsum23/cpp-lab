@@ -1,6 +1,7 @@
 # binaries
 server
 client
+day[0-9]*
 *.o
 *.out
 a.out
