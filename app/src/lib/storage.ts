@@ -148,6 +148,19 @@ export async function clearAll(): Promise<void> {
   await saveSecrets(secrets);
 }
 
+/**
+ * The mentor gained a provider setting after the fact. A record that predates it has
+ * a Claude model id and no provider, and defaulting it to Gemini would silently point
+ * an Anthropic model at Google's API — so the model id is the evidence of intent.
+ */
+function migrateSettings(base: Progress['settings'], stored?: Partial<Progress['settings']>): Progress['settings'] {
+  const merged = { ...base, ...stored };
+  if (!stored?.mentorProvider && stored?.mentorModel?.startsWith('claude')) {
+    merged.mentorProvider = 'anthropic';
+  }
+  return merged;
+}
+
 /** Fill in fields added by later app versions rather than throwing away a real run. */
 function migrate(p: Progress): Progress {
   const base = defaultProgress();
@@ -156,7 +169,7 @@ function migrate(p: Progress): Progress {
     ...p,
     schemaVersion: SCHEMA_VERSION,
     streak: { ...base.streak, ...p.streak },
-    settings: { ...base.settings, ...p.settings },
+    settings: migrateSettings(base.settings, p.settings),
     badges: { ...p.badges },
     loadedWeeks: { ...p.loadedWeeks },
     days: {},

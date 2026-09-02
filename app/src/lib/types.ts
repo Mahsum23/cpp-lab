@@ -109,12 +109,19 @@ export interface StreakState {
   freezesEarnedAt: number;
 }
 
-export type MentorModel = 'claude-haiku-4-5-20251001' | 'claude-sonnet-5' | 'claude-opus-5';
+export type MentorProvider = 'gemini' | 'anthropic';
 
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
   peekAhead: boolean;
-  mentorModel: MentorModel;
+  mentorProvider: MentorProvider;
+  /**
+   * A plain string, not a union of known ids. Gemini's model list is fetched from
+   * Google at runtime precisely because those names get retired; pinning them in the
+   * type system would only mean the compiler is confident about something the API
+   * has already changed its mind on.
+   */
+  mentorModel: string;
 }
 
 /**
@@ -127,12 +134,15 @@ export interface Secrets {
   githubToken: string | null;
   /** The gist this device syncs through, discovered or created on connect. */
   gistId: string | null;
-  /** Anthropic API key for the mentor chat. */
+  /** Google AI Studio key — the free-tier mentor. */
+  geminiKey: string | null;
+  /** Anthropic API key — the prepaid mentor. Kept alongside rather than instead of
+   *  the Gemini one, so switching providers doesn't mean re-pasting. */
   anthropicKey: string | null;
 }
 
 export function emptySecrets(): Secrets {
-  return { githubToken: null, gistId: null, anthropicKey: null };
+  return { githubToken: null, gistId: null, geminiKey: null, anthropicKey: null };
 }
 
 export interface Progress {
@@ -165,7 +175,13 @@ export function defaultProgress(): Progress {
     streak: { count: 0, longest: 0, lastActiveDate: null, freezes: 0, freezesEarnedAt: 0 },
     xp: 0,
     badges: {},
-    settings: { theme: 'system', peekAhead: false, mentorModel: 'claude-sonnet-5' },
+    settings: {
+      theme: 'system',
+      peekAhead: false,
+      // Gemini by default: its free tier is the only one that doesn't need a card.
+      mentorProvider: 'gemini',
+      mentorModel: 'gemini-2.5-flash',
+    },
     loadedWeeks: {},
   };
 }

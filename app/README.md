@@ -63,15 +63,32 @@ The JSON export is still there. It's the copy that doesn't depend on GitHub.
 
 ## Turn on the mentor chat
 
-Settings → **Mentor chat** → paste an Anthropic API key
-([console.anthropic.com](https://console.anthropic.com/settings/keys)). The Mentor tab
-then answers in context: it knows which day you're on, what today's theory said, and
-what the task is — and it will not write that task for you, by construction of its
-system prompt. Model is switchable (Haiku / Sonnet / Opus) in the same section.
+Settings → **Mentor chat**. Two providers; **Gemini is the default because its free
+tier is actually free** — rate-limited rather than metered, no card, no credits.
 
-This is the one part of the app that isn't free: fractions of a cent per question,
-billed to your own key. The key lives on the device; there's no server in between,
-which is both why it's free to host and why the key has to be there.
+**Gemini (free)**
+
+1. [aistudio.google.com/apikey](https://aistudio.google.com/apikey), sign in with a
+   Google account.
+2. **Create API key** — accept whatever project it offers, or let it make one.
+3. Copy it (starts with `AIza`), paste into Settings → Save key.
+
+Saving fetches the model list straight from Google, which doubles as the cheapest
+possible check that the key works. Pick a **Flash** model: on the free tier the limit
+that bites is requests-per-minute, and Flash gets several times Pro's allowance.
+
+**Claude (prepaid)**
+
+Switch the provider toggle and paste a key from
+[console.anthropic.com](https://console.anthropic.com/settings/keys). Note that **the
+Anthropic API is prepaid and completely separate from a Claude subscription** — a key
+alone won't work until the account has credit. Roughly ½–2¢ per question depending on
+the model; set a spend limit while you're in there.
+
+Either way the key lives on the device, never in the repo, and never in the synced
+progress — `npm test` asserts the last one. The mentor knows which day you're on, what
+today's theory said, and what the task is, and it will not write that task for you, by
+construction of its system prompt.
 
 ## Adding a day
 

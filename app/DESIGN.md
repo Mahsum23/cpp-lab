@@ -1,7 +1,7 @@
 # cpp-lab — Learning App Design Doc
 
-**Status:** v2 built (2026-09-02) — cloud sync + mentor chat. Code in `app/`, how-to in
-`app/README.md`.
+**Status:** v2 built (2026-09-02) — cloud sync + mentor chat (Gemini free tier or
+Claude). Code in `app/`, how-to in `app/README.md`.
 **Type:** installable PWA (Progressive Web App) — runs in the browser, "Add to Home
 Screen" on iPhone gives it a full-screen icon, offline support, and a native-ish feel.
 No Mac, Xcode, App Store, or developer account required.
@@ -415,14 +415,46 @@ Goal: ask the mentor a quick question *in context* without leaving the app —
   system prompt. This is a feature: the app cannot become a cheat button.
 
 **Transport**
-- Direct client → Anthropic API with a key pasted into Settings, stored on-device
-  only and never included in the synced payload. Verified: the endpoint's CORS
-  preflight allows `anthropic-dangerous-direct-browser-access`, so no proxy is needed.
-- The client is a single `fetch` in `src/lib/mentor.ts`; swapping in a serverless
-  proxy later is a one-line change.
+- Direct client → provider API with a key pasted into Settings, stored on-device only
+  and never included in the synced payload. Both endpoints' CORS preflights were
+  verified before the code was written: Anthropic allows the
+  `anthropic-dangerous-direct-browser-access` opt-in header, and Google echoes the
+  origin and accepts the key in `x-goog-api-key` — which keeps it out of the URL, and
+  therefore out of anything that logs URLs.
+- No proxy, no serverless function. `src/lib/mentor.ts` is two `fetch` calls behind
+  one interface; swapping in a proxy later is a change to that file alone.
 
-**Model:** Sonnet by default, with Haiku (cheap, for quick "what does this flag do")
-and Opus (for the ones he's actually stuck on) selectable in Settings.
+### 8.0 Two providers, because the bills are different
+
+Shipping only Anthropic was a design mistake, and it surfaced the moment the key was
+pasted in: **the Anthropic API is prepaid and entirely separate from a Claude
+subscription.** "Get a key" is not sufficient instruction — the account needs credit,
+and a Max subscription grants none. For a tab whose job is answering "why is it like
+this" three times a session, a paywall is a bad trade.
+
+So the mentor is provider-agnostic, with **Gemini as the default**:
+
+| | Gemini | Claude |
+|---|---|---|
+| Cost | Free tier — rate-limited, not metered. No card. | Prepaid credits, ~½–2¢ a question. |
+| Getting a key | AI Studio, sign in with Google, one tap. | Console, plus a top-up. |
+| Answer quality | Good enough for concept questions. | Better, particularly on C++ specifics. |
+
+Both share the persona, the prime directive, the day context, the history window and
+the markdown rendering. What differs is genuinely only the wire format — Gemini calls
+the assistant `model`, puts the system prompt in `systemInstruction`, wraps text in
+`parts[]`, and hides streamed tokens in `candidates[0].content.parts[].text`. Every one
+of those differences fails as a runtime 400 rather than a type error, which is why
+`scripts/test-mentor.mjs` asserts the shape of both requests rather than trusting them.
+
+**Gemini's model list is fetched, not hardcoded.** Google retires and renames models
+often enough that a list pinned today 404s within a year, and that failure reaches the
+user as "model not available" with no route to one that is. On key save the app calls
+`ListModels`, keeps the entries that support `generateContent`, drops embeddings and
+image/audio models, sorts Flash first (its free-tier limits are the generous ones), and
+**heals the stored choice if it is no longer offered**. `Settings.mentorModel` is
+therefore a plain `string`, not a union — the type system should not be more confident
+about a model name than Google is.
 
 ### 8.1 Security consequence, handled
 
@@ -537,7 +569,11 @@ clean swap at this stage.
 6. **Sync transport (2026-09-02)** — GitHub gist over Telegram, for the reasons in
    §8.5. He raised Telegram explicitly; the blocker is that bots can't read their own
    history, which makes restore-after-wipe unworkable.
-7. **Quiz option order (2026-09-02)** — decided by the build, not the author. Writing
+7. **Mentor provider (2026-09-02)** — Gemini's free tier is the default; Anthropic is
+   kept as a switch rather than removed, since it answers better once an account has
+   credit. Driven by a real dead end: a valid Anthropic key with a $0 balance, and app
+   copy that said "get a key" without saying "and prepay it".
+8. **Quiz option order (2026-09-02)** — decided by the build, not the author. Writing
    the right answer first is the natural way to author a key, and it made every
    correct answer option A. `build-content.mjs` now shuffles deterministically per
    question, re-salting if a whole day lands its answers in the same slot.
@@ -555,6 +591,8 @@ clean swap at this stage.
 - **Streak freezes cap at 2** and are earned every 7th day. §4 said "earn one every 7
   days" without a ceiling; uncapped, a long run banks enough freezes to make the
   streak meaningless.
+- **The mentor is two providers, not one.** §8 specified Anthropic only. See §8.0 —
+  the free tier is what makes the tab usable without a billing decision first.
 - **The Mentor tab is always visible**, not revealed once a key is set as §8 said. A
   feature you have to already know about to find is a feature nobody finds; the tab
   shows a setup card explaining what it does, what it refuses to do, and that it's the
@@ -574,7 +612,7 @@ clean swap at this stage.
   2026-09-01. Week 1 ships with Day 1 written and Days 2–8 rostered as locked steps —
   lessons stay written one at a time, calibrated on how the last one went, per
   `README.md`.
-- **v2** — mentor chat (§8) and progress sync (§8.5). ✅ built 2026-09-02.
-  ← we are here
+- **v2** — mentor chat (§8, both providers) and progress sync (§8.5). ✅ built
+  2026-09-02. ← we are here
 - **v3 (optional)** — richer spaced-repetition review, more badges, note→PROGRESS.md
   export polish.

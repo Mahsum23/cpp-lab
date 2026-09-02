@@ -66,5 +66,13 @@ is a briefing — `src/main.cpp` still gets written on the laptop.
   fixed on the way, one of them a self-retriggering Svelte effect that reloaded the
   chat thread hundreds of times a second and ate the message being sent.
 
+**Mentor: Gemini added as the default provider (2026-09-02).** Shipping Anthropic-only
+was wrong — the API is prepaid and separate from a Claude subscription, so "paste a
+key" hit a $0 balance. The mentor is now provider-agnostic with Google's free tier as
+the default and Claude as a switch. Gemini's model list is fetched from the API rather
+than hardcoded, because Google retires model names faster than this repo gets touched;
+a stored choice that disappears heals itself to a working one. `scripts/test-mentor.mjs`
+asserts both wire formats, since every difference between them fails as a runtime 400.
+
 **Once sync is on, the phone is usually the more current record.** If this file and
 the app disagree about what's done, this file is the one that's behind.

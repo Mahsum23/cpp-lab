@@ -2,7 +2,24 @@
   import { app } from '../lib/app.svelte';
   import Button from '../components/Button.svelte';
   import { relativeTime } from '../lib/date';
-  import { MODELS } from '../lib/mentor';
+  import { PROVIDERS } from '../lib/mentor';
+  import type { MentorProvider } from '../lib/types';
+
+  const providers = Object.entries(PROVIDERS) as [MentorProvider, (typeof PROVIDERS)[MentorProvider]][];
+  const provider = $derived(PROVIDERS[app.mentorProvider]);
+  const selectedModel = $derived(app.mentorModels.find((m) => m.id === app.progress.settings.mentorModel));
+
+  // Ask the provider what it can run when this screen opens, not on every app launch:
+  // it's a round trip that only matters while the picker is on screen. The signature
+  // guard is deliberate — an effect that re-fires on its own writes is a request loop,
+  // and saving a key already refreshes the list on its own.
+  let fetchedFor = '';
+  $effect(() => {
+    const signature = `${app.mentorProvider}:${app.mentorKey ?? ''}`;
+    if (!app.mentorKey || signature === fetchedFor) return;
+    fetchedFor = signature;
+    void app.refreshMentorModels();
+  });
 
   const themes = [
     { id: 'system', label: 'System' },
@@ -14,6 +31,7 @@
   let tokenInput = $state('');
   let keyInput = $state('');
   let connecting = $state(false);
+  let savingKey = $state(false);
   let confirmDisconnect = $state(false);
   let message = $state<{ kind: 'ok' | 'bad'; text: string } | null>(null);
   let confirmingReset = $state(false);
@@ -95,9 +113,23 @@
   }
 
   async function saveKey() {
-    await app.setAnthropicKey(keyInput);
-    keyInput = '';
-    flash('ok', 'Key saved on this device. The Mentor tab is live.');
+    savingKey = true;
+    try {
+      await app.setMentorKey(app.mentorProvider, keyInput);
+      keyInput = '';
+      // setMentorKey fetches the model list, which is also the cheapest possible check
+      // that the key works — better to find out here than on his first question.
+      if (app.mentorModelsError) flash('bad', app.mentorModelsError);
+      else flash('ok', `${provider.label} key saved. The Mentor tab is live.`);
+    } finally {
+      savingKey = false;
+    }
+  }
+
+  async function removeKey() {
+    await app.setMentorKey(app.mentorProvider, null);
+    fetchedFor = '';
+    flash('ok', `${provider.label} key removed from this device.`);
   }
 
   async function reset() {
@@ -240,56 +272,93 @@
 
   <section>
     <h2>Mentor chat</h2>
-    {#if app.mentorReady}
+    <p class="hint">
+      Ask a question in context without leaving the app. It knows which day you're on,
+      and it won't write your task for you.
+    </p>
+
+    <div class="segmented two" role="radiogroup" aria-label="Provider">
+      {#each providers as [id, info]}
+        <button
+          role="radio"
+          aria-checked={app.mentorProvider === id}
+          class:on={app.mentorProvider === id}
+          onclick={() => app.setMentorProvider(id)}
+        >
+          {info.label}
+          {#if info.free}<span class="tag">free</span>{/if}
+        </button>
+      {/each}
+    </div>
+    <p class="hint fine">{provider.cost}</p>
+
+    {#if app.mentorKey}
       <div class="status">
         <span class="dot ok"></span>
         <div>
-          <strong>Key saved on this device</strong>
-          <p class="hint">The Mentor tab knows which day you're on and won't write your task for you.</p>
+          <strong>{provider.label} key saved on this device</strong>
+          <p class="hint">Never leaves it, and never rides along in the synced progress.</p>
         </div>
       </div>
       <div class="pair">
-        <Button variant="ghost" size="sm" onclick={() => app.setAnthropicKey(null)}>Remove key</Button>
+        <Button variant="ghost" size="sm" onclick={removeKey}>Remove key</Button>
       </div>
     {:else}
-      <p class="hint">
-        Ask a question in context without leaving the app. It talks to Anthropic's API
-        straight from this device — there's no server in between, which is why the key
-        lives here.
-      </p>
-      <p class="hint fine">
-        Unlike everything else in this app, this part costs money — a fraction of a cent
-        per question, billed to your own key. Get one at
-        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a>.
-      </p>
+      <ol class="steps">
+        <li>
+          Open
+          <a href={provider.consoleUrl} target="_blank" rel="noreferrer">{provider.consoleLabel}</a>
+          {#if app.mentorProvider === 'gemini'}and sign in with a Google account{/if}.
+        </li>
+        {#if app.mentorProvider === 'gemini'}
+          <li><strong>Create API key</strong> → pick any project it offers, or let it make one.</li>
+        {:else}
+          <li>Create a key, then add credits — the API is prepaid and a Claude subscription doesn't cover it.</li>
+        {/if}
+        <li>Copy it, paste it here.</li>
+      </ol>
       <input
         class="secret"
         type="password"
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
-        placeholder="sk-ant-…"
+        placeholder={provider.placeholder}
         bind:value={keyInput}
       />
-      <Button size="sm" disabled={!keyInput.trim()} onclick={saveKey}>Save key</Button>
+      <Button size="sm" disabled={savingKey || !keyInput.trim()} onclick={saveKey}>
+        {savingKey ? 'Checking…' : 'Save key'}
+      </Button>
     {/if}
 
     <div class="models">
-      <h3>Model</h3>
-      {#each MODELS as m}
-        <label class="model" class:on={app.progress.settings.mentorModel === m.id}>
-          <input
-            type="radio"
-            name="mentor-model"
-            checked={app.progress.settings.mentorModel === m.id}
-            onchange={() => app.setMentorModel(m.id)}
-          />
-          <span>
-            <strong>{m.label}</strong>
-            <span class="hint">{m.note}</span>
-          </span>
-        </label>
-      {/each}
+      <h3>
+        Model
+        {#if app.loadingModels}<span class="loading">loading…</span>{/if}
+      </h3>
+      <select
+        aria-label="Model"
+        value={app.progress.settings.mentorModel}
+        onchange={(e) => app.setMentorModel(e.currentTarget.value)}
+      >
+        {#each app.mentorModels as m}
+          <option value={m.id}>{m.label}</option>
+        {/each}
+        {#if !app.mentorModels.some((m) => m.id === app.progress.settings.mentorModel)}
+          <option value={app.progress.settings.mentorModel}>{app.progress.settings.mentorModel}</option>
+        {/if}
+      </select>
+      {#if selectedModel?.note}
+        <p class="hint">{selectedModel.note}</p>
+      {/if}
+      {#if app.mentorModelsError}
+        <p class="hint bad-hint">Couldn't fetch the model list: {app.mentorModelsError}</p>
+      {:else if app.mentorProvider === 'gemini' && app.mentorKey}
+        <p class="hint">
+          Fetched from Google, so it's whatever your key can actually run. Flash models
+          are listed first — their free-tier limits are the most generous.
+        </p>
+      {/if}
     </div>
   </section>
 
@@ -481,8 +550,7 @@
     margin-bottom: 5px;
   }
 
-  .steps a,
-  .hint a {
+  .steps a {
     color: var(--accent);
   }
 
@@ -516,6 +584,24 @@
     font-weight: 600;
   }
 
+  .segmented.two {
+    grid-template-columns: repeat(2, 1fr);
+    margin-top: 12px;
+  }
+
+  .tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: 2px;
+    margin-left: 5px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+
   .models {
     margin-top: 22px;
   }
@@ -529,38 +615,29 @@
     margin-bottom: 10px;
   }
 
-  .model {
-    display: flex;
-    gap: 11px;
-    align-items: flex-start;
+  .loading {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+    margin-left: 6px;
+  }
+
+  /* A select rather than radio cards: Gemini's list comes from the API and can run to
+     dozens of entries, which iOS renders as a native wheel picker. */
+  select {
+    width: 100%;
     padding: 11px 13px;
-    border-radius: 13px;
-    border: 1.5px solid var(--border);
-    margin-bottom: 8px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    /* 16px or iOS zooms the page when it gets focus. */
+    font-size: 16px;
+    font-family: inherit;
   }
 
-  .model.on {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-
-  .model input {
-    margin-top: 2px;
-    width: 18px;
-    height: 18px;
-    accent-color: var(--accent);
-    flex: none;
-  }
-
-  .model strong {
-    display: block;
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  .model .hint {
-    margin-top: 1px;
-    font-size: 13px;
+  .bad-hint {
+    color: var(--bad);
   }
 
   .version {

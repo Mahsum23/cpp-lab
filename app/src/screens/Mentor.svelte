@@ -4,6 +4,9 @@
   import { router } from '../lib/router.svelte';
   import Markdown from '../components/Markdown.svelte';
   import Button from '../components/Button.svelte';
+  import { PROVIDERS } from '../lib/mentor';
+
+  const provider = $derived(PROVIDERS[app.mentorProvider]);
 
   let draft = $state('');
   let box = $state<HTMLTextAreaElement | null>(null);
@@ -94,15 +97,21 @@
     <div class="setup card">
       <h2>Add an API key to turn this on</h2>
       <p>
-        The mentor talks to Anthropic's API straight from this device — there's no server
+        The mentor talks to {provider.label} straight from this device — there's no server
         in between, which is also why the key has to live here. A key from
-        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
-          console.anthropic.com</a>, pasted into Settings, is all it needs.
+        <a href={provider.consoleUrl} target="_blank" rel="noreferrer">{provider.consoleLabel}</a>,
+        pasted into Settings, is all it needs.
       </p>
-      <p class="warn">
-        This is the one part of the app that isn't free. Questions cost fractions of a
-        cent each on Haiku or Sonnet — but it's a real API key on a real bill, so it's
-        worth knowing that going in.
+      <p class="warn" class:free={provider.free}>
+        {#if provider.free}
+          Gemini's free tier is genuinely free — rate-limited rather than metered, no card.
+          If you'd rather have Claude answer, Settings can switch it, but that side is
+          prepaid.
+        {:else}
+          Heads up: the Anthropic API is <strong>prepaid and separate from a Claude
+          subscription</strong>. A key alone won't work until the account has credit.
+          Gemini's free tier is one tap away in Settings if you'd rather not.
+        {/if}
       </p>
       <Button size="sm" onclick={() => router.go('/settings')}>Open Settings</Button>
     </div>
@@ -239,6 +248,10 @@
   .warn {
     border-left: 2px solid var(--flame);
     padding-left: 11px;
+  }
+
+  .warn.free {
+    border-left-color: var(--ok);
   }
 
   .intro p {

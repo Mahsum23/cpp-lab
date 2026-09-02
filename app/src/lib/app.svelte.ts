@@ -4,7 +4,7 @@ import {
   emptySecrets,
   type Curriculum,
   type Day,
-  type MentorModel,
+  type MentorProvider,
   type Progress,
   type Secrets,
   type TaskState,
@@ -12,6 +12,7 @@ import {
 } from './types';
 import * as store from './storage';
 import * as cloud from './cloud';
+import { listModels, PROVIDERS, type ModelChoice } from './mentor';
 import { mergeProgress } from './merge';
 import { fetchCurriculum, fetchWeek, SchemaTooNewError } from './content';
 import { completeDay as advanceStreak, displayedStreak, atRisk } from './streak';
@@ -131,6 +132,9 @@ class AppStore {
     this.secrets = await store.loadSecrets();
     this.weeks = await store.loadAllWeeks();
     this.applyTheme();
+    // Seeded, not fetched: the real list costs a round trip and is only ever looked
+    // at on the Settings screen, which asks for it when it opens.
+    this.mentorModels = PROVIDERS[this.mentorProvider].models;
     this.ready = true;
     if (this.cloudConnected) this.cloud = { ...this.cloud, status: 'idle' };
     void store.requestPersistence();
@@ -433,18 +437,83 @@ class AppStore {
 
   // --- mentor -------------------------------------------------------------
 
+  /** Models the active provider says it can run. Fetched, not hardcoded — see listModels. */
+  mentorModels = $state<ModelChoice[]>([]);
+  mentorModelsError = $state<string | null>(null);
+  loadingModels = $state(false);
+
+  get mentorProvider(): MentorProvider {
+    return this.progress.settings.mentorProvider;
+  }
+
+  /** The key for whichever provider is selected, or null. */
+  get mentorKey(): string | null {
+    return this.mentorProvider === 'gemini' ? this.secrets.geminiKey : this.secrets.anthropicKey;
+  }
+
   get mentorReady(): boolean {
-    return Boolean(this.secrets.anthropicKey);
+    return Boolean(this.mentorKey);
   }
 
-  async setAnthropicKey(key: string | null) {
-    this.secrets = { ...this.secrets, anthropicKey: key?.trim() || null };
+  async setMentorKey(provider: MentorProvider, key: string | null) {
+    const value = key?.trim() || null;
+    this.secrets =
+      provider === 'gemini'
+        ? { ...this.secrets, geminiKey: value }
+        : { ...this.secrets, anthropicKey: value };
     await store.saveSecrets($state.snapshot(this.secrets));
+    if (value && provider === this.mentorProvider) await this.refreshMentorModels();
   }
 
-  async setMentorModel(model: MentorModel) {
+  async setMentorProvider(provider: MentorProvider) {
+    if (provider === this.mentorProvider) return;
+    this.progress.settings.mentorProvider = provider;
+    // The old model id belongs to the old provider's namespace; carrying it across
+    // just produces a 404 on the first question.
+    this.progress.settings.mentorModel = PROVIDERS[provider].defaultModel;
+    this.mentorModels = PROVIDERS[provider].models;
+    this.mentorModelsError = null;
+    await this.persist();
+    if (this.mentorKey) await this.refreshMentorModels();
+  }
+
+  async setMentorModel(model: string) {
     this.progress.settings.mentorModel = model;
     await this.persist();
+  }
+
+  /**
+   * Ask the provider what it actually offers, and heal the stored choice if it's gone.
+   *
+   * Without the healing step a retired model id sits in settings forever, failing
+   * every question with a 404 and no obvious way out — the user has no reason to
+   * suspect the model picker rather than their key.
+   */
+  async refreshMentorModels(): Promise<void> {
+    const provider = this.mentorProvider;
+    const key = this.mentorKey;
+    if (!key) {
+      this.mentorModels = PROVIDERS[provider].models;
+      return;
+    }
+    this.loadingModels = true;
+    this.mentorModelsError = null;
+    try {
+      const models = await listModels(provider, key);
+      // Provider may have been switched while this was in flight.
+      if (provider !== this.mentorProvider) return;
+      this.mentorModels = models;
+      if (models.length && !models.some((m) => m.id === this.progress.settings.mentorModel)) {
+        this.progress.settings.mentorModel = models[0].id;
+        await this.persist();
+      }
+    } catch (err) {
+      if (provider !== this.mentorProvider) return;
+      this.mentorModels = PROVIDERS[provider].models;
+      this.mentorModelsError = errorText(err);
+    } finally {
+      this.loadingModels = false;
+    }
   }
 
   // --- settings -----------------------------------------------------------

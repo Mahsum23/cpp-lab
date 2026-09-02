@@ -92,7 +92,7 @@ class ChatStore {
   }
 
   private async run(): Promise<void> {
-    const key = app.secrets.anthropicKey;
+    const key = app.mentorKey;
     if (!key) {
       this.error = 'No API key set — add one in Settings.';
       return;
@@ -111,6 +111,7 @@ class ChatStore {
     try {
       const context = app.current ?? app.availableDays.at(-1) ?? null;
       for await (const chunk of streamReply({
+        provider: app.mentorProvider,
         key,
         model: app.progress.settings.mentorModel,
         system: systemPrompt(context),
