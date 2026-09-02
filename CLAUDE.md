@@ -150,6 +150,34 @@ question's `prompt`, its 2–4 `options` with `correct: true/false`, and a `why`
 misconception is wrong is the part that teaches. The `.md`'s `## Quiz` section stays
 question-text-only, because that's the file he'd have open while doing the lesson.
 
+**Five questions per quiz.** Not three, not eight — five, every day, in both the `.md`
+and the `.quiz.yaml`. Enough to cover a session's material properly; few enough to sit
+inside a 20–30 minute budget alongside theory and a task.
+
+**Lesson files are documents, not replies.** They get read on a phone, weeks later, by
+someone who never saw the conversation that produced them. So nothing in a lesson may
+refer to how it was commissioned: no "since you asked for it", no headings that argue
+with an instruction ("What a socket is — not just \"it's an int\""), no "as you
+requested". If a rule in this file shaped the lesson, the lesson shows the result and
+says nothing about the rule. Write every line as though it had always been there.
+
+**Every lesson carries at least one thing he didn't know was possible.** A flag, a
+`/proc` file, a tool, a two-line experiment — something concrete and lesser-known that
+a working engineer would be pleased to find. In the milestone spec these live under a
+**Worth knowing:** line per day, so the hooks are planned before the lesson is written
+rather than improvised. Favour the ones with a story attached (a race that motivated an
+API change, an optimisation that famously backfired) over trivia with no consequence.
+
+**Prefer showing to asserting.** If a lesson claims the kernel keeps a structure, or a
+state machine exists, or a buffer is separate from yours, find the command or the
+experiment that lets him *see* it — `ls -l /proc/<pid>/fd`, `ss -tan`, `strace`,
+`MSG_PEEK` reading the same bytes twice. A claim he verified himself outranks a
+paragraph he believed.
+
+**Teasers in `week.yaml` are hooks, not tables of contents.** "struct sockaddr_in,
+htons, INADDR_ANY" repeats the title back at him. "Why this struct carries eight bytes
+of deliberate padding" makes him open it.
+
 **Never make option order carry information.** Writing the key, the correct answer
 comes out first every time — it's the one you're sure of, the distractors come after.
 Four days of that and he's pattern-matching on position instead of thinking, which

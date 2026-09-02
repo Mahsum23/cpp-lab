@@ -4,6 +4,10 @@
 # A day with a matching day-NN-*.md is "available". A day listed here without one is
 # "upcoming": the app shows the title and teaser, locked, so the map reads as a real
 # path instead of a cliff. Lessons stay written one at a time, per README.md.
+#
+# Teasers are hooks, not tables of contents. "struct sockaddr_in, htons, INADDR_ANY"
+# says nothing the day title doesn't; "why this struct carries eight bytes of
+# deliberate padding" makes him want to open it.
 id: week-01
 title: Raw Sockets
 milestone: 01-raw-sockets
@@ -17,49 +21,49 @@ days:
     day: 1
     title: A socket is a file descriptor
     estMinutes: 25
-    teaser: What socket() actually allocates, and why it hands you an int.
+    teaser: What socket() actually allocates — and how to go and look at it in /proc.
 
   - id: day-02
     day: 2
     title: Addresses and byte order
     estMinutes: 25
-    teaser: struct sockaddr_in, why network byte order exists, htons/htonl, INADDR_ANY.
+    teaser: Why sockaddr_in carries eight bytes of deliberate padding, and why htons() compiles to nothing on half the machines ever built.
 
   - id: day-03
     day: 3
     title: bind() and listen()
     estMinutes: 30
-    teaser: Claiming a port, the backlog queue, and reproducing "Address already in use" on purpose.
+    teaser: Break your own port on purpose, then find the option that fixes it — and the one letter that turns it into kernel load balancing.
 
   - id: day-04
     day: 4
     title: accept()
     estMinutes: 25
-    teaser: Why accept() hands back a different fd — the single most-missed fact in hand-rolled socket code.
+    teaser: Two fds, one connection. The single most-missed fact in hand-rolled socket code.
 
   - id: day-05
     day: 5
     title: recv() and send(), once each
     estMinutes: 25
-    teaser: What the return value actually means. Bytes transferred, not "the message".
+    teaser: Read the same bytes twice without consuming them, and prove the kernel's buffer is not yours.
 
   - id: day-06
     day: 6
     title: The echo loop for one client
     estMinutes: 30
-    teaser: TCP is a byte stream, not a message stream. Short reads and short writes.
+    teaser: TCP is a byte stream, not a message stream — plus the 40-millisecond stall that has been ambushing engineers since the 1980s.
 
   - id: day-07
     day: 7
     title: The outer loop, and the client
     estMinutes: 30
-    teaser: Accept, serve, disconnect, accept again — then connect() from the other side.
+    teaser: Accept, serve, disconnect, accept again — and the difference between hanging up and hanging up politely.
 
   - id: day-08
     day: 8
-    title: Hardening pass
-    estMinutes: 25
-    teaser: Every syscall checked, every warning gone. Rigor, not new material.
+    title: Watch it work
+    estMinutes: 30
+    teaser: Point strace, ss and tcpdump at your own server. Every claim from Day 1 onward, finally visible.
     teachBack: >
       Explain the socket lifecycle end to end, and why accept() returns a new fd rather
       than reusing the listening one. Then: what breaks if you get that wrong?
