@@ -22,42 +22,70 @@ days:
     title: A socket is a file descriptor
     estMinutes: 25
     teaser: What socket() actually allocates — and how to go and look at it in /proc.
+    teachBack: >
+      Explain what the int from socket() actually is, and what it refers to. Then: a
+      long-running server leaks one fd per connection. Why does it run fine for hours
+      and then fail all at once, and what does it fail with?
 
   - id: day-02
     day: 2
     title: Addresses and byte order
     estMinutes: 25
     teaser: Why sockaddr_in carries eight bytes of deliberate padding, and why htons() compiles to nothing on half the machines ever built.
+    teachBack: >
+      Explain why network byte order exists at all — what would break if every machine
+      just sent its integers however it stores them. Then: which fields of sockaddr_in
+      need htons/htonl and which don't, and how would you know without looking it up?
 
   - id: day-03
     day: 3
     title: bind() and listen()
     estMinutes: 30
     teaser: Break your own port on purpose, then find the option that fixes it — and the one letter that turns it into kernel load balancing.
+    teachBack: >
+      The backlog you pass to listen() is a queue of what, exactly — and who puts things
+      in it? Then explain why the port was still busy after you killed the server, and
+      what SO_REUSEADDR is actually overriding.
 
   - id: day-04
     day: 4
     title: accept()
     estMinutes: 25
     teaser: Two fds, one connection. The single most-missed fact in hand-rolled socket code.
+    teachBack: >
+      Explain why accept() returns a new fd instead of reusing the listening one. What
+      is the listening socket doing while you're talking to a client, and what breaks
+      if you close the wrong one?
 
   - id: day-05
     day: 5
     title: recv() and send(), once each
     estMinutes: 25
     teaser: Read the same bytes twice without consuming them, and prove the kernel's buffer is not yours.
+    teachBack: >
+      What does the return value of recv() mean — all three cases. Then: your buffer is
+      1024 bytes and the client sent 4000. Walk through what actually happens, and where
+      the other bytes are in the meantime.
 
   - id: day-06
     day: 6
     title: The echo loop for one client
     estMinutes: 30
     teaser: TCP is a byte stream, not a message stream — plus the 40-millisecond stall that has been ambushing engineers since the 1980s.
+    teachBack: >
+      Explain why one send() on the client does not equal one recv() on the server, and
+      what that means for anyone who wants to send "messages" over TCP. Then: how would
+      you know where a message ends?
 
   - id: day-07
     day: 7
     title: The outer loop, and the client
     estMinutes: 30
     teaser: Accept, serve, disconnect, accept again — and the difference between hanging up and hanging up politely.
+    teachBack: >
+      Walk the whole lifecycle from both sides — what the server calls, what the client
+      calls, and where the two meet. Then: what does connect() do that bind/listen/accept
+      do on the other end, and why is there no accept() on the client side?
 
   - id: day-08
     day: 8

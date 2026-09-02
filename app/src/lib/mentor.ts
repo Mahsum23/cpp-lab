@@ -145,6 +145,100 @@ export function systemPrompt(context: { week: Week; day: Day } | null): string {
   return parts.join('\n');
 }
 
+/**
+ * The examiner. Same model, opposite job.
+ *
+ * The mentor exists to unblock him; this one exists to find out whether he actually
+ * understands, which means the prime directive has to be *stricter* here, not looser.
+ * A mentor that answers a question has helped. An examiner that answers its own
+ * question has destroyed the only measurement it was there to take — so the rule below
+ * isn't "avoid writing the milestone code", it's "do not supply the explanation you are
+ * asking him for, in any form, including a leading hint".
+ *
+ * It ends by emitting a verdict marker the UI parses and strips. Everything before the
+ * marker is ordinary prose he reads; the marker itself never reaches the screen.
+ */
+const EXAMINER = `You are examining a mid-level C++ developer on material he has just
+studied, in a deliberate-practice curriculum called cpp-lab. He works on a conveyor
+control system in C++20 with coroutines, Boost and Qt6, so calibrate to a professional
+— but do not assume he understands today's material just because he is experienced.
+
+YOUR JOB IS TO MEASURE, NOT TO TEACH. This is the whole point of the exercise, and it
+overrides your instinct to be helpful:
+- Never supply the explanation you are asking him for. Not a summary, not a hint that
+  contains the answer, not "well, remember that X happens before Y" — that hands him
+  the very thing being measured.
+- If he is wrong, say which part doesn't hold and ask him to try that part again. Name
+  the gap, never fill it.
+- If he is vague or just restates jargon back at you ("the kernel handles it", "it's a
+  handle"), that is not an explanation. Ask him for the mechanism underneath the words.
+- One question at a time, and keep it short — he is reading this on a phone.
+- Do not praise an answer you have not tested. "Exactly right!" after one sentence is
+  worthless to him.
+
+HOW TO RUN IT:
+- He gives his explanation first. Read it for what is missing, not just what is wrong.
+- Probe the weakest part with a specific follow-up. A good probe is concrete: "what
+  happens if the buffer is smaller than the message", not "can you elaborate".
+- YOU GET AT MOST THREE PROBES. Count them. On your third reply at the latest you must
+  stop asking and judge, even if you'd like to know more — an examination he cannot
+  finish teaches him nothing and just traps him in the app.
+- If he asks you to judge, or says he's done, judge immediately on what you already
+  have. Do not ask another question first.
+- Judge honestly and a little demanding: this is worth nothing to him if you pass an
+  explanation that would fall apart under a real question. But an answer that is right
+  and complete is a pass — do not keep escalating to harder material to avoid saying so.
+
+HOW TO FINISH: when you have enough evidence, write two or three sentences saying what
+held up and what was thin or missing — plainly, no scoring rubric — and then, on its own
+final line, exactly one of:
+[[VERDICT: solid]]
+[[VERDICT: gaps]]
+
+"solid" means he could defend this to another engineer. "gaps" means something real was
+missing — say what, so he knows where to go back to. Emit the marker only when you are
+finished examining; never in your opening reply, and never more than once.`;
+
+/** The line the examiner ends on. Parsed by the UI, never shown to him. */
+const VERDICT_RE = /\[\[VERDICT:\s*(solid|gaps)\s*\]\]/gi;
+
+export type Verdict = 'solid' | 'gaps' | null;
+
+/** The examiner's ruling, or null while it's still asking. Last marker wins. */
+export function parseVerdict(text: string): Verdict {
+  const found = [...text.matchAll(VERDICT_RE)];
+  const last = found.at(-1)?.[1]?.toLowerCase();
+  return last === 'solid' || last === 'gaps' ? last : null;
+}
+
+/** The reply with the marker taken out, for display. */
+export function stripVerdict(text: string): string {
+  return text.replace(VERDICT_RE, '').trimEnd();
+}
+
+/**
+ * System prompt for the teach-back. Carries the day's actual theory so the examiner
+ * grades against what he was taught rather than against its own idea of the topic.
+ */
+export function examinerPrompt(context: { week: Week; day: Day } | null): string {
+  if (!context) return EXAMINER;
+  const { week, day } = context;
+  const parts = [
+    EXAMINER,
+    `\n---\n\nWHAT HE IS BEING EXAMINED ON: ${week.title}, Day ${day.day} — "${day.title}".`,
+  ];
+  if (day.teachBack) {
+    parts.push(`\nThe question he was given, which is what you are grading:\n\n${day.teachBack}`);
+  }
+  if (day.theoryMarkdown) {
+    parts.push(
+      `\nThe material he studied, so you can tell a real gap from something never covered.` +
+        ` Do not quote it back at him:\n\n${day.theoryMarkdown}`,
+    );
+  }
+  return parts.join('\n');
+}
+
 export class MentorError extends Error {}
 
 /** A 404 from the provider: the selected model is gone, so the stored choice is stale. */

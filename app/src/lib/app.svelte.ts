@@ -100,7 +100,10 @@ class AppStore {
   /** Segments closed on the day ring: theory, quiz, task. */
   segments(day: Day, weekId: string): boolean[] {
     const p = this.dayProgress(day.id, weekId);
-    return [p.theoryDone, Boolean(p.quiz.completedAt) || !day.quiz?.length, p.task === 'done'];
+    const base = [p.theoryDone, Boolean(p.quiz.completedAt) || !day.quiz?.length, p.task === 'done'];
+    // Only days that actually pose a teach-back get the fourth arc, so a day without
+    // one still reads as complete at three.
+    return day.teachBack ? [...base, p.teachBackDone] : base;
   }
 
   stateOf(day: Day): DayState {
@@ -285,6 +288,9 @@ class AppStore {
     p.completedAt = new Date().toISOString();
     p.theoryDone = true;
     p.task = 'done';
+    // teachBackDone is deliberately NOT set here. It's the examiner's ruling, and a
+    // day can be finished without passing it — that's the honest outcome, and the
+    // ring should keep showing the open arc until he goes back and earns it.
 
     const gain = XP_SESSION + (p.quiz.cleanSweep ? XP_CLEAN_SWEEP : 0);
     this.lastXpGain = gain;

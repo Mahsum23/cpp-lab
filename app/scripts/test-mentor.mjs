@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, listModels, systemPrompt, PROVIDERS, MentorError, ModelGoneError } = await import(file);
+const { streamReply, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, ModelGoneError } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -270,6 +270,34 @@ ok('system prompt still forbids writing the task', /Never write the implementati
 ok("system prompt carries today's theory and task", prompt.includes('THEORY') && prompt.includes('TASK'));
 ok('system prompt names the days still ahead', prompt.includes('Day 2: Addresses'));
 ok('no-context prompt still carries the directive', /prime directive/i.test(systemPrompt(null)));
+
+// --- the examiner ----------------------------------------------------------
+
+console.log('\n— teach-back examiner —');
+
+const exam = examinerPrompt({ week, day: { ...day, teachBack: 'Explain why accept() returns a new fd.' } });
+ok('examiner is told to measure, not teach', /MEASURE, NOT TO TEACH/.test(exam));
+// The whole point of the step: an examiner that answers its own question has destroyed
+// the measurement, so this instruction is load-bearing in a way the mentor's isn't.
+ok('examiner is forbidden from supplying the explanation', /Never supply the explanation you are asking him for/.test(exam));
+ok('examiner names the gap rather than filling it', /Name\s+the gap, never fill it/.test(exam));
+ok('examiner rejects jargon restated back at it', /restates jargon/.test(exam));
+ok('examiner carries the question being graded', exam.includes('Explain why accept() returns a new fd.'));
+ok("examiner carries the day's theory to grade against", exam.includes('THEORY'));
+ok('examiner is told not to quote the theory back at him', /Do not quote it back at him/.test(exam));
+ok('examiner with no day context still refuses to teach', /MEASURE, NOT TO TEACH/.test(examinerPrompt(null)));
+
+// The verdict is a machine-readable line the UI acts on; the learner never sees it.
+ok('a solid verdict parses', parseVerdict('Held up well.\n[[VERDICT: solid]]') === 'solid');
+ok('a gaps verdict parses', parseVerdict('You never said where the bytes live.\n[[VERDICT: gaps]]') === 'gaps');
+ok('no marker means still examining', parseVerdict('So what happens when the buffer is full?') === null);
+// A re-examination after "gaps" has to be able to overturn the earlier ruling.
+ok('the last verdict wins, so a retry can overturn a fail', parseVerdict('[[VERDICT: gaps]] ... later ... [[VERDICT: solid]]') === 'solid');
+ok('case and spacing in the marker are tolerated', parseVerdict('[[verdict:  Solid ]]') === 'solid');
+ok('an invented verdict is not accepted', parseVerdict('[[VERDICT: brilliant]]') === null);
+
+ok('the marker is stripped before display', stripVerdict('Nice.\n[[VERDICT: solid]]') === 'Nice.');
+ok('stripping leaves ordinary prose alone', stripVerdict('No marker here.') === 'No marker here.');
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all mentor cases pass');
 process.exit(fails ? 1 : 0);

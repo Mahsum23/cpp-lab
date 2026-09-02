@@ -18,6 +18,7 @@
   const threadKey = $derived(context?.day.id ?? GENERAL);
 
   $effect(() => {
+    chat.context = context;
     void chat.open(threadKey);
   });
 
