@@ -110,6 +110,54 @@ stub({ body: sse([{ candidates: [{ finishReason: 'SAFETY' }] }]) });
 err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
 ok('a silent safety stop surfaces as an error', err instanceof MentorError && /SAFETY/.test(err.message), String(err?.message));
 
+// Google's 2.5 models regularly complete a stream with finishReason STOP (or none at
+// all) and zero content parts — an upstream hiccup, not a real stop. Nothing has been
+// shown on screen yet in that case, so a silent retry should be invisible if it works.
+{
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    const body =
+      calls === 1
+        ? sse([{ candidates: [{ finishReason: 'STOP' }] }])
+        : sse([{ candidates: [{ content: { parts: [{ text: 'here you go' }] }, finishReason: 'STOP' }] }]);
+    return {
+      ok: true, status: 200, json: async () => null, text: async () => body,
+      body: {
+        getReader() {
+          const bytes = new TextEncoder().encode(body);
+          let done = false;
+          return {
+            read: async () => (done ? { done: true } : ((done = true), { done: false, value: bytes })),
+            cancel: async () => {},
+          };
+        },
+      },
+    };
+  };
+  const text = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread }));
+  ok('an empty STOP stream retries once, silently, and returns the real text', text === 'here you go', text);
+  ok('the retry made a second request rather than reusing the first', calls === 2, String(calls));
+}
+
+// Empty twice in a row is no longer a silent hang — it surfaces as an error.
+stub({ body: sse([{ candidates: [{ finishReason: 'STOP' }] }]) });
+err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
+ok(
+  'two empty STOP streams in a row surface an error instead of hanging forever',
+  err instanceof MentorError && /known hiccup/i.test(err.message),
+  String(err?.message),
+);
+
+// A stream that just ends with no finishReason at all is the same "empty" pattern.
+stub({ body: sse([{ candidates: [{}] }]) });
+err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
+ok(
+  'a stream with no finish reason at all gets the same treatment as an empty STOP',
+  err instanceof MentorError && /known hiccup/i.test(err.message),
+  String(err?.message),
+);
+
 // --- Anthropic -------------------------------------------------------------
 
 console.log('\n— anthropic request shape —');
