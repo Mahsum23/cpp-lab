@@ -115,17 +115,6 @@
   <p class="none">No task spec for this day.</p>
 {/if}
 
-{#if day.teachBack}
-  <div class="teachback">
-    <p class="lbl">Teach-back</p>
-    <p class="tb-text">{day.teachBack}</p>
-    <button class="tb-toggle" class:on={dp.teachBackDone} onclick={() => app.setTeachBackDone(day, weekId, !dp.teachBackDone)}>
-      {dp.teachBackDone ? '✓ Explained it' : 'Mark as explained'}
-    </button>
-    <p class="tb-note">Do this out loud on the laptop — I'll push on the gaps there.</p>
-  </div>
-{/if}
-
 <div class="block">
   <p class="lbl">What confused me</p>
   <textarea
@@ -302,39 +291,6 @@
     font-size: 0.92em;
   }
 
-  .teachback {
-    background: var(--accent-soft);
-    border-radius: 16px;
-    padding: 15px 16px;
-    margin-bottom: 22px;
-  }
-
-  .tb-text {
-    margin: 0 0 12px;
-    font-size: 15px;
-    line-height: 1.5;
-    color: var(--text-dim);
-  }
-
-  .tb-toggle {
-    border: 1.5px solid var(--accent);
-    color: var(--accent);
-    border-radius: 10px;
-    padding: 8px 14px;
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .tb-toggle.on {
-    background: var(--accent);
-    color: var(--accent-ink);
-  }
-
-  .tb-note {
-    font-size: 12.5px;
-    color: var(--text-faint);
-    margin: 10px 0 0;
-  }
 
   .actions {
     display: grid;

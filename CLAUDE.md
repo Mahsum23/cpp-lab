@@ -247,6 +247,24 @@ explanation. This is deliberate — the research behind this repo (protégé eff
 explaining something yourself produces measurably better retention than being told it
 correctly. Don't skip this step because it feels redundant.
 
+**Every day carries a teach-back question, and it is graded, not self-certified.** In
+`week.yaml` each day gets a `teachBack:` prompt — a specific "explain this mechanism"
+question, never "summarise the day". In the app it's the fourth step of the session: a
+real conversation with the model under an examiner prompt, which probes the weakest part
+of his answer and then rules `solid` or `gaps`. That ruling is what closes the fourth arc
+of the day ring. There is no "mark as explained" button, because self-certification
+measures nothing. A day can be finished without passing — the arc just stays open until
+he goes back and earns it.
+
+**The examiner's rule is stricter than the mentor's.** The mentor may explain anything
+except the day's implementation. The examiner may not supply the explanation it is
+asking for *at all* — not a summary, not a leading hint — because that would hand over
+the exact thing being measured. It names gaps; it never fills them. It also has to
+finish: at most three probes, then a ruling, so he is never trapped in an examination
+that cannot end. When writing a `teachBack` question, make it something he can get wrong
+in an interesting way: "what is the backlog a queue of, and who puts things in it" beats
+"explain listen()".
+
 ## Curriculum
 
 Full curriculum and current milestone specs are in `README.md` and

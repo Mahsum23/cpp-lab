@@ -1,6 +1,7 @@
 import { app } from './app.svelte';
 import * as store from './storage';
-import { ModelGoneError, streamReply, systemPrompt, type ChatMessage } from './mentor';
+import { examinerPrompt, ModelGoneError, streamReply, systemPrompt, type ChatMessage } from './mentor';
+import type { Day, Week } from './types';
 
 /** One thread per day, plus a general one for questions that aren't about a lesson. */
 export const GENERAL = 'general';
@@ -10,7 +11,20 @@ interface StoredThread {
   updatedAt: string;
 }
 
+type DayContext = { week: Week; day: Day } | null;
+
 class ChatStore {
+  /**
+   * Which day this thread is about. Set by the screen that owns the thread, and read
+   * when a message is sent — the system prompt is built from it, so the mentor and the
+   * examiner can share every line of this class and still be different jobs.
+   *
+   * Deliberately not `$state`: nothing renders from it, and run() reads it once.
+   */
+  context: DayContext = null;
+
+  constructor(private readonly buildSystem: (ctx: DayContext) => string) {}
+
   messages = $state<ChatMessage[]>([]);
   streaming = $state(false);
   error = $state<string | null>(null);
@@ -110,12 +124,11 @@ class ChatStore {
     this.messages.push({ role: 'assistant', content: '' });
 
     try {
-      const context = app.current ?? app.availableDays.at(-1) ?? null;
       for await (const chunk of streamReply({
         provider: app.mentorProvider,
         key,
         model,
-        system: systemPrompt(context),
+        system: this.buildSystem(this.context),
         messages: history,
         signal: this.controller.signal,
       })) {
@@ -140,4 +153,12 @@ class ChatStore {
   }
 }
 
-export const chat = new ChatStore();
+/** The Mentor tab: answers questions, won't write the milestone. */
+export const chat = new ChatStore(systemPrompt);
+
+/**
+ * The teach-back step: makes him explain it, and won't explain it for him. A separate
+ * store rather than a mode on the first one, so the two transcripts never mix — the
+ * examiner reading yesterday's help-me chat would be grading its own answers.
+ */
+export const exam = new ChatStore(examinerPrompt);

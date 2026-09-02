@@ -54,7 +54,7 @@ These two coexist and do different jobs. Worth being explicit so we don't duplic
 | Quiz | Self-contained, instant feedback | (n/a — app owns this) |
 | Task | Read the spec, jot notes, mark done | **Write the actual C++ here** |
 | Code review | — | Senior-style review of your code |
-| Teach-back | Prompt shown at milestone end | Done live — I push on gaps |
+| Teach-back | Graded conversation, step 4 of every session | Examiner prompt probes the answer, then rules solid/gaps |
 | Chat (v2) | Quick mentor questions in-context | Full mentoring, code, debugging |
 
 The app is the **daily driver and reference**; the laptop repo is where real code and

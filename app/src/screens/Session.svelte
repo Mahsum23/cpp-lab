@@ -4,6 +4,7 @@
   import Theory from './steps/Theory.svelte';
   import Quiz from './steps/Quiz.svelte';
   import Task from './steps/Task.svelte';
+  import TeachBack from './steps/TeachBack.svelte';
   import Celebration from '../components/Celebration.svelte';
 
   interface Props {
@@ -16,15 +17,18 @@
   const found = $derived(app.findDay(weekId, dayId));
   const day = $derived(found?.day ?? null);
   const hasQuiz = $derived(Boolean(day?.quiz?.length));
+  // The teach-back is a step, not an afterthought on the task screen — but only on
+  // days that actually pose a question, so a day without one still ends on the task.
+  const hasTeachBack = $derived(Boolean(day?.teachBack));
 
   let celebrating = $state(false);
 
-  const STEPS = 3;
-  const clamped = $derived(Math.min(Math.max(step, 0), STEPS - 1));
+  const steps = $derived(hasTeachBack ? 4 : 3);
+  const clamped = $derived(Math.min(Math.max(step, 0), steps - 1));
 
   function goto(next: number) {
     if (next < 0) return router.back();
-    if (next > STEPS - 1) return;
+    if (next > steps - 1) return;
     router.replace(sessionPath(weekId, dayId, next));
   }
 
@@ -48,7 +52,7 @@
   </div>
 {:else}
   <div class="stepper">
-    <div class="bar" style:--pct="{((clamped + 1) / STEPS) * 100}%">
+    <div class="bar" style:--pct="{((clamped + 1) / steps) * 100}%">
       <span></span>
     </div>
     <div class="row">
@@ -56,7 +60,7 @@
         <svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg>
         <span>Day {day.day}</span>
       </button>
-      <span class="count numeral">{clamped + 1}/{STEPS}</span>
+      <span class="count numeral">{clamped + 1}/{steps}</span>
     </div>
   </div>
 
@@ -65,8 +69,10 @@
       <Theory {day} {weekId} onnext={() => goto(hasQuiz ? 1 : 2)} {hasQuiz} />
     {:else if clamped === 1}
       <Quiz {day} {weekId} onnext={() => goto(2)} />
+    {:else if clamped === 2}
+      <Task {day} {weekId} onfinish={() => (hasTeachBack ? goto(3) : finish())} />
     {:else}
-      <Task {day} {weekId} onfinish={finish} />
+      <TeachBack {day} week={found!.week} {weekId} onfinish={finish} />
     {/if}
   </div>
 

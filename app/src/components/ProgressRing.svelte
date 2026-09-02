@@ -1,5 +1,6 @@
 <script lang="ts">
-  /** The day ring: three segments — theory, quiz, task. Closing it is the unit of
+  /** The day ring: theory, quiz, task, and — where the day poses one — the
+   *  teach-back. Closing it is the unit of
    *  daily progress, so it's deliberately the most animated thing on the screen. */
   interface Props {
     segments: boolean[];
@@ -7,7 +8,7 @@
     labels?: string[];
   }
 
-  let { segments, size = 62, labels = ['theory', 'quiz', 'task'] }: Props = $props();
+  let { segments, size = 62, labels = ['theory', 'quiz', 'task', 'teach-back'] }: Props = $props();
 
   const R = 17;
   const C = 2 * Math.PI * R;
