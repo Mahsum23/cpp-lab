@@ -180,7 +180,7 @@ export function defaultProgress(): Progress {
       peekAhead: false,
       // Gemini by default: its free tier is the only one that doesn't need a card.
       mentorProvider: 'gemini',
-      mentorModel: 'gemini-2.5-flash',
+      mentorModel: 'gemini-flash-latest',
     },
     loadedWeeks: {},
   };

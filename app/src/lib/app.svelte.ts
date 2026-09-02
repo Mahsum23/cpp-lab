@@ -483,6 +483,23 @@ class AppStore {
   }
 
   /**
+   * A question just came back "that model is gone". Retire it and move on.
+   *
+   * The list-based heal below can't catch this on its own: Google keeps retired models
+   * in models.list, looking perfectly healthy, so a stored id that 404s on every single
+   * question still passes the "is it in the list?" check and stays selected forever.
+   * A 404 is the only reliable evidence the model is dead, so it's what we act on.
+   */
+  async retireModel(dead: string): Promise<void> {
+    if (this.progress.settings.mentorModel !== dead) return;
+    const next = this.mentorModels.find((m) => m.id !== dead);
+    if (!next) return;
+    this.progress.settings.mentorModel = next.id;
+    await this.persist();
+    await this.refreshMentorModels();
+  }
+
+  /**
    * Ask the provider what it actually offers, and heal the stored choice if it's gone.
    *
    * Without the healing step a retired model id sits in settings forever, failing

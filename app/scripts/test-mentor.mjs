@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, listModels, systemPrompt, PROVIDERS, MentorError } = await import(file);
+const { streamReply, listModels, systemPrompt, PROVIDERS, MentorError, ModelGoneError } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -28,7 +28,11 @@ const ok = (label, cond, extra = '') => {
 // --- a fetch stub that records the request and replays a canned stream ------
 
 let seen = null;
-const sse = (frames) => frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('');
+// CRLF, because that is what generativelanguage.googleapis.com actually sends. The
+// old stub used bare LF, which is why a parser that could not read a single real
+// Gemini frame sailed through this entire suite.
+const sse = (frames, eol = '\r\n\r\n') =>
+  frames.map((f) => `data: ${JSON.stringify(f)}${eol}`).join('');
 
 function stub({ status = 200, body = '', json = null } = {}) {
   globalThis.fetch = async (url, init = {}) => {
@@ -87,19 +91,45 @@ ok('assistant turns are renamed to "model"', g.contents.map((c) => c.role).join(
 ok('text is wrapped in parts[]', g.contents[0].parts[0].text === 'why does recv return 0?');
 ok('output is capped', g.generationConfig.maxOutputTokens > 0);
 
+// Both line endings are legal per the SSE spec and both are in use, so parse both.
+stub({ body: sse([{ candidates: [{ content: { parts: [{ text: 'crlf ok' }] } }] }], '\r\n\r\n') });
+ok(
+  'CRLF-framed frames parse (this is what Google really sends)',
+  (await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread }))) === 'crlf ok',
+);
+
+stub({ body: sse([{ candidates: [{ content: { parts: [{ text: 'lf ok' }] } }] }], '\n\n') });
+ok(
+  'LF-framed frames still parse (this is what Anthropic sends)',
+  (await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread }))) === 'lf ok',
+);
+
+// A last frame with no trailing blank line used to be dropped on the floor.
+stub({ body: 'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'no trailer' }] } }] }) });
+ok(
+  'a final frame without its trailing blank line is not lost',
+  (await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread }))) === 'no trailer',
+);
+
 console.log('\n— gemini failure modes —');
 stub({ status: 429, body: { error: { message: 'Resource has been exhausted' } } });
 let err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
 ok('429 explains the free-tier limit in plain words', err instanceof MentorError && /free tier is rate-limited/i.test(err.message), err.message);
 
-stub({ status: 404, body: { error: { message: 'models/gone is not found' } } });
-err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'gone', system: 's', messages: thread })).catch((e) => e);
-ok('404 on a listed model points at regenerating the key first', /aistudio\.google\.com\/apikey/i.test(err.message), err.message);
-ok('404 still offers the model picker as a fallback', /pick a different one in Settings/i.test(err.message), err.message);
+// Google's 404 body names the replacement model; passing it through beats paraphrase.
+stub({ status: 404, body: { error: { message: 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.6-flash' } } });
+err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'gemini-2.5-flash', system: 's', messages: thread })).catch((e) => e);
+ok("404 passes through Google's own explanation", /no longer available to new users/i.test(err.message), err.message);
+ok('404 names the successor Google suggests', /gemini-3\.6-flash/.test(err.message), err.message);
+// The caller needs to tell "this model is dead" apart from "this request failed", so
+// it can retire the stored choice instead of retrying into the same wall.
+ok('a 404 is typed as ModelGoneError', err instanceof ModelGoneError, err.constructor.name);
+ok('ModelGoneError is still a MentorError', err instanceof MentorError);
 
-stub({ status: 401, body: { error: { message: 'API_KEY_SERVICE_BLOCKED' } } });
+stub({ status: 401, body: { error: { message: 'ACCESS_TOKEN_TYPE_UNSUPPORTED' } } });
 err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
-ok('401 explains the Standard-key rejection, not a garbled passthrough', /aistudio\.google\.com\/apikey/i.test(err.message), err.message);
+ok('401 is reported as an auth rejection, not a garbled passthrough', /rejected that key/i.test(err.message), err.message);
+ok('a 401 is NOT treated as a dead model', !(err instanceof ModelGoneError));
 
 stub({ status: 400, body: { error: { message: 'API key not valid. Please pass a valid API key.' } } });
 err = await collect(streamReply({ provider: 'gemini', key: 'bad', model: 'm', system: 's', messages: thread })).catch((e) => e);
@@ -110,9 +140,9 @@ stub({ body: sse([{ candidates: [{ finishReason: 'SAFETY' }] }]) });
 err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
 ok('a silent safety stop surfaces as an error', err instanceof MentorError && /SAFETY/.test(err.message), String(err?.message));
 
-// Google's 2.5 models regularly complete a stream with finishReason STOP (or none at
-// all) and zero content parts — an upstream hiccup, not a real stop. Nothing has been
-// shown on screen yet in that case, so a silent retry should be invisible if it works.
+// A stream that completes with finishReason STOP (or none at all) and zero content
+// parts must not read as success. Nothing has been shown on screen yet in that case,
+// so a silent retry is invisible if it works.
 {
   let calls = 0;
   globalThis.fetch = async () => {
@@ -145,7 +175,7 @@ stub({ body: sse([{ candidates: [{ finishReason: 'STOP' }] }]) });
 err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
 ok(
   'two empty STOP streams in a row surface an error instead of hanging forever',
-  err instanceof MentorError && /known hiccup/i.test(err.message),
+  err instanceof MentorError && /empty answer twice in a row/i.test(err.message),
   String(err?.message),
 );
 
@@ -154,7 +184,7 @@ stub({ body: sse([{ candidates: [{}] }]) });
 err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
 ok(
   'a stream with no finish reason at all gets the same treatment as an empty STOP',
-  err instanceof MentorError && /known hiccup/i.test(err.message),
+  err instanceof MentorError && /empty answer twice in a row/i.test(err.message),
   String(err?.message),
 );
 
@@ -202,16 +232,30 @@ ok('empty turns are dropped rather than sent', JSON.parse(seen.body).messages.le
 // --- model discovery -------------------------------------------------------
 
 console.log('\n— model discovery —');
+// Shaped after the real catalogue: retired snapshots still listed as healthy, the
+// current generations, the `-latest` aliases, and a pile of non-chat neighbours.
 stub({ json: { models: [
-  { name: 'models/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', description: 'Strong. Slow.', supportedGenerationMethods: ['generateContent'] },
   { name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', description: 'Fast. Cheap.', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', description: 'Strong. Slow.', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/gemini-flash-latest', displayName: 'Gemini Flash Latest', description: 'Latest release of Gemini Flash.', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/gemini-pro-latest', displayName: 'Gemini Pro Latest', description: 'Latest release of Gemini Pro.', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', description: 'Newest flash.', supportedGenerationMethods: ['generateContent'] },
   { name: 'models/text-embedding-004', displayName: 'Embedding', supportedGenerationMethods: ['embedContent'] },
   { name: 'models/imagen-3.0', displayName: 'Imagen', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/gemini-3.1-flash-image', displayName: 'Flash Image', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/lyria-3-pro-preview', displayName: 'Lyria', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/gemini-3.5-transcribe', displayName: 'Transcribe', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/deep-research-preview-04-2026', displayName: 'Deep Research', supportedGenerationMethods: ['generateContent'] },
 ] } });
 const models = await listModels('gemini', 'k');
-ok('only chat-capable models are offered', models.every((m) => !/embedding|imagen/.test(m.id)), JSON.stringify(models.map((m) => m.id)));
-ok('flash is listed first for the free tier', models[0].id.includes('flash'), models[0].id);
-ok('the note comes from the API description', models[0].note === 'Fast');
+const ids = models.map((m) => m.id);
+ok('only chat-capable models are offered', ids.every((id) => !/embedding|imagen|image|lyria|transcribe|deep-research/.test(id)), JSON.stringify(ids));
+// models[0] is what the app falls back to when the stored choice dies, so it has to
+// be an alias that tracks the current model rather than a dated snapshot that retires.
+ok('the default pick is the flash alias, not a dated snapshot', models[0].id === 'gemini-flash-latest', models[0].id);
+ok('a retired snapshot sinks below the current generation', ids.indexOf('gemini-3.8-flash') < ids.indexOf('gemini-2.5-flash'), JSON.stringify(ids));
+ok("flash outranks pro, for the free tier's sake", ids.indexOf('gemini-flash-latest') < ids.indexOf('gemini-pro-latest'), JSON.stringify(ids));
+ok('the note comes from the API description', models[0].note === 'Latest release of Gemini Flash.');
 
 stub({ json: { models: [] } });
 ok('an empty list falls back to the curated one', (await listModels('gemini', 'k')).length === PROVIDERS.gemini.models.length);
