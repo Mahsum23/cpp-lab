@@ -76,3 +76,35 @@ asserts both wire formats, since every difference between them fails as a runtim
 
 **Once sync is on, the phone is usually the more current record.** If this file and
 the app disagree about what's done, this file is the one that's behind.
+
+**Mentor: the Gemini tab never actually worked, and here is why (2026-09-02).** Three
+separate faults stacked on top of each other, which is why it looked so mysterious.
+
+1. **The SSE parser could not read a single real Gemini frame.** It split frames on
+   `"\n\n"`, but `generativelanguage.googleapis.com` separates them with `"\r\n\r\n"`,
+   and `"\r\n\r\n".split("\n\n")` matches nothing. Every frame therefore accumulated in
+   the buffer instead of being emitted, and the whole response was discarded at end of
+   stream — no text, no error, cursor blinking forever. Deterministic, not flaky: it
+   had never worked against the real API. The unit tests passed throughout because the
+   stub framed its fake stream with `"\n\n"`, so the suite was testing a stream shape
+   that does not exist in production. Anthropic really does send `"\n\n"`, which is why
+   only Gemini broke. Both framings are legal per the SSE spec; the parser now handles
+   CRLF, LF and CR, and no longer drops a final frame that arrives without a trailing
+   blank line.
+2. **The app auto-selected a retired model.** Both seeds (`gemini-2.5-flash`,
+   `gemini-2.5-pro`) now 404 with "no longer available to new users", and the sort put
+   the retired `gemini-2.5-flash` first, so the self-heal chose it. Retired models stay
+   in `models.list` looking perfectly healthy — nothing in the metadata marks them —
+   so the "is it still in the list?" heal could never catch this. Seeds are now the
+   `-latest` aliases, which track whatever Google currently ships, and ranking prefers
+   aliases, then newer generations, Flash over Pro (Pro's free-tier quota is spent in a
+   few questions). A 404 is now typed as `ModelGoneError` and retires the stored model,
+   since that is the only reliable evidence a model is dead.
+3. **The 404 copy blamed the wrong thing.** Google's 404 body names the replacement
+   model outright; the handler was throwing that away and paraphrasing it into a guess
+   about API-key types. It passes Google's own words through now.
+
+Verified against the live API with a real key, not stubs: `listModels` ranks
+`gemini-flash-latest` first, and a real question streams back a real answer. Also note
+Google intermittently 503s its newest models (`-latest`, `3.8`) while older ones serve
+fine; that path is transient and already reported as such.

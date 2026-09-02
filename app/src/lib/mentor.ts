@@ -52,17 +52,22 @@ export interface ProviderInfo {
 export const PROVIDERS: Record<MentorProvider, ProviderInfo> = {
   gemini: {
     label: 'Gemini',
-    placeholder: 'AIza…',
+    // AI Studio now issues auth keys, which start "AQ."; older standard keys start
+    // "AIza". Both are in circulation, so the hint must not swear by either.
+    placeholder: 'AIza… or AQ.…',
     consoleUrl: 'https://aistudio.google.com/apikey',
     consoleLabel: 'aistudio.google.com/apikey',
     cost: 'Free tier, rate-limited rather than metered. No card, no credits.',
     free: true,
     // Seeds only. The real list is fetched from the API the moment a key is saved,
-    // which is the point: model names get retired, and a hardcoded one eventually 404s.
-    defaultModel: 'gemini-2.5-flash',
+    // which is the point: model names get retired, and a hardcoded one eventually 404s
+    // — as the previous seeds here, gemini-2.5-flash and -pro, both now do. So the
+    // seeds are the `-latest` aliases: they follow whatever Google currently ships.
+    defaultModel: 'gemini-flash-latest',
     models: [
-      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: 'Fast, and the free tier is generous with it.' },
-      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'Stronger, with a much tighter free-tier limit.' },
+      { id: 'gemini-flash-latest', label: 'Gemini Flash (latest)', note: 'Tracks the current Flash. Generous free tier.' },
+      { id: 'gemini-flash-lite-latest', label: 'Gemini Flash Lite (latest)', note: 'Quicker and cheaper, a bit less careful.' },
+      { id: 'gemini-pro-latest', label: 'Gemini Pro (latest)', note: 'Stronger, with a much tighter free-tier limit.' },
     ],
   },
   anthropic: {
@@ -142,6 +147,9 @@ export function systemPrompt(context: { week: Week; day: Day } | null): string {
 
 export class MentorError extends Error {}
 
+/** A 404 from the provider: the selected model is gone, so the stored choice is stale. */
+export class ModelGoneError extends MentorError {}
+
 // --- shared plumbing -------------------------------------------------------
 
 /** Trim the thread to a sane window, and make sure it still starts with a user turn. */
@@ -178,10 +186,32 @@ async function errorMessage(res: Response): Promise<string> {
 }
 
 /**
+ * A frame ends at a blank line and a line ends at CRLF, LF or CR — all three, says the
+ * SSE spec, and providers genuinely differ: Anthropic sends LF, Google sends CRLF.
+ *
+ * Splitting frames on "\n\n" alone therefore never matched a single Gemini frame,
+ * because "\r\n\r\n" has a \r wedged between the newlines. Every frame accumulated in
+ * the buffer instead of being emitted, and the whole response was dropped on the floor
+ * at end of stream: no text, no error, no clue. Deterministic, not intermittent — it
+ * simply never worked against the real API, only against a test stub that used LF.
+ */
+const FRAME_BREAK = /\r\n\r\n|\n\n|\r\r/;
+const LINE_BREAK = /\r\n|\n|\r/;
+
+/** The joined `data:` payload of one frame, or '' if it carries none. */
+function framePayload(frame: string): string {
+  return frame
+    .split(LINE_BREAK)
+    .filter((l) => l.startsWith('data:'))
+    .map((l) => l.slice(5).trim())
+    .join('');
+}
+
+/**
  * Yields the `data:` payload of each complete SSE frame.
  *
- * Frames are separated by a blank line, and a network chunk can split one down the
- * middle, so the trailing partial frame stays buffered until the rest arrives.
+ * A network chunk can split a frame down the middle, so the trailing partial frame
+ * stays buffered until the rest arrives.
  */
 async function* sseFrames(res: Response): AsyncGenerator<string> {
   if (!res.body) throw new MentorError('The API returned no body to stream.');
@@ -193,17 +223,19 @@ async function* sseFrames(res: Response): AsyncGenerator<string> {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const frames = buffer.split('\n\n');
+      const frames = buffer.split(FRAME_BREAK);
+      // Whatever follows the last blank line is either nothing or the start of a
+      // frame still on the wire; either way it waits for the next chunk.
       buffer = frames.pop() ?? '';
       for (const frame of frames) {
-        const data = frame
-          .split('\n')
-          .filter((l) => l.startsWith('data:'))
-          .map((l) => l.slice(5).trim())
-          .join('');
+        const data = framePayload(frame);
         if (data && data !== '[DONE]') yield data;
       }
     }
+    // A final frame that arrives without its trailing blank line is still a frame.
+    // Dropping it silently is what made this class of bug so quiet the first time.
+    const last = framePayload(buffer + decoder.decode());
+    if (last && last !== '[DONE]') yield last;
   } finally {
     reader.cancel().catch(() => {});
   }
@@ -213,23 +245,20 @@ async function* sseFrames(res: Response): AsyncGenerator<string> {
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-// Google spent 2026 retiring "Standard" API keys in favour of "Authorization" keys
-// (bound to a Cloud service account), rejecting Standard keys on generateContent
-// outright from September 2026. listModels stays a lighter, less-gated call that
-// still answers for an old key, so the failure only shows up once you actually try
-// to talk to it — as a 401 (API_KEY_SERVICE_BLOCKED / ACCESS_TOKEN_TYPE_UNSUPPORTED)
-// or, confusingly, as a 404 on a model that was just in the fetched list. New keys
-// minted from AI Studio are auto-issued as the working type, so regenerating one is
-// the actual fix far more often than it looks like from the error text alone.
-const REGEN_KEY_HINT =
-  'Generate a fresh key at aistudio.google.com/apikey rather than reusing an old one — Google phased out the old "Standard" key type for this call during 2026, and new keys are issued as the type that still works.';
-
+/**
+ * A model Google has retired 404s on generateContent while still appearing, in full
+ * health, in models.list — nothing in the list metadata marks it as gone. The saving
+ * grace is that the 404 body says exactly what happened and names the replacement
+ * ("...is no longer available to new users. Please update your code to use
+ * models/gemini-3.6-flash"), so for this one status the honest thing is to pass
+ * Google's own words through rather than paraphrasing them into something vaguer.
+ */
 function explainGemini(status: number, message: string): string {
   if (status === 400 && /api.?key/i.test(message)) {
-    return 'Google rejected that key. Copy it again from aistudio.google.com/apikey — it starts with "AIza".';
+    return 'Google rejected that key. Copy it again from aistudio.google.com/apikey — the whole string, which starts with "AQ." or "AIza".';
   }
   if (status === 401) {
-    return `Google is blocking that key at the auth layer, before it even looks at the model. ${REGEN_KEY_HINT}`;
+    return `Google rejected that key at the auth layer, before it looked at the model. ${message || 'Check it in Settings, or generate a fresh one at aistudio.google.com/apikey.'}`;
   }
   if (status === 403) {
     return message.includes('SERVICE_DISABLED') || /not been used|disabled/i.test(message)
@@ -237,18 +266,23 @@ function explainGemini(status: number, message: string): string {
       : 'Google refused the request. Check the key is still active.';
   }
   if (status === 404) {
-    // The model came from Google's own list a moment ago, so a 404 here is more often
-    // the key than a genuinely missing model — but it can be either, so say both.
-    return (
-      "Google says that model doesn't exist for this key — odd, since it was just in the fetched list. That combination usually means the key, not the model: " +
-      `${REGEN_KEY_HINT} If a fresh key still 404s on this exact model, then pick a different one in Settings.`
-    );
+    // Retired models still show up in models.list, so this is reachable from the
+    // picker. Google names the successor in the message; don't bury that.
+    return message
+      ? `${message} (Settings has the full list — the app will move you to a current model.)`
+      : 'That model is gone. Pick another one in Settings — the list is fetched from Google.';
   }
   if (status === 429) {
     return "Gemini's free tier is rate-limited, and you've hit it. Wait a minute, or switch to a Flash model — its limits are much higher.";
   }
   if (status >= 500) return 'Google is having a moment. Try again shortly.';
   return message || `The API said ${status}.`;
+}
+
+/** Builds the right error class for a Gemini HTTP failure. */
+function geminiError(status: number, message: string): MentorError {
+  const text = explainGemini(status, message);
+  return status === 404 ? new ModelGoneError(text) : new MentorError(text);
 }
 
 interface GeminiModel {
@@ -258,15 +292,46 @@ interface GeminiModel {
   supportedGenerationMethods?: string[];
 }
 
-/** Models that answer chat turns. Excludes embeddings, image/video/audio and the rest. */
-const NOT_CHAT = /embedding|aqa|imagen|veo|image-generation|tts|audio|learnlm|gemma/i;
+/**
+ * Models that answer chat turns. The catalogue has grown a lot of neighbours that
+ * advertise generateContent but are no use to a text mentor: image and video
+ * generators, TTS, transcription, music, robotics, computer-use and the research
+ * agents. All of them are named for what they do, which is the only signal available.
+ */
+const NOT_CHAT =
+  /embedding|aqa|imagen|veo|image|tts|audio|learnlm|gemma|lyria|nano-banana|transcribe|robotics|computer-use|deep-research|antigravity|omni/i;
+
+/**
+ * How good a default this model is, higher first.
+ *
+ * The point of the ordering is the top entry: it's what the app falls back to when the
+ * stored choice is gone, so it has to be something that actually answers. Two rules do
+ * the work. Aliases like `gemini-flash-latest` win because they track whatever is
+ * current and so can never be the thing that retires under you — which is exactly how
+ * a hardcoded `gemini-2.5-flash` ended up 404ing here. Otherwise newer beats older, so
+ * last year's stable snapshot sinks below this year's even though models.list presents
+ * the two identically.
+ *
+ * Flash over Pro is deliberate and not about quality: on the free tier Pro burns its
+ * much smaller quota in a handful of questions, which reads as a broken app.
+ */
+function rank(id: string): number {
+  let score = 0;
+  if (/-latest$/.test(id)) score += 1000;
+  if (/flash/.test(id)) score += 100;
+  if (/lite/.test(id)) score -= 10;
+  if (/preview|-exp\b|-exp-|experimental/.test(id)) score -= 50;
+  // "gemini-3.8-flash" -> 3.8, so the newest generation floats up among equals.
+  score += Number(/gemini-(\d+(?:\.\d+)?)/.exec(id)?.[1] ?? 0);
+  return score;
+}
 
 async function listGeminiModels(key: string): Promise<ModelChoice[]> {
   const res = await post(`${GEMINI_BASE}/models?pageSize=200`, {
     method: 'GET',
     headers: { 'x-goog-api-key': key },
   });
-  if (!res.ok) throw new MentorError(explainGemini(res.status, await errorMessage(res)));
+  if (!res.ok) throw geminiError(res.status, await errorMessage(res));
 
   const body = (await res.json()) as { models?: GeminiModel[] };
   const choices = (body.models ?? [])
@@ -278,9 +343,7 @@ async function listGeminiModels(key: string): Promise<ModelChoice[]> {
     }))
     .filter((m) => !NOT_CHAT.test(m.id));
 
-  // Flash first: on the free tier the limit that bites is requests per minute, and
-  // Flash gets several times the allowance Pro does.
-  choices.sort((a, b) => Number(b.id.includes('flash')) - Number(a.id.includes('flash')));
+  choices.sort((a, b) => rank(b.id) - rank(a.id));
   return choices;
 }
 
@@ -315,7 +378,7 @@ async function* attemptGemini(opts: {
     },
     opts.signal,
   );
-  if (!res.ok) throw new MentorError(explainGemini(res.status, await errorMessage(res)));
+  if (!res.ok) throw geminiError(res.status, await errorMessage(res));
 
   let sawText = false;
   let finish: string | undefined;
@@ -349,18 +412,16 @@ async function* attemptGemini(opts: {
 }
 
 /**
- * Google's 2.5 models have a well-documented habit of completing a stream with
- * `finishReason: "STOP"` (or no finish reason at all) and zero content parts —
- * reported at up to ~50% of first-turn requests in the wild. Nothing is wrong with
- * the question; it's an upstream hiccup. The old code only distinguished "stopped
- * for a real reason" (SAFETY, RECITATION, …) from everything else, so this exact
- * pattern — no text, an innocuous finish reason — fell through both checks and the
- * request just ended with nothing said and nothing thrown: a silent hang from the
- * user's seat, cursor blinking forever.
+ * A stream can finish having yielded nothing: no text, and either `finishReason:
+ * "STOP"` or no finish reason at all. The old code only treated a *different* finish
+ * reason (SAFETY, RECITATION, …) as an error, so that case fell through every check
+ * and the request ended with nothing said and nothing thrown — a silent hang, cursor
+ * blinking forever.
  *
- * Since nothing will have been shown on screen yet when this happens, one transparent
- * retry is invisible if it works and costs one extra round trip if it doesn't — far
- * better than surfacing a Google flake as "the mentor is broken."
+ * The empty streams that prompted this turned out to be self-inflicted (see
+ * sseFrames), but an answerless response is still possible, so it stays handled: one
+ * transparent retry, since nothing has reached the screen yet, and a real error rather
+ * than silence if the second attempt is empty too.
  */
 async function* streamGemini(opts: {
   key: string;
@@ -377,7 +438,7 @@ async function* streamGemini(opts: {
     if (hardStop) throw new MentorError(`Gemini stopped without answering (${finish}).`);
     if (attempt === 2) {
       throw new MentorError(
-        "Gemini finished without sending any text, twice in a row — a known hiccup with this model, not your question. Try again in a moment, or switch models in Settings.",
+        'Gemini returned an empty answer twice in a row. Try again, or switch models in Settings.',
       );
     }
     // attempt 1 came back empty with an innocuous finish reason: silently retry.

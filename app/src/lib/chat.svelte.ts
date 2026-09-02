@@ -1,6 +1,6 @@
 import { app } from './app.svelte';
 import * as store from './storage';
-import { streamReply, systemPrompt, type ChatMessage } from './mentor';
+import { ModelGoneError, streamReply, systemPrompt, type ChatMessage } from './mentor';
 
 /** One thread per day, plus a general one for questions that aren't about a lesson. */
 export const GENERAL = 'general';
@@ -98,6 +98,7 @@ class ChatStore {
       return;
     }
 
+    const model = app.progress.settings.mentorModel;
     this.error = null;
     this.streaming = true;
     this.controller = new AbortController();
@@ -113,7 +114,7 @@ class ChatStore {
       for await (const chunk of streamReply({
         provider: app.mentorProvider,
         key,
-        model: app.progress.settings.mentorModel,
+        model,
         system: systemPrompt(context),
         messages: history,
         signal: this.controller.signal,
@@ -128,6 +129,9 @@ class ChatStore {
     } catch (err) {
       this.error = err instanceof Error ? err.message : 'The mentor is unavailable.';
       if (this.messages[index]?.role === 'assistant') this.messages.splice(index, 1);
+      // The model is gone, not merely unhappy: swap it out so Retry isn't a re-run of
+      // the same guaranteed 404.
+      if (err instanceof ModelGoneError) await app.retireModel(model);
     } finally {
       this.streaming = false;
       this.controller = null;
