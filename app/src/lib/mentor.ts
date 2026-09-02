@@ -284,13 +284,18 @@ async function listGeminiModels(key: string): Promise<ModelChoice[]> {
   return choices;
 }
 
-async function* streamGemini(opts: {
+/**
+ * One request/response cycle. Yields text as it streams and, via the generator's
+ * return value (not a yielded value — `yield*` surfaces this to the caller), reports
+ * whether any text ever showed up and what the model said its finish reason was.
+ */
+async function* attemptGemini(opts: {
   key: string;
   model: string;
   system: string;
   messages: ChatMessage[];
   signal?: AbortSignal;
-}): AsyncGenerator<string> {
+}): AsyncGenerator<string, { sawText: boolean; finish: string | undefined }> {
   const contents = window_(opts.messages).map((m) => ({
     // Gemini calls the assistant "model"; everything else about the shape differs too.
     role: m.role === 'assistant' ? 'model' : 'user',
@@ -340,9 +345,42 @@ async function* streamGemini(opts: {
     }
   }
 
-  // A safety stop with nothing emitted looks exactly like a silent hang otherwise.
-  if (!sawText && finish && finish !== 'STOP') {
-    throw new MentorError(`Gemini stopped without answering (${finish}).`);
+  return { sawText, finish };
+}
+
+/**
+ * Google's 2.5 models have a well-documented habit of completing a stream with
+ * `finishReason: "STOP"` (or no finish reason at all) and zero content parts —
+ * reported at up to ~50% of first-turn requests in the wild. Nothing is wrong with
+ * the question; it's an upstream hiccup. The old code only distinguished "stopped
+ * for a real reason" (SAFETY, RECITATION, …) from everything else, so this exact
+ * pattern — no text, an innocuous finish reason — fell through both checks and the
+ * request just ended with nothing said and nothing thrown: a silent hang from the
+ * user's seat, cursor blinking forever.
+ *
+ * Since nothing will have been shown on screen yet when this happens, one transparent
+ * retry is invisible if it works and costs one extra round trip if it doesn't — far
+ * better than surfacing a Google flake as "the mentor is broken."
+ */
+async function* streamGemini(opts: {
+  key: string;
+  model: string;
+  system: string;
+  messages: ChatMessage[];
+  signal?: AbortSignal;
+}): AsyncGenerator<string> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const { sawText, finish } = yield* attemptGemini(opts);
+    if (sawText) return;
+
+    const hardStop = finish && finish !== 'STOP';
+    if (hardStop) throw new MentorError(`Gemini stopped without answering (${finish}).`);
+    if (attempt === 2) {
+      throw new MentorError(
+        "Gemini finished without sending any text, twice in a row — a known hiccup with this model, not your question. Try again in a moment, or switch models in Settings.",
+      );
+    }
+    // attempt 1 came back empty with an innocuous finish reason: silently retry.
   }
 }
 
