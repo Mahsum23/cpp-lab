@@ -5,6 +5,12 @@
     { name: 'today', label: 'Today', path: '/today', d: 'M4 5h16v15H4z M4 9h16 M8 3v4 M16 3v4' },
     { name: 'map', label: 'Map', path: '/map', d: 'M10 6h10 M10 12h10 M10 18h10 M5 6h.01 M5 12h.01 M5 18h.01' },
     { name: 'stats', label: 'Stats', path: '/stats', d: 'M5 20V11 M12 20V4 M19 20v-6' },
+    {
+      name: 'mentor',
+      label: 'Mentor',
+      path: '/mentor',
+      d: 'M20 14a2 2 0 0 1-2 2H9l-4 4V6a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2z',
+    },
     { name: 'settings', label: 'Settings', path: '/settings', d: 'M4 7h16 M4 12h16 M4 17h16 M9 5v4 M15 10v4 M7 15v4' },
   ];
 
@@ -30,7 +36,7 @@
     inset: auto 0 0 0;
     z-index: 20;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     padding-bottom: var(--safe-b);
     background: color-mix(in srgb, var(--bg) 92%, transparent);
     /* Content scrolling under a translucent bar is the native-feeling detail. */

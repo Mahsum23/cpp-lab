@@ -1,19 +1,32 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import { defaultProgress, emptyDayProgress, SCHEMA_VERSION, type Progress, type Week } from './types';
+import {
+  defaultProgress,
+  emptySecrets,
+  emptyDayProgress,
+  SCHEMA_VERSION,
+  type Progress,
+  type Secrets,
+  type Week,
+} from './types';
 
 const DB_NAME = 'cpp-lab';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const KV = 'kv';
 const WEEKS = 'weeks';
+const CHATS = 'chats';
 const PROGRESS_KEY = 'progress';
+const SECRETS_KEY = 'secrets';
 
 let dbp: Promise<IDBPDatabase> | null = null;
 
 function db() {
   dbp ??= openDB(DB_NAME, DB_VERSION, {
+    // Guarded rather than versioned-switched: the same code has to bring a fresh
+    // install and a v1 install to the same place.
     upgrade(d) {
       if (!d.objectStoreNames.contains(KV)) d.createObjectStore(KV);
       if (!d.objectStoreNames.contains(WEEKS)) d.createObjectStore(WEEKS);
+      if (!d.objectStoreNames.contains(CHATS)) d.createObjectStore(CHATS);
     },
   });
   return dbp;
@@ -53,6 +66,52 @@ export async function saveProgress(p: Progress): Promise<void> {
   }
 }
 
+/**
+ * Secrets are stored beside progress but never inside it — see the note on `Secrets`.
+ * IndexedDB is origin-scoped and no worse than localStorage here; the real protection
+ * is that the GitHub token is gists-only and the whole thing is revocable in one click.
+ */
+export async function loadSecrets(): Promise<Secrets> {
+  try {
+    const stored = (await (await db()).get(KV, SECRETS_KEY)) as Partial<Secrets> | undefined;
+    return { ...emptySecrets(), ...stored };
+  } catch {
+    return emptySecrets();
+  }
+}
+
+export async function saveSecrets(s: Secrets): Promise<void> {
+  try {
+    await (await db()).put(KV, s, SECRETS_KEY);
+  } catch (err) {
+    console.error('[storage] secrets save failed', err);
+  }
+}
+
+export async function loadChat<T>(key: string): Promise<T | undefined> {
+  try {
+    return (await (await db()).get(CHATS, key)) as T | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function saveChat(key: string, value: unknown): Promise<void> {
+  try {
+    await (await db()).put(CHATS, value, key);
+  } catch (err) {
+    console.error('[storage] chat save failed', err);
+  }
+}
+
+export async function deleteChat(key: string): Promise<void> {
+  try {
+    await (await db()).delete(CHATS, key);
+  } catch {
+    /* nothing to clean up */
+  }
+}
+
 export async function loadWeek(id: string): Promise<Week | undefined> {
   try {
     return (await (await db()).get(WEEKS, id)) as Week | undefined;
@@ -78,10 +137,15 @@ export async function saveWeek(week: Week): Promise<void> {
   }
 }
 
+/** Wipes progress and content. Secrets survive — re-pasting two API keys after a
+ *  reset is pure friction, and "reset progress" doesn't mean "log me out". */
 export async function clearAll(): Promise<void> {
   const d = await db();
+  const secrets = await loadSecrets();
   await d.clear(KV);
   await d.clear(WEEKS);
+  await d.clear(CHATS);
+  await saveSecrets(secrets);
 }
 
 /** Fill in fields added by later app versions rather than throwing away a real run. */
@@ -98,7 +162,17 @@ function migrate(p: Progress): Progress {
     days: {},
   };
   for (const [id, d] of Object.entries(p.days ?? {})) {
-    merged.days[id] = { ...emptyDayProgress(d.weekId), ...d, quiz: { ...emptyDayProgress(d.weekId).quiz, ...d.quiz } };
+    const blank = emptyDayProgress(d.weekId);
+    const day = { ...blank, ...d, quiz: { ...blank.quiz, ...d.quiz } };
+
+    // Records written before `quiz.correct` existed only know their answers as
+    // indices into content that may since have been reshuffled. A clean sweep is
+    // still unambiguous, though — every answer was right — so that much is
+    // recoverable rather than guessed.
+    if (Object.keys(day.quiz.correct).length === 0 && day.quiz.cleanSweep) {
+      for (const qid of Object.keys(day.quiz.answers)) day.quiz.correct[qid] = true;
+    }
+    merged.days[id] = day;
   }
   return merged;
 }

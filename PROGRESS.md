@@ -42,3 +42,29 @@ Actions.)
 
 This is Claude's build, not practice; it doesn't replace writing C++. The Task screen
 is a briefing — `src/main.cpp` still gets written on the laptop.
+
+**Side track — app v2 (2026-09-02):** sync, mentor chat, and a quiz-content fix.
+
+- **Sync.** Passing JSON between devices was too much friction to survive as a daily
+  habit. Progress now lives in a **secret GitHub gist**, written straight from the
+  phone with a fine-grained token scoped to Gists only. Telegram was considered on
+  request and rejected: its bots can't read their own chat history, so restoring onto
+  a wiped phone has no clean path. Two devices **merge** rather than overwrite — see
+  `app/DESIGN.md` §8.5 for what happens to XP (derived from the day records) and the
+  streak (chosen, never max'd, so a phone in a drawer can't resurrect a broken run).
+  Setup is in `app/README.md`.
+- **Mentor chat.** Fifth tab. Carries this repo's persona and prime directive plus
+  today's theory and task, so it answers in context and still refuses to write the
+  milestone code. Anthropic key pasted in Settings, on-device only; Haiku/Sonnet/Opus
+  switchable. It's the one part of the app that costs money.
+- **Quiz content.** Every correct answer was option A, because that's how you author a
+  key. `build-content.mjs` now shuffles deterministically per question, so authoring
+  order carries no information. Day 1 also gained two questions (fd exhaustion; what
+  Asio actually does over `recv()`), making it 5.
+- Verified end to end in a phone-sized browser with the GitHub and Anthropic APIs
+  stubbed: 24 UI checks, plus streak/merge/markdown unit tests. Three bugs found and
+  fixed on the way, one of them a self-retriggering Svelte effect that reloaded the
+  chat thread hundreds of times a second and ate the message being sent.
+
+**Once sync is on, the phone is usually the more current record.** If this file and
+the app disagree about what's done, this file is the one that's behind.

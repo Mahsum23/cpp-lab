@@ -14,8 +14,35 @@ hljs.registerLanguage('plaintext', plaintext);
 
 const marked = new Marked({ gfm: true, breaks: false });
 
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * Only ever produce a link the browser will treat as navigation.
+ *
+ * `javascript:` in an href is script execution dressed as a link, and this renderer
+ * now sees text the model wrote, not just text we wrote. Anything that isn't plainly
+ * http(s) or mailto becomes an inert anchor.
+ */
+function safeHref(href: string): string {
+  const trimmed = href.trim();
+  return /^(https?:|mailto:|#|\/)/i.test(trimmed) ? escapeHtml(trimmed) : '#';
+}
+
 marked.use({
   renderer: {
+    /**
+     * Raw HTML is escaped rather than emitted — for every source, deliberately.
+     *
+     * The mentor's replies come down this same pipe, and a model that echoes back an
+     * `<img onerror=…>` it read somewhere would be running script in a page whose
+     * IndexedDB holds a GitHub token and an Anthropic key. Having one path that is
+     * always safe beats a `trusted` flag that is right until the day someone forgets
+     * to pass it. Lessons lose the ability to embed HTML; they have never used it.
+     */
+    html({ text }) {
+      return escapeHtml(text);
+    },
     code({ text, lang }) {
       const language = hljs.getLanguage(lang ?? '') ? (lang as string) : 'cpp';
       const html = hljs.highlight(text, { language, ignoreIllegals: true }).value;
@@ -29,10 +56,16 @@ marked.use({
       const kind = m[1].toLowerCase();
       return `<blockquote class="aside aside-${kind}">${inner.replace(m[0], '<p>')}</blockquote>`;
     },
+    // Markdown image syntax can't carry an event handler, but it can carry a
+    // `javascript:` src, so it goes through the same href filter.
+    image({ href, title, text }) {
+      const t = title ? ` title="${escapeHtml(title)}"` : '';
+      return `<img src="${safeHref(href)}" alt="${escapeHtml(text)}"${t}>`;
+    },
     // Everything opens in a new tab; a phone app losing its place is infuriating.
     link({ href, title, tokens }) {
-      const t = title ? ` title="${title}"` : '';
-      return `<a href="${href}"${t} target="_blank" rel="noopener noreferrer">${this.parser.parseInline(tokens)}</a>`;
+      const t = title ? ` title="${escapeHtml(title)}"` : '';
+      return `<a href="${safeHref(href)}"${t} target="_blank" rel="noopener noreferrer">${this.parser.parseInline(tokens)}</a>`;
     },
   },
 });

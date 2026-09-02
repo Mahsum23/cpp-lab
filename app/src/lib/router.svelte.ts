@@ -5,6 +5,7 @@ export type Route =
   | { name: 'today' }
   | { name: 'map' }
   | { name: 'stats' }
+  | { name: 'mentor' }
   | { name: 'settings' }
   | { name: 'session'; weekId: string; dayId: string; step: number };
 
@@ -15,6 +16,8 @@ function parse(hash: string): Route {
       return { name: 'map' };
     case 'stats':
       return { name: 'stats' };
+    case 'mentor':
+      return { name: 'mentor' };
     case 'settings':
       return { name: 'settings' };
     case 'session':

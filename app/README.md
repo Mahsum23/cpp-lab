@@ -21,7 +21,7 @@ Other scripts:
 | `npm run content` | Compile `milestones/*/lessons/` → `public/content/` |
 | `npm run build` | Content, then production build into `dist/` |
 | `npm run preview` | Serve `dist/` (add `--host` to open it from your phone on the same wifi) |
-| `npm test` | Streak-rule tests — the one bit of logic subtle enough to earn them |
+| `npm test` | Streak, merge and markdown-escaping tests — the bits that fail silently |
 | `npm run check` | `svelte-check` type pass |
 | `npm run icons` | Re-render the icon set; only needed if the mark changes |
 
@@ -37,6 +37,42 @@ That gives a home-screen icon, full-screen launch with no browser chrome, and of
 use. To try it before deploying, `npm run preview -- --host` and open the LAN address
 from the phone — everything works except installing, which needs HTTPS.
 
+## Sync it across devices
+
+Settings → **Sync**. The app keeps your progress in a **secret GitHub gist**, so the
+phone and the laptop stay in step without exporting JSON by hand.
+
+1. [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)
+2. **Account permissions** → **Gists: Read and write**. Nothing else.
+3. Generate, copy, paste into Settings → Connect.
+
+That token can read and write your gists and nothing else — no repo access, no push,
+revocable from the same page. It's stored on the device only and is never included in
+the synced payload.
+
+Connecting a second device with the same token finds the existing gist and **merges**
+rather than overwriting: every completed day, note and badge from both sides survives.
+Settings, and which weeks are downloaded, deliberately stay per-device. See
+`DESIGN.md` §8.5 for why the streak is the one field that gets chosen instead of
+merged.
+
+**Reset all progress** switches sync off as part of the wipe, so it can't push the
+empty record over your backup. Reconnecting pulls the gist back.
+
+The JSON export is still there. It's the copy that doesn't depend on GitHub.
+
+## Turn on the mentor chat
+
+Settings → **Mentor chat** → paste an Anthropic API key
+([console.anthropic.com](https://console.anthropic.com/settings/keys)). The Mentor tab
+then answers in context: it knows which day you're on, what today's theory said, and
+what the task is — and it will not write that task for you, by construction of its
+system prompt. Model is switchable (Haiku / Sonnet / Opus) in the same section.
+
+This is the one part of the app that isn't free: fractions of a cent per question,
+billed to your own key. The key lives on the device; there's no server in between,
+which is both why it's free to host and why the key has to be there.
+
 ## Adding a day
 
 Two files per day, and the app is a build artifact of them:
@@ -49,6 +85,9 @@ milestones/<milestone>/lessons/
 ```
 
 The `.md` stays greppable and reviewable in git and never contains a correct answer.
+Write the options in whatever order is natural — the build shuffles them
+deterministically per question, so authoring the right answer first (which is what
+everyone does) can't turn into a pattern the learner spots instead of thinking.
 `## Task` is parsed by convention — `- File: \`path\``, `- Compile: \`cmd\``, and a
 `### Checklist` of `- [ ]` items become structured UI; everything else stays prose.
 
@@ -72,12 +111,16 @@ keeps your progress, because that's a typo fix, not new work.
 src/
   lib/      types · storage (IndexedDB) · content fetch · streak · xp · badges
             markdown (marked + highlight.js) · router · app.svelte.ts (the store)
-  screens/  Today · Session (Theory→Quiz→Task) · WeekMap · Stats · Settings
+            cloud (gist sync) · merge · mentor (Anthropic stream) · chat.svelte.ts
+  screens/  Today · Session (Theory→Quiz→Task) · WeekMap · Stats · Mentor · Settings
   components/
-scripts/    build-content.mjs · gen-icons.mjs · test-streak.mjs
+scripts/    build-content.mjs · gen-icons.mjs · test-{streak,merge,markdown}.mjs
 public/content/   generated — never hand-edit
 ```
 
-Svelte 5 + Vite + `vite-plugin-pwa`. No backend. Progress lives in IndexedDB on the
-one device, which is why Settings has an export button — iOS evicts storage from web
-apps it decides are idle, and that export is the only real safety net.
+Svelte 5 + Vite + `vite-plugin-pwa`. No backend, and none of the three network
+dependencies needs one: content is static files on the same origin, sync is the GitHub
+API, and the mentor is the Anthropic API — all called straight from the browser.
+
+Progress lives in IndexedDB, which iOS will evict from a web app it decides is idle.
+Sync is the answer to that; the export button is the answer to sync being off.

@@ -71,6 +71,16 @@ export type TaskState = 'todo' | 'attempted' | 'done';
 export interface QuizState {
   /** questionId -> index of the option picked. First pick only; no take-backs. */
   answers: Record<string, number>;
+  /**
+   * questionId -> was that pick right, recorded at the moment he tapped.
+   *
+   * Redundant with `answers` only for as long as the content stands still. Option
+   * order is a build output (build-content.mjs shuffles), so an edited quiz renumbers
+   * the options underneath an index that's already been stored — and the score for a
+   * day he aced silently rots. The verdict is a fact about what happened; the index
+   * is a fact about a file that can change. Store the fact.
+   */
+  correct: Record<string, boolean>;
   completedAt: string | null;
   /** True only if every question was right on the first pick. */
   cleanSweep: boolean;
@@ -99,9 +109,30 @@ export interface StreakState {
   freezesEarnedAt: number;
 }
 
+export type MentorModel = 'claude-haiku-4-5-20251001' | 'claude-sonnet-5' | 'claude-opus-5';
+
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
   peekAhead: boolean;
+  mentorModel: MentorModel;
+}
+
+/**
+ * Credentials, kept out of `Progress` on purpose: `Progress` is the object that gets
+ * uploaded to the gist, and an API key riding along in a sync payload is exactly the
+ * kind of accident that only shows up in someone else's billing.
+ */
+export interface Secrets {
+  /** Fine-grained GitHub PAT, gists scope only. */
+  githubToken: string | null;
+  /** The gist this device syncs through, discovered or created on connect. */
+  gistId: string | null;
+  /** Anthropic API key for the mentor chat. */
+  anthropicKey: string | null;
+}
+
+export function emptySecrets(): Secrets {
+  return { githubToken: null, gistId: null, anthropicKey: null };
 }
 
 export interface Progress {
@@ -118,7 +149,7 @@ export function emptyDayProgress(weekId: string): DayProgress {
   return {
     weekId,
     theoryDone: false,
-    quiz: { answers: {}, completedAt: null, cleanSweep: false },
+    quiz: { answers: {}, correct: {}, completedAt: null, cleanSweep: false },
     task: 'todo',
     checklist: [],
     notes: '',
@@ -134,7 +165,7 @@ export function defaultProgress(): Progress {
     streak: { count: 0, longest: 0, lastActiveDate: null, freezes: 0, freezesEarnedAt: 0 },
     xp: 0,
     badges: {},
-    settings: { theme: 'system', peekAhead: false },
+    settings: { theme: 'system', peekAhead: false, mentorModel: 'claude-sonnet-5' },
     loadedWeeks: {},
   };
 }

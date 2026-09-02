@@ -1,5 +1,9 @@
 # Answer key for day-01. Deliberately NOT in the .md — that's the file you'd open
 # while doing the lesson. Distractors are real misconceptions, not filler.
+#
+# Option order here is authoring order and means nothing: build-content.mjs shuffles
+# each question deterministically, so writing the correct one first is fine and the
+# learner still can't pattern-match on position.
 questions:
   - id: q1
     prompt: What does it mean if socket() returns -1 versus returning 3?
@@ -89,3 +93,74 @@ questions:
         why: >
           Ordered byte stream is the one thing UDP is not. Datagrams preserve message
           boundaries precisely because there's no stream to order them into.
+
+  - id: q4
+    prompt: >
+      A program calls socket() ten thousand times in a loop and never calls close().
+      What actually runs out, and how does it show up?
+    options:
+      - text: "The fd table — you hit RLIMIT_NOFILE and socket() starts returning -1 with errno EMFILE"
+        correct: true
+        why: >
+          Every fd is a slot in a per-process table with a hard ceiling (`ulimit -n`,
+          often 1024 or 8192). The failure is quiet and late: nine thousand calls
+          succeed, then everything fails at once — which is why "check the return value
+          of every syscall" stops sounding paranoid. EMFILE is per-process; ENFILE is
+          the system-wide table, and seeing that one means you've taken the whole box
+          down, not just yourself.
+      - text: "Nothing — a socket with no address bound holds no resources until you bind() it"
+        correct: false
+        why: >
+          The kernel allocated a real structure the moment socket() returned: buffers,
+          protocol state, a table slot. Unbound just means the address fields are
+          empty. This is the fd-leak bug in a nutshell — it looks free because nothing
+          visible happened.
+      - text: "The ephemeral port range — 65535 ports means you run out of ports long before fds"
+        correct: false
+        why: >
+          Plausible arithmetic, wrong stage. No port is reserved until bind() or
+          connect(); these sockets never touched the port space. Port exhaustion is
+          real, but it's a client-side problem you hit by opening lots of *connections*
+          — and it's why TIME_WAIT shows up in your life later.
+      - text: "Nothing — the kernel reclaims sockets that have no address once memory gets tight"
+        correct: false
+        why: >
+          There's no garbage collector here. The fd is a reference the kernel assumes
+          you still want; it's released when you close it or when the process exits.
+          Process exit is the only cleanup you get for free, which is exactly why a
+          long-lived server leaking fds is so much worse than a short script doing it.
+
+  - id: q5
+    prompt: >
+      When Asio hands you `co_await socket.async_read_some(...)`, what has replaced the
+      raw recv() call underneath?
+    options:
+      - text: "Nothing — it's still recv() on an fd from socket(); what Asio adds is knowing when to call it"
+        correct: true
+        why: >
+          This is the whole point of Day 1. Asio owns an event loop (epoll on Linux,
+          kqueue on BSD, IOCP on Windows) that watches the fd and resumes your
+          coroutine once the kernel says data has arrived — then does the ordinary
+          recv(). The abstraction you already use at work is a scheduler bolted on top
+          of the exact three calls in this milestone.
+      - text: "It's the same recv(), but Asio runs it on a worker thread so the blocking wait is off your coroutine"
+        correct: false
+        why: >
+          That's the thread-pool model — real, and what some libraries genuinely do,
+          but it's the design Asio exists to avoid. A thread parked in a blocking recv()
+          costs you a stack and a context switch per connection; readiness notification
+          costs you one epoll entry. This distinction is precisely why C10k was a
+          named problem.
+      - text: "io_uring replaced the socket API — modern async I/O submits operations directly, with no fd"
+        correct: false
+        why: >
+          io_uring changed how you *submit and complete* work, not what you're
+          operating on: its ops take the same fd from the same socket() call. Forty
+          years in, the notification mechanism has been rewritten four times and the
+          socket abstraction hasn't moved.
+      - text: "Asio uses a userspace TCP stack to skip the syscall, which is where the speedup comes from"
+        correct: false
+        why: >
+          Kernel-bypass stacks exist (DPDK, and the reason people say "userspace TCP"),
+          but they're a specialist tool for line-rate packet processing, and Asio isn't
+          one. Ordinary Asio is a thin, portable wrapper over the kernel's sockets.

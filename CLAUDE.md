@@ -150,6 +150,14 @@ question's `prompt`, its 2–4 `options` with `correct: true/false`, and a `why`
 misconception is wrong is the part that teaches. The `.md`'s `## Quiz` section stays
 question-text-only, because that's the file he'd have open while doing the lesson.
 
+**Never make option order carry information.** Writing the key, the correct answer
+comes out first every time — it's the one you're sure of, the distractors come after.
+Four days of that and he's pattern-matching on position instead of thinking, which
+measures nothing. In the `.quiz.yaml` this is handled for you: `build-content.mjs`
+shuffles each question deterministically, so author in whatever order is natural. In a
+**chat quiz via `AskUserQuestion` there is no build step**, so vary the correct
+option's position yourself, question by question.
+
 The phone app (`app/`, see `app/DESIGN.md`) is built from these files, so:
 
 - Keep `milestones/<m>/lessons/week.yaml` current — it's the week roster (day ids,
@@ -166,13 +174,25 @@ The phone app (`app/`, see `app/DESIGN.md`) is built from these files, so:
 None of this replaces running the session in chat — it's the same lesson, written down
 so it also reaches his phone.
 
+**The app has its own mentor, and it obeys this file.** Settings → Mentor chat turns on
+an in-app chat that carries the persona and the prime directive above, plus the current
+day's theory and task. It will explain anything and refuses to write the milestone
+code, same as here. So if he arrives on the laptop already having discussed something,
+that's where it happened — ask rather than re-explaining from scratch.
+
+**Progress can arrive from the phone.** The app syncs to a secret GitHub gist
+(Settings → Sync shows the link). His phone is often the more current record of what's
+done, so if `PROGRESS.md` and the app disagree, the app is probably right and
+`PROGRESS.md` is behind — reconcile it rather than assuming the repo is authoritative.
+
 **Quiz is a command, and it's interactive, not chat Q&A.** When he types `quiz` (or
 otherwise asks for the quiz), don't just type questions into chat and wait for prose
 answers. Use the `AskUserQuestion` tool: one call, one entry per question, 2–4 options
 each. Make the wrong options real misconceptions someone would plausibly hold, not
 throwaway distractors — that's what makes picking the right one, or explaining why the
 others are wrong, actually mean something. Don't mark any option "(Recommended)" —
-that would hand him the answer. He can always free-type a different answer via the
+that would hand him the answer, and don't leave the correct one in the same slot
+across questions. He can always free-type a different answer via the
 tool's built-in "Other," so this doesn't force pure multiple-choice recognition over
 actual recall.
 

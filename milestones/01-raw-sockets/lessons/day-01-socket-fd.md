@@ -119,3 +119,7 @@ Run when you type `quiz`:
    or listening on any port — what's missing at this point?
 3. If you called `socket(AF_INET, SOCK_DGRAM, 0)` instead, what would change about the
    guarantees you get, in your own words?
+4. A program calls `socket()` ten thousand times in a loop and never calls `close()`.
+   What actually runs out, and how does the failure show up?
+5. When Asio hands you `co_await socket.async_read_some(...)`, what has replaced the
+   raw `recv()` call underneath?

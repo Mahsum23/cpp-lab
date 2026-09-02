@@ -1,17 +1,22 @@
 import {
   defaultProgress,
   emptyDayProgress,
+  emptySecrets,
   type Curriculum,
   type Day,
+  type MentorModel,
   type Progress,
+  type Secrets,
   type TaskState,
   type Week,
 } from './types';
 import * as store from './storage';
+import * as cloud from './cloud';
+import { mergeProgress } from './merge';
 import { fetchCurriculum, fetchWeek, SchemaTooNewError } from './content';
 import { completeDay as advanceStreak, displayedStreak, atRisk } from './streak';
 import { evaluate as evaluateBadges } from './badges';
-import { XP_CLEAN_SWEEP, XP_SESSION } from './xp';
+import { deriveXp, XP_CLEAN_SWEEP, XP_SESSION } from './xp';
 import { localDateOf, today } from './date';
 
 export type DayState = 'done' | 'current' | 'unlocked' | 'locked' | 'upcoming';
@@ -23,12 +28,26 @@ export interface SyncState {
   newWeeks: string[];
 }
 
+/** Progress sync, which is a different thing from content sync above. */
+export interface CloudState {
+  status: 'off' | 'idle' | 'syncing' | 'ok' | 'error';
+  lastSyncAt: string | null;
+  /** Which device wrote the copy we last read. */
+  lastDevice: string | null;
+  error: string | null;
+}
+
+/** Long enough that a tapped checklist doesn't fire a request per tap. */
+const PUSH_DEBOUNCE_MS = 4000;
+
 class AppStore {
   progress = $state<Progress>(defaultProgress());
   weeks = $state<Week[]>([]);
   curriculum = $state<Curriculum | null>(null);
   ready = $state(false);
   sync = $state<SyncState>({ status: 'idle', message: null, newWeeks: [] });
+  secrets = $state<Secrets>(emptySecrets());
+  cloud = $state<CloudState>({ status: 'off', lastSyncAt: null, lastDevice: null, error: null });
   /** Badge ids earned by the most recent action, for the celebration sheet. */
   justEarned = $state<string[]>([]);
   lastXpGain = $state(0);
@@ -109,11 +128,16 @@ class AppStore {
 
   async init() {
     this.progress = await store.loadProgress();
+    this.secrets = await store.loadSecrets();
     this.weeks = await store.loadAllWeeks();
     this.applyTheme();
     this.ready = true;
+    if (this.cloudConnected) this.cloud = { ...this.cloud, status: 'idle' };
     void store.requestPersistence();
-    void this.refresh();
+    // Sequenced, not raced: refresh() writes loadedWeeks when it downloads a week,
+    // and syncNow() replaces `progress` wholesale with its merge result. Overlapping
+    // them can drop that write and re-download the week on the next launch.
+    void this.refresh().then(() => this.syncNow());
   }
 
   /**
@@ -172,6 +196,7 @@ class AppStore {
 
   private async persist() {
     await store.saveProgress($state.snapshot(this.progress));
+    this.schedulePush();
   }
 
   private mutable(dayId: string, weekId: string) {
@@ -191,15 +216,27 @@ class AppStore {
     const p = this.mutable(day.id, weekId);
     if (questionId in p.quiz.answers) return;
     p.quiz.answers[questionId] = optionIndex;
+    // The verdict is settled now, against the content he actually saw. Recomputing it
+    // later from the index would re-read a file that may have been edited since.
+    const question = day.quiz?.find((q) => q.id === questionId);
+    p.quiz.correct[questionId] = Boolean(question?.options[optionIndex]?.correct);
     await this.persist();
+  }
+
+  /** Was this question answered correctly? Falls back to the stored index for day
+   *  records written before the verdict was kept. */
+  private wasCorrect(day: Day, weekId: string, questionId: string): boolean {
+    const p = this.dayProgress(day.id, weekId);
+    if (questionId in p.quiz.correct) return p.quiz.correct[questionId];
+    const question = day.quiz?.find((q) => q.id === questionId);
+    return Boolean(question?.options[p.quiz.answers[questionId]]?.correct);
   }
 
   async finishQuiz(day: Day, weekId: string) {
     const p = this.mutable(day.id, weekId);
     const questions = day.quiz ?? [];
     p.quiz.cleanSweep =
-      questions.length > 0 &&
-      questions.every((q) => questions.length && q.options[p.quiz.answers[q.id]]?.correct);
+      questions.length > 0 && questions.every((q) => this.wasCorrect(day, weekId, q.id));
     p.quiz.completedAt = new Date().toISOString();
     await this.persist();
   }
@@ -208,7 +245,7 @@ class AppStore {
     const p = this.dayProgress(day.id, weekId);
     const questions = day.quiz ?? [];
     return {
-      correct: questions.filter((q) => q.options[p.quiz.answers[q.id]]?.correct).length,
+      correct: questions.filter((q) => q.id in p.quiz.answers && this.wasCorrect(day, weekId, q.id)).length,
       total: questions.length,
     };
   }
@@ -246,8 +283,10 @@ class AppStore {
     p.task = 'done';
 
     const gain = XP_SESSION + (p.quiz.cleanSweep ? XP_CLEAN_SWEEP : 0);
-    this.progress.xp += gain;
     this.lastXpGain = gain;
+    // Derived, not incremented — see deriveXp. The counter and the ledger can't
+    // disagree if there's only a ledger.
+    this.progress.xp = deriveXp(Object.values($state.snapshot(this.progress).days));
 
     const outcome = advanceStreak($state.snapshot(this.progress.streak), today());
     this.progress.streak = outcome.streak;
@@ -266,6 +305,146 @@ class AppStore {
   clearCelebration() {
     this.justEarned = [];
     this.lastXpGain = 0;
+  }
+
+  // --- cloud sync ---------------------------------------------------------
+
+  get cloudConnected(): boolean {
+    return Boolean(this.secrets.githubToken && this.secrets.gistId);
+  }
+
+  private pushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Set while we're writing our own merge result back, so the save it triggers
+   *  doesn't schedule a push that re-enters the sync we're already inside. */
+  private applyingRemote = false;
+
+  private schedulePush() {
+    if (!this.cloudConnected || this.applyingRemote) return;
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.pushTimer = setTimeout(() => void this.pushNow(), PUSH_DEBOUNCE_MS);
+  }
+
+  /** Send anything pending right now — called when the app goes to the background,
+   *  which on iOS is the last moment we're reliably allowed to run. */
+  async flushCloud(): Promise<void> {
+    if (!this.pushTimer) return;
+    clearTimeout(this.pushTimer);
+    this.pushTimer = null;
+    await this.pushNow();
+  }
+
+  private async pushNow(): Promise<void> {
+    this.pushTimer = null;
+    const { githubToken, gistId } = this.secrets;
+    if (!githubToken || !gistId) return;
+    try {
+      await cloud.push(githubToken, gistId, $state.snapshot(this.progress));
+      this.cloud = {
+        status: 'ok',
+        lastSyncAt: new Date().toISOString(),
+        lastDevice: cloud.deviceName(),
+        error: null,
+      };
+    } catch (err) {
+      // A failed push is not worth interrupting a session over — the local copy is
+      // still the real one, and the next sync will carry it.
+      this.cloud = { ...this.cloud, status: 'error', error: errorText(err) };
+    }
+  }
+
+  /**
+   * Pull, merge, push. Runs on launch, on foreground, and on demand.
+   *
+   * Merge rather than choose: with no server to arbitrate, "newest wins" would let
+   * opening the laptop erase a session done on the phone that morning.
+   */
+  async syncNow(): Promise<void> {
+    const { githubToken, gistId } = this.secrets;
+    if (!githubToken || !gistId || this.cloud.status === 'syncing') return;
+
+    this.cloud = { ...this.cloud, status: 'syncing', error: null };
+    try {
+      const remote = await cloud.pull(githubToken, gistId);
+      if (remote) {
+        const local = $state.snapshot(this.progress);
+        const merged = mergeProgress(local, remote.progress);
+        if (JSON.stringify(merged) !== JSON.stringify(local)) {
+          this.applyingRemote = true;
+          this.progress = merged;
+          await store.saveProgress($state.snapshot(this.progress));
+          this.applyingRemote = false;
+          this.applyTheme();
+        }
+      }
+      await cloud.push(githubToken, gistId, $state.snapshot(this.progress));
+      this.cloud = {
+        status: 'ok',
+        lastSyncAt: new Date().toISOString(),
+        lastDevice: remote?.device ?? cloud.deviceName(),
+        error: null,
+      };
+    } catch (err) {
+      this.applyingRemote = false;
+      this.cloud = { ...this.cloud, status: 'error', error: errorText(err) };
+    }
+  }
+
+  /** Returns whether it adopted an existing gist or made a new one — the difference
+   *  matters to the message shown, because one of them means "your history is back". */
+  async connectCloud(token: string): Promise<'adopted' | 'created'> {
+    this.cloud = { ...this.cloud, status: 'syncing', error: null };
+    try {
+      const existing = await cloud.findGist(token);
+      const gistId = existing ?? (await cloud.createGist(token, $state.snapshot(this.progress)));
+      this.secrets = { ...this.secrets, githubToken: token, gistId };
+      await store.saveSecrets($state.snapshot(this.secrets));
+
+      if (existing) {
+        await this.syncNow();
+        if (this.cloud.status === 'error') throw new cloud.CloudError(this.cloud.error ?? 'Sync failed.');
+        return 'adopted';
+      }
+      this.cloud = {
+        status: 'ok',
+        lastSyncAt: new Date().toISOString(),
+        lastDevice: cloud.deviceName(),
+        error: null,
+      };
+      return 'created';
+    } catch (err) {
+      this.cloud = { ...this.cloud, status: 'error', error: errorText(err) };
+      throw err;
+    }
+  }
+
+  /** Forgets the token on this device. The gist itself is left alone — deleting a
+   *  backup as a side effect of signing out of one phone would be indefensible. */
+  async disconnectCloud(): Promise<void> {
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.pushTimer = null;
+    this.secrets = { ...this.secrets, githubToken: null, gistId: null };
+    await store.saveSecrets($state.snapshot(this.secrets));
+    this.cloud = { status: 'off', lastSyncAt: null, lastDevice: null, error: null };
+  }
+
+  get gistUrl(): string | null {
+    return this.secrets.gistId ? cloud.gistUrl(this.secrets.gistId) : null;
+  }
+
+  // --- mentor -------------------------------------------------------------
+
+  get mentorReady(): boolean {
+    return Boolean(this.secrets.anthropicKey);
+  }
+
+  async setAnthropicKey(key: string | null) {
+    this.secrets = { ...this.secrets, anthropicKey: key?.trim() || null };
+    await store.saveSecrets($state.snapshot(this.secrets));
+  }
+
+  async setMentorModel(model: MentorModel) {
+    this.progress.settings.mentorModel = model;
+    await this.persist();
   }
 
   // --- settings -----------------------------------------------------------
@@ -307,13 +486,28 @@ class AppStore {
     this.applyTheme();
   }
 
+  /**
+   * Wipes this device. Cloud sync is switched off as part of it, on purpose: a reset
+   * that stayed connected would push the empty record over the only backup a few
+   * seconds later. Reconnecting afterwards pulls the cloud copy back, which makes
+   * "reset" recoverable and makes deleting the gist the deliberate act it should be.
+   */
   async resetAll() {
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.pushTimer = null;
     await store.clearAll();
+    this.secrets = { ...(await store.loadSecrets()), githubToken: null, gistId: null };
+    await store.saveSecrets($state.snapshot(this.secrets));
+    this.cloud = { status: 'off', lastSyncAt: null, lastDevice: null, error: null };
     this.progress = defaultProgress();
     this.weeks = [];
     this.applyTheme();
     await this.refresh();
   }
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : 'Something went wrong.';
 }
 
 export const app = new AppStore();

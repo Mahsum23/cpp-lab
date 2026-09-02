@@ -25,3 +25,18 @@ export function formatDate(iso: string): string {
     day: 'numeric',
   });
 }
+
+/** "just now" / "4 min ago" / "yesterday" — for sync status lines. */
+export function relativeTime(iso: string, now = Date.now()): string {
+  const secs = Math.round((now - Date.parse(iso)) / 1000);
+  if (!Number.isFinite(secs) || secs < 0) return 'just now';
+  if (secs < 45) return 'just now';
+  if (secs < 5400) {
+    const mins = Math.round(secs / 60);
+    return mins < 60 ? `${mins} min ago` : 'an hour ago';
+  }
+  const hours = Math.round(secs / 3600);
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}

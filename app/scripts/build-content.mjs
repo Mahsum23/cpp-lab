@@ -106,6 +106,67 @@ function countMdQuizQuestions(quizMd) {
   return (quizMd.match(/^\s*\d+\.\s+/gm) ?? []).length;
 }
 
+/**
+ * Deterministic option shuffle.
+ *
+ * Authoring a quiz, you write the right answer first — it's the one you're sure of,
+ * the distractors come after. Do that four days running and the learner has stopped
+ * reading the options and started pattern-matching on position, which measures
+ * nothing. So the source order is treated as arbitrary and the build lays the options
+ * out itself.
+ *
+ * Seeded rather than random, deliberately: the same lesson must shuffle the same way
+ * on every machine and every rebuild, because the app records answers by position and
+ * `contentHash` would otherwise churn on every `npm run content`.
+ *
+ * FNV-1a over the seed string, then xorshift32 — small, no dependency, and stable
+ * across Node versions in a way Math.random() explicitly is not.
+ */
+function rng(seed) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i += 1) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  let s = h >>> 0 || 0x9e3779b9;
+  return () => {
+    s ^= s << 13;
+    s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    s >>>= 0;
+    return s / 0x1_0000_0000;
+  };
+}
+
+function shuffle(items, seed) {
+  const next = rng(seed);
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(next() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Shuffle every question in a day, then check the day as a whole: a seed that happens
+ * to put all five answers in slot C is just as much of a tell as authoring order was.
+ * Re-salt until the positions differ; bounded, and the identity fallback is only
+ * reachable for a single-question day.
+ */
+function placeOptions(questions, dayId) {
+  for (let salt = 0; salt < 32; salt += 1) {
+    const out = questions.map((q) => ({
+      ...q,
+      options: shuffle(q.options, `${dayId}:${q.id}:${salt}`),
+    }));
+    const slots = out.map((q) => q.options.findIndex((o) => o.correct));
+    if (out.length < 2 || new Set(slots).size > 1) return out;
+  }
+  return questions;
+}
+
 function loadQuiz(path, dayId) {
   if (!existsSync(path)) return null;
   const doc = parseYaml(readFileSync(path, 'utf8'));
@@ -114,7 +175,7 @@ function loadQuiz(path, dayId) {
     warn(`${dayId}: ${path} has no questions`);
     return null;
   }
-  return questions.map((q, qi) => {
+  const parsed = questions.map((q, qi) => {
     const options = q.options ?? [];
     const correctCount = options.filter((o) => o.correct).length;
     if (correctCount !== 1) {
@@ -136,6 +197,8 @@ function loadQuiz(path, dayId) {
       })),
     };
   });
+
+  return placeOptions(parsed, dayId);
 }
 
 function buildWeek(milestone) {

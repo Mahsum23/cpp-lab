@@ -1,6 +1,7 @@
 # cpp-lab — Learning App Design Doc
 
-**Status:** locked — v1 built (2026-09-01). Code in `app/`, how-to in `app/README.md`.
+**Status:** v2 built (2026-09-02) — cloud sync + mentor chat. Code in `app/`, how-to in
+`app/README.md`.
 **Type:** installable PWA (Progressive Web App) — runs in the browser, "Add to Home
 Screen" on iPhone gives it a full-screen icon, offline support, and a native-ish feel.
 No Mac, Xcode, App Store, or developer account required.
@@ -233,7 +234,7 @@ not "You're a superstar!!!" filler.
 Theme (system / light / dark), reset progress, export/import progress JSON (backup,
 since it's a single device), and — greyed until v2 — **Anthropic API key** for chat.
 
-### 3.6 Mentor chat (v2) — see §8.
+### 3.6 Mentor chat — see §8. Built.
 
 ---
 
@@ -396,33 +397,96 @@ No app rebuild, no redeploy of the shell for content-only changes.
 
 ---
 
-## 8. Chat with the mentor (v2 — designed now, built later)
+## 8. Chat with the mentor (built 2026-09-02)
 
 Goal: ask the mentor a quick question *in context* without leaving the app —
 "why does TIME_WAIT exist again?" while sitting on Day 3.
 
-**Behavior**
-- A **Mentor** tab (5th tab, appears once an API key is set).
-- Every message carries context: a **system prompt** = the mentor persona distilled
-  from `CLAUDE.md` (tone + the prime directive: *never hand over milestone
-  implementation code; answer "why"/concept questions freely; guiding questions when
-  he's stuck*) **plus** the current day's theory + task, so the mentor "knows where you
-  are."
-- Responses stream. Conversation history stored locally per day/topic.
-- The in-app mentor obeys the same prime directive as here — it will *not* write your
-  echo server for you, by construction of its system prompt. This is a feature: the
-  app can't become a cheat button.
+**Behaviour as built**
+- A **Mentor** tab, fifth in the bar.
+- Every message carries a system prompt = the mentor persona distilled from
+  `CLAUDE.md` (tone, calibration to his actual baseline, and the prime directive:
+  *never write the milestone implementation; answer "why" freely; guiding questions
+  when he's stuck*) **plus** the current day's title, theory and task, and the titles
+  of the days still ahead so it can't get in front of the curriculum.
+- Responses stream token by token. One thread per day, stored locally, resumed on
+  return.
+- The in-app mentor obeys the same prime directive as the CLI, by construction of its
+  system prompt. This is a feature: the app cannot become a cheat button.
 
-**Transport (chosen tradeoff)**
-- v2.0: **direct client → Anthropic API** using an API key you paste into Settings,
-  stored on-device only. Rationale: single-user personal app, usage is literally
-  pennies, and it needs zero backend. The tradeoff — the key lives on your device —
-  is acceptable for a private tool you install only on your own phone.
-- Future option if this is ever shared: a tiny serverless proxy holding the key. Out
-  of scope now; the client is written so swapping the endpoint is a one-line change.
+**Transport**
+- Direct client → Anthropic API with a key pasted into Settings, stored on-device
+  only and never included in the synced payload. Verified: the endpoint's CORS
+  preflight allows `anthropic-dangerous-direct-browser-access`, so no proxy is needed.
+- The client is a single `fetch` in `src/lib/mentor.ts`; swapping in a serverless
+  proxy later is a one-line change.
 
-**Model:** `claude-sonnet` by default (fast, cheap, plenty for this); switchable to
-Opus in settings for hard conceptual questions.
+**Model:** Sonnet by default, with Haiku (cheap, for quick "what does this flag do")
+and Opus (for the ones he's actually stuck on) selectable in Settings.
+
+### 8.1 Security consequence, handled
+
+Model output is rendered as markdown through `{@html}`, in a page whose IndexedDB
+holds a GitHub token and an Anthropic key. `src/lib/markdown.ts` therefore escapes raw
+HTML from *every* source and filters link and image hrefs to navigational schemes —
+one always-safe path rather than a `trusted` flag someone eventually forgets to pass.
+`scripts/test-markdown.mjs` asserts it against the obvious payloads and against the
+lesson formatting that has to keep working.
+
+---
+
+## 8.5 Progress sync (built 2026-09-02)
+
+Exporting JSON by hand is the kind of friction that quietly ends a daily habit. The
+constraint: free, no server, and nothing new to run.
+
+**Chosen: a secret GitHub Gist**, written directly from the phone.
+
+- `api.github.com` sends `Access-Control-Allow-Origin: *` (verified), so a static page
+  can `PATCH` it with no proxy.
+- Auth is a **fine-grained PAT with one permission: Gists, read and write**. It cannot
+  read a repo, push code, or open an issue, and it's revocable from one page. That's
+  the trade for having no backend: a narrow credential on the device instead of a
+  broad one on a machine you'd have to keep running.
+- The gist is secret, versioned, and diffable — and it's readable from the laptop,
+  so a session there can see what happened on the phone.
+
+**Rejected**
+
+- *Telegram Bot API.* Also CORS-open, but a bot cannot read its own chat history, so
+  "restore onto a wiped phone" has no clean path (the pinned-message trick caps at
+  4096 characters and is fragile). The 4 GB of Saved Messages belongs to the user
+  account, which bots can't touch. And a bot token is a far broader capability than
+  gists-only.
+- *Committing `progress.json` to this repo.* Needs `contents: write` — a much wider
+  token — and turns a learning log into commit-history noise.
+- *A third-party free tier.* Another account, another expiry, dead in two years.
+
+**Merge, not last-write-wins.** There's no server to arbitrate, so `src/lib/merge.ts`
+is a pure function both devices would compute identically. Every field takes the
+more-advanced of the two values or keeps both; opening the laptop can never erase a
+session done on the phone that morning. Specifics worth knowing:
+
+- **XP is derived from the day records, not merged.** An accumulator can't merge:
+  summing double-counts a shared session, maxing loses one. The days are the ledger.
+- **The streak is chosen, not merged** — it's history neither record stores. The
+  device that acted most recently wins the count, so a phone left in a drawer on a
+  12-day streak can't resurrect it a week after it broke. `longest` takes the max,
+  because that's what a high-water mark means.
+- **Settings and `loadedWeeks` stay local.** Syncing theme would flip the laptop when
+  he switches the phone to dark at night; syncing `loadedWeeks` would convince a fresh
+  install it already holds content it hasn't downloaded.
+- **Two different notes on the same day are both kept**, separated by a rule. Dropping
+  one silently is the worst outcome available.
+- **Reset switches sync off** rather than pushing an empty record over the backup a
+  few seconds later. Reconnecting afterwards pulls it back, which makes deleting the
+  gist the deliberate act it ought to be.
+
+Sync runs on launch, on returning to the foreground, and a few seconds after any
+change; a pending push is flushed when the app is backgrounded, which on iOS is the
+last moment it's reliably allowed to run. `scripts/test-merge.mjs` covers it.
+
+The JSON export in §3.5 stays. It's the copy that doesn't depend on GitHub.
 
 ---
 
@@ -457,7 +521,7 @@ clean swap at this stage.
 
 ---
 
-## 11. Decisions (settled 2026-09-01)
+## 11. Decisions (settled 2026-09-01, extended 2026-09-02)
 
 1. **Content authoring** — two files per day, `.md` + `.quiz.yaml`, compiled to week
    JSON by `app/scripts/build-content.mjs`. The answer key stays out of the file he'd
@@ -470,6 +534,13 @@ clean swap at this stage.
 4. **Peek-ahead** — days ahead locked by default, with an explicit "Let me jump ahead"
    toggle on the map and in Settings. Gentle, not a nanny.
 5. **v1 scope** — chat held to v2. Everything in §3.1–3.5 is in and built.
+6. **Sync transport (2026-09-02)** — GitHub gist over Telegram, for the reasons in
+   §8.5. He raised Telegram explicitly; the blocker is that bots can't read their own
+   history, which makes restore-after-wipe unworkable.
+7. **Quiz option order (2026-09-02)** — decided by the build, not the author. Writing
+   the right answer first is the natural way to author a key, and it made every
+   correct answer option A. `build-content.mjs` now shuffles deterministically per
+   question, re-salting if a whole day lands its answers in the same slot.
 
 ### Where the build knowingly departs from this doc
 
@@ -484,11 +555,16 @@ clean swap at this stage.
 - **Streak freezes cap at 2** and are earned every 7th day. §4 said "earn one every 7
   days" without a ceiling; uncapped, a long run banks enough freezes to make the
   streak meaningless.
-- **A test file exists** (`app/scripts/test-streak.mjs`, `npm test`). The streak rules
+- **The Mentor tab is always visible**, not revealed once a key is set as §8 said. A
+  feature you have to already know about to find is a feature nobody finds; the tab
+  shows a setup card explaining what it does, what it refuses to do, and that it's the
+  one part of the app that costs money.
+- **Test files exist** (`app/scripts/test-*.mjs`, `npm test`). The streak rules
   are the one piece of logic here subtle enough — freezes, gaps, DST-proof date maths
   — to fail silently and only be noticed by losing a real 40-day run. Node's own
-  runner, no framework, no new dependencies. It is not a general testing setup, and it
-  does not pre-empt milestone 09.
+  runner, no framework, no new dependencies. Merge and markdown-escaping joined it in
+  v2 for the same reason: both fail silently and both fail expensively. It is not a
+  general testing setup, and it does not pre-empt milestone 09.
 
 ## 12. Build plan
 
@@ -497,7 +573,8 @@ clean swap at this stage.
   streak + XP + badges, update mechanism, offline, both themes, installable. ✅ built
   2026-09-01. Week 1 ships with Day 1 written and Days 2–8 rostered as locked steps —
   lessons stay written one at a time, calibrated on how the last one went, per
-  `README.md`. ← we are here
-- **v2** — mentor chat (§8).
+  `README.md`.
+- **v2** — mentor chat (§8) and progress sync (§8.5). ✅ built 2026-09-02.
+  ← we are here
 - **v3 (optional)** — richer spaced-repetition review, more badges, note→PROGRESS.md
   export polish.

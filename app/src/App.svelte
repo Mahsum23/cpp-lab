@@ -6,6 +6,7 @@
   import WeekMap from './screens/WeekMap.svelte';
   import Stats from './screens/Stats.svelte';
   import Settings from './screens/Settings.svelte';
+  import Mentor from './screens/Mentor.svelte';
   import Session from './screens/Session.svelte';
 
   const route = $derived(router.route);
@@ -15,7 +16,16 @@
   // that standalone iOS doesn't reliably give us anyway.
   $effect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && app.ready) void app.refresh();
+      if (!app.ready) return;
+      if (document.visibilityState === 'visible') {
+        void app.refresh();
+        // Pick up anything done on the other device while this one was away.
+        void app.syncNow();
+      } else {
+        // Backgrounding is the last moment iOS reliably lets us run, so a pending
+        // debounced push gets sent now rather than being lost with the process.
+        void app.flushCloud();
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
@@ -29,6 +39,8 @@
     <WeekMap />
   {:else if route.name === 'stats'}
     <Stats />
+  {:else if route.name === 'mentor'}
+    <Mentor />
   {:else if route.name === 'settings'}
     <Settings />
   {:else}
