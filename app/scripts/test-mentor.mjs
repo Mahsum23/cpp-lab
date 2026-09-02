@@ -94,7 +94,12 @@ ok('429 explains the free-tier limit in plain words', err instanceof MentorError
 
 stub({ status: 404, body: { error: { message: 'models/gone is not found' } } });
 err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'gone', system: 's', messages: thread })).catch((e) => e);
-ok('404 points at the model picker, not the key', /not available to your key/i.test(err.message), err.message);
+ok('404 on a listed model points at regenerating the key first', /aistudio\.google\.com\/apikey/i.test(err.message), err.message);
+ok('404 still offers the model picker as a fallback', /pick a different one in Settings/i.test(err.message), err.message);
+
+stub({ status: 401, body: { error: { message: 'API_KEY_SERVICE_BLOCKED' } } });
+err = await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread })).catch((e) => e);
+ok('401 explains the Standard-key rejection, not a garbled passthrough', /aistudio\.google\.com\/apikey/i.test(err.message), err.message);
 
 stub({ status: 400, body: { error: { message: 'API key not valid. Please pass a valid API key.' } } });
 err = await collect(streamReply({ provider: 'gemini', key: 'bad', model: 'm', system: 's', messages: thread })).catch((e) => e);

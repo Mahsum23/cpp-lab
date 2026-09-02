@@ -213,9 +213,23 @@ async function* sseFrames(res: Response): AsyncGenerator<string> {
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
+// Google spent 2026 retiring "Standard" API keys in favour of "Authorization" keys
+// (bound to a Cloud service account), rejecting Standard keys on generateContent
+// outright from September 2026. listModels stays a lighter, less-gated call that
+// still answers for an old key, so the failure only shows up once you actually try
+// to talk to it — as a 401 (API_KEY_SERVICE_BLOCKED / ACCESS_TOKEN_TYPE_UNSUPPORTED)
+// or, confusingly, as a 404 on a model that was just in the fetched list. New keys
+// minted from AI Studio are auto-issued as the working type, so regenerating one is
+// the actual fix far more often than it looks like from the error text alone.
+const REGEN_KEY_HINT =
+  'Generate a fresh key at aistudio.google.com/apikey rather than reusing an old one — Google phased out the old "Standard" key type for this call during 2026, and new keys are issued as the type that still works.';
+
 function explainGemini(status: number, message: string): string {
   if (status === 400 && /api.?key/i.test(message)) {
     return 'Google rejected that key. Copy it again from aistudio.google.com/apikey — it starts with "AIza".';
+  }
+  if (status === 401) {
+    return `Google is blocking that key at the auth layer, before it even looks at the model. ${REGEN_KEY_HINT}`;
   }
   if (status === 403) {
     return message.includes('SERVICE_DISABLED') || /not been used|disabled/i.test(message)
@@ -223,7 +237,12 @@ function explainGemini(status: number, message: string): string {
       : 'Google refused the request. Check the key is still active.';
   }
   if (status === 404) {
-    return 'That model is not available to your key. Pick another one in Settings — the list is fetched from Google, so a working one is in there.';
+    // The model came from Google's own list a moment ago, so a 404 here is more often
+    // the key than a genuinely missing model — but it can be either, so say both.
+    return (
+      "Google says that model doesn't exist for this key — odd, since it was just in the fetched list. That combination usually means the key, not the model: " +
+      `${REGEN_KEY_HINT} If a fresh key still 404s on this exact model, then pick a different one in Settings.`
+    );
   }
   if (status === 429) {
     return "Gemini's free tier is rate-limited, and you've hit it. Wait a minute, or switch to a Flash model — its limits are much higher.";
