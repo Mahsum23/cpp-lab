@@ -1,18 +1,43 @@
 # cpp-lab
 
-A deliberate-practice repo for going from mid-level to senior C++ engineer.
-Not a tutorial collection. Every milestone produces something that runs.
+A deliberate-practice curriculum for the layer underneath the C++ you already write:
+sockets, concurrency, build systems, testing, CI. Not a tutorial collection — every
+milestone produces something that runs, and you write all of it yourself.
 
-## How this works
+**Who it's for.** You're comfortable in C++ and want the systems knowledge that usually
+gets absorbed by osmosis, or never. You don't need prior socket, CMake or CI
+experience; that's the point. Linux (or WSL/macOS) and a C++20 compiler are assumed.
 
-- Each milestone lives in `milestones/NN-name/` and has its own `README.md` with the task spec.
-- Milestone specs are written **one at a time**, not all upfront — each one is calibrated
-  based on how the previous one actually went.
-- Within a milestone, all of its days are written up front, so progress never waits on
-  asking for the next lesson. Pacing is the app's job (one session a day), not a
-  side effect of which files happen to exist.
-- Every milestone ends with two things: a code review, and a teach-back.
-- `PROGRESS.md` is the log. Update it as you go.
+**How it's structured.** Milestones live in `milestones/NN-name/`, each with a spec in
+its `README.md` and a set of daily lessons in `lessons/`. A lesson is roughly 20–30
+minutes: theory, a five-question quiz, a small coding task, and a teach-back where you
+explain the mechanism back in your own words. A milestone is 4–6 hours spread over
+those sessions, and ends with a code review and a teach-back.
+
+Lessons are written a milestone at a time, so all of a milestone's days are available at
+once; later milestones get written as the earlier ones land. `PROGRESS.md` is the running
+log — what got done, and what was confusing.
+
+## The app
+
+The curriculum is also an installable PWA that serves one day at a time, tracks streaks
+and progress, and syncs between devices through a private GitHub gist:
+
+```bash
+cd app
+npm install
+npm run dev        # http://localhost:5173
+```
+
+`app/README.md` covers deploying it to GitHub Pages and installing it on a phone.
+The lesson files in `milestones/` are the source of truth — `npm run content` compiles
+them into the app's JSON, so editing a lesson and rebuilding is all it takes to change
+what the app serves.
+
+The app also has an optional in-app mentor and an examiner that grades the teach-back,
+both of which call a model API directly from the device with your own key (Gemini's free
+tier or an Anthropic key — Settings explains the cost of each). It works without a key;
+you just lose those two features.
 
 ## Operating rules
 
@@ -22,8 +47,9 @@ Not a tutorial collection. Every milestone produces something that runs.
   actually stuck, not after you're mildly uncomfortable.
 
 **On AI use (this matters):**
-The research is clear that delegating the struggle to an assistant measurably erodes
-exactly the skills this repo exists to build. So:
+The research on this is consistent: delegating the struggle to an assistant measurably
+erodes exactly the skills this repo exists to build. The in-app mentor is built to
+refuse the implementation for this reason. So:
 - Write the first version yourself, always. Even if it's bad.
 - Ask for concepts, API semantics, and "why does this behave this way" freely.
 - Do NOT ask for the implementation before you've attempted it.

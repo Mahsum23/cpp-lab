@@ -52,6 +52,10 @@ misremember afterwards.
 ### The call itself
 
 ```cpp
+int socket(int domain, int type, int protocol);
+```
+
+```cpp
 int fd = socket(AF_INET, SOCK_STREAM, 0);
 ```
 
@@ -68,8 +72,22 @@ Three arguments, three questions:
   explicitly only in exotic cases, like raw ICMP sockets.
 
 On success you get a small positive int. On failure, `-1`, with `errno` set — the
-POSIX pattern of "sentinel return value, look in `errno` for the reason", which is why
-`strerror(errno)` will appear in every program in this milestone. `errno` predates
+POSIX pattern of "sentinel return value, look in `errno` for the reason". Turning that
+number into something readable is one call:
+
+```cpp
+char *strerror(int errnum);
+```
+
+```cpp
+int fd = socket(AF_INET, SOCK_STREAM, 0);
+if (fd < 0) {
+    std::fprintf(stderr, "socket: %s\n", std::strerror(errno));  // e.g. "Too many open files"
+    return 1;
+}
+```
+
+which is why `strerror(errno)` will appear in every program in this milestone. `errno` predates
 sockets by a decade; it's a 1979-era mechanism that every syscall API since has been
 bolted onto.
 
@@ -87,8 +105,16 @@ launch — so a server that shells out to a helper hands that helper a live copy
 listening socket. That leaks a resource, and worse, keeps the port occupied by a
 process that has no idea it owns it.
 
-You can also set this after the fact with `fcntl(fd, F_SETFD, FD_CLOEXEC)`, and that is
-what people did for years. The reason the flag was added directly to `socket()` in 2008
+You can also set this after the fact, which is what people did for years:
+
+```cpp
+int fcntl(int fd, int cmd, ... /* arg */ );
+```
+
+```cpp
+fcntl(fd, F_SETFD, FD_CLOEXEC);   // same effect, one syscall later
+```
+ The reason the flag was added directly to `socket()` in 2008
 is that the two-call version has a race: between `socket()` returning and `fcntl()`
 running, another thread can `fork()` and `exec()`, and the fd escapes anyway. A race
 window measured in nanoseconds, closed by moving one bit into the original call.
@@ -127,7 +153,7 @@ Write a program that:
 1. Calls `socket(AF_INET, SOCK_STREAM, 0)`
 2. Checks the return value — on failure, print `strerror(errno)` and exit non-zero
 3. On success, prints the fd
-4. Calls `close(fd)` before exiting
+4. Calls `close(fd)` before exiting — `int close(int fd);`, and it can fail, so check it
 
 That's the whole program. No address, no `bind()`, no network activity yet.
 

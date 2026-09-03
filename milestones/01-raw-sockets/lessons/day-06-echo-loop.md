@@ -82,8 +82,21 @@ client hangs up rudely. It looks like a crash with no cause.
 Three fixes, any of which works:
 
 - pass **`MSG_NOSIGNAL`** to each `send()` — the signal is suppressed and you get `-1`
-  with `EPIPE` instead, which is what you actually wanted
-- `signal(SIGPIPE, SIG_IGN)` once at startup, same effect process-wide
+  with `EPIPE` instead, which is what you actually wanted:
+
+  ```cpp
+  ssize_t k = send(conn, buf, n, MSG_NOSIGNAL);
+  if (k < 0 && errno == EPIPE) { /* peer is gone — same path as recv() == 0 */ }
+  ```
+- ignore the signal once at startup, same effect process-wide:
+
+  ```cpp
+  void (*signal(int sig, void (*handler)(int)))(int);   // yes, really
+  ```
+
+  ```cpp
+  std::signal(SIGPIPE, SIG_IGN);   // one line, covers every send() in the process
+  ```
 - set `SO_NOSIGPIPE` on the socket (BSD and macOS; not Linux)
 
 Handling it as an ordinary error is always right. `EPIPE` means "this connection is
@@ -109,11 +122,12 @@ the receiver is holding the ACK hoping for data to attach it to. Nobody moves un
 delayed-ACK timer expires. The result is a mysterious, wildly reproducible ~40 ms stall
 per exchange that shows up in production and vanishes under a profiler.
 
-The fix is `TCP_NODELAY`, which turns Nagle off:
+The fix is `TCP_NODELAY`, which turns Nagle off — the same `setsockopt()` from Day 3, at
+a different level:
 
 ```cpp
 int yes = 1;
-setsockopt(conn, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+setsockopt(conn, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));  // note: IPPROTO_TCP, not SOL_SOCKET
 ```
 
 Essentially every RPC framework, database driver and game server sets it. Note it goes on

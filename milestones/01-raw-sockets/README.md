@@ -6,11 +6,11 @@
 
 ## Why this exists
 
-You already await async I/O at work. What you haven't done is see what's underneath it.
-Asio will hide `accept()`, `recv()`, and the entire file-descriptor model behind
-`async_read` and coroutine suspension. If you go straight to Asio, you'll be learning
-the library and the operating system at the same time, and you'll end up trusting a
-black box.
+Most C++ networking gets done through a library — Asio, Qt, gRPC, something in-house.
+Any of them will hide `accept()`, `recv()`, and the entire file-descriptor model behind
+a friendlier API. Start there and you end up learning the library and the operating
+system at the same time, which usually means trusting a black box for the parts you
+can't yet distinguish.
 
 Build the black box first. Badly, blockingly, by hand. Then Asio becomes a convenience
 rather than a mystery.

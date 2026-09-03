@@ -149,7 +149,7 @@ questions:
           This is the whole point of Day 1. Asio owns an event loop (epoll on Linux,
           kqueue on BSD, IOCP on Windows) that watches the fd and resumes your coroutine
           once the kernel says data has arrived — then does the ordinary recv(). The
-          abstraction you already use at work is a scheduler bolted onto the exact calls
+          library you reach for in production is a scheduler bolted onto the exact calls
           in this milestone.
       - text: "It's the same recv(), but Asio runs it on a worker thread so the blocking wait is off your coroutine"
         correct: false

@@ -143,3 +143,23 @@ without the option, restart with it: still refused; first server with it: binds
 immediately. The naive lesson would have had him add the option, still fail, and
 conclude the material was broken. `MSG_PEEK` returning identical bytes twice and
 `SIGPIPE` killing a process with exit status 141 were both verified on the box too.
+
+**Made the shipped content public-facing (2026-09-03).** The curriculum and the app are
+something anyone can clone and install, so nothing shipped assumes one particular
+reader's job any more. The app's mentor and examiner prompts hard-coded a conveyor
+control system, Boost and Qt6, and told the model to skip the coroutine mental model —
+wrong for any other user, and silently so. Both now describe the audience instead: a
+developer fluent in C++ and new to the layer underneath it, with an instruction to
+calibrate if the learner volunteers their background. Milestone 01's "you already await
+async I/O at work" opening, which was in three places, is gone the same way.
+
+CLAUDE.md and PROGRESS.md stay personal — they're the private half, and CLAUDE.md now
+records the boundary explicitly so lessons don't drift back into being addressed to one
+person.
+
+Also applied Day 2's signature rule to the rest of the week: every function a lesson
+teaches now shows its real declaration alongside a snippet calling it — socket, close,
+strerror, fcntl, bind, listen, setsockopt, accept, accept4, inet_ntop, recv, send,
+signal, connect, inet_pton, shutdown. Verified the lot compiles clean under
+`-Wall -Wextra` rather than trusting it by eye, which also confirmed inet_pton's
+return-value trap (1 on success, so a `< 0` check silently accepts malformed input).

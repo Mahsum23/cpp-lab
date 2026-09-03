@@ -5,8 +5,12 @@
 ### Two file descriptors, one connection
 
 ```cpp
+int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+```
+
+```cpp
 sockaddr_in peer{};
-socklen_t len = sizeof(peer);
+socklen_t len = sizeof(peer);          // must be initialised — see below
 int conn = accept(listen_fd, reinterpret_cast<sockaddr *>(&peer), &len);
 ```
 
@@ -60,14 +64,29 @@ be large enough.
 If you don't care who connected, both arguments can be `nullptr`.
 
 To print the address, use `inet_ntop()` and not `inet_ntoa()` — Day 2 covered why the
-older one hands you a pointer into a static buffer that the next call overwrites.
+older one hands you a pointer into a static buffer that the next call overwrites:
+
+```cpp
+const char *inet_ntop(int af, const void *restrict src,
+                       char *restrict dst, socklen_t size);
+```
+
+```cpp
+char ip[INET_ADDRSTRLEN];
+inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+std::printf("client %s:%u\n", ip, ntohs(peer.sin_port));
+```
 
 ### accept4(), and Day 1's race again
 
 Linux has `accept4()`, which takes the same arguments plus a flags word:
 
 ```cpp
-int conn = accept4(listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
+int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
+```
+
+```cpp
+int conn = accept4(listen_fd, nullptr, nullptr, SOCK_CLOEXEC);  // nullptr: don't care who
 ```
 
 This is exactly the `SOCK_CLOEXEC` problem from Day 1, one level up. Close-on-exec is

@@ -33,6 +33,21 @@ exists to break that constraint.
 socket()  ->  connect()  ->  send()/recv()  ->  close()
 ```
 
+```cpp
+int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+```
+
+Identical in shape to `bind()` — same cast, same explicit length — but the address is
+now the *destination* rather than the local endpoint:
+
+```cpp
+sockaddr_in server{};
+server.sin_family = AF_INET;
+server.sin_port = htons(9000);
+inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server));
+```
+
 No `bind()`, no `listen()`, no `accept()`. Just `connect()`, which does three things
 at once:
 
@@ -44,10 +59,16 @@ at once:
    for the server work here unchanged. There is no "client API"; a connected socket is a
    connected socket, and both ends are peers from here on.
 
-`connect()` takes the same `sockaddr *` cast and length as `bind()` — but the address you
-fill in is now the *destination*, not the local endpoint. Use `inet_pton()` to turn
-`"127.0.0.1"` into `sin_addr` (the modern counterpart to Day 4's `inet_ntop`), and
-`htons()` on the port exactly as before.
+`inet_pton()` is the modern counterpart to Day 4's `inet_ntop()` — text to binary rather
+than binary to text:
+
+```cpp
+int inet_pton(int af, const char *restrict src, void *restrict dst);
+```
+
+It returns `1` on success, `0` if the string isn't a valid address in that family, and
+`-1` on a bad family — so the usual `< 0` check silently accepts malformed input, and
+you want `!= 1`.
 
 Its failure modes are worth knowing by name, because each one tells you something
 different:
@@ -70,6 +91,10 @@ a firewall.
 the kernel begins tearing the connection down — both directions at once.
 
 `shutdown()` is more precise, and it's the call people don't learn until they need it:
+
+```cpp
+int shutdown(int sockfd, int how);
+```
 
 ```cpp
 shutdown(fd, SHUT_WR);   // send FIN: "I'm done sending", still able to read

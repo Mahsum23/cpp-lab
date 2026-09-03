@@ -279,12 +279,12 @@ const exam = examinerPrompt({ week, day: { ...day, teachBack: 'Explain why accep
 ok('examiner is told to measure, not teach', /MEASURE, NOT TO TEACH/.test(exam));
 // The whole point of the step: an examiner that answers its own question has destroyed
 // the measurement, so this instruction is load-bearing in a way the mentor's isn't.
-ok('examiner is forbidden from supplying the explanation', /Never supply the explanation you are asking him for/.test(exam));
+ok('examiner is forbidden from supplying the explanation', /Never supply the explanation you are asking (?:them|him) for/.test(exam));
 ok('examiner names the gap rather than filling it', /Name\s+the gap, never fill it/.test(exam));
-ok('examiner rejects jargon restated back at it', /restates jargon/.test(exam));
+ok('examiner rejects jargon restated back at it', /restate(?:s)? jargon/.test(exam));
 ok('examiner carries the question being graded', exam.includes('Explain why accept() returns a new fd.'));
 ok("examiner carries the day's theory to grade against", exam.includes('THEORY'));
-ok('examiner is told not to quote the theory back at him', /Do not quote it back at him/.test(exam));
+ok('examiner is told not to quote the theory back', /Do not quote it back at (?:them|him)/.test(exam));
 ok('examiner with no day context still refuses to teach', /MEASURE, NOT TO TEACH/.test(examinerPrompt(null)));
 
 // The verdict is a machine-readable line the UI acts on; the learner never sees it.

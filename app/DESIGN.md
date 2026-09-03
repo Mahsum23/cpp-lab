@@ -319,7 +319,7 @@ The index the app checks for what weeks exist.
   "id": "week-01",
   "title": "Raw Sockets I",
   "milestone": "01-raw-sockets",
-  "intro": "You already await async I/O at work. Build the black box first…",
+  "intro": "The layer underneath the libraries you already use. Build the black box first…",
   "days": [
     {
       "id": "day-01",
@@ -405,9 +405,9 @@ Goal: ask the mentor a quick question *in context* without leaving the app —
 **Behaviour as built**
 - A **Mentor** tab, fifth in the bar.
 - Every message carries a system prompt = the mentor persona distilled from
-  `CLAUDE.md` (tone, calibration to his actual baseline, and the prime directive:
+  `CLAUDE.md` (tone, calibration to the learner's baseline, and the prime directive:
   *never write the milestone implementation; answer "why" freely; guiding questions
-  when he's stuck*) **plus** the current day's title, theory and task, and the titles
+  when the learner is stuck*) **plus** the current day's title, theory and task, and the titles
   of the days still ahead so it can't get in front of the curriculum.
 - Responses stream token by token. One thread per day, stored locally, resumed on
   return.
@@ -506,7 +506,7 @@ session done on the phone that morning. Specifics worth knowing:
   12-day streak can't resurrect it a week after it broke. `longest` takes the max,
   because that's what a high-water mark means.
 - **Settings and `loadedWeeks` stay local.** Syncing theme would flip the laptop when
-  he switches the phone to dark at night; syncing `loadedWeeks` would convince a fresh
+  someone switches the phone to dark at night; syncing `loadedWeeks` would convince a fresh
   install it already holds content it hasn't downloaded.
 - **Two different notes on the same day are both kept**, separated by a rule. Dropping
   one silently is the worst outcome available.
