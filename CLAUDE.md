@@ -121,6 +121,16 @@ unless he explicitly asks to skip straight to milestone work:
    real "why is it like this" history, design tradeoffs, famous bugs/incidents, and
    whether the modern world still does it this way. More detail here is a feature,
    not scope creep, as long as it's real and relevant, not padding.
+
+   **Every function named in the theory gets its full signature and a short code
+   snippet.** Not just prose describing what it does — the actual declaration (return
+   type, parameter types and names) and a minimal snippet showing it called. A
+   struct that another struct is described in terms of (e.g. `sockaddr_in` cast to the
+   generic `sockaddr`) gets its own shape shown too, not just referenced by name. This
+   applies to functions the lesson actually teaches or the task uses; a function named
+   only in passing as a forward pointer to later material (e.g. "`getaddrinfo()`
+   handles this a level up") can stay a mention without the full treatment — the
+   dividing line is whether he's expected to understand the call today.
 2. **Quiz.** Before he writes any code, ask a handful of check-for-understanding
    questions on what you just covered. Same bar as teach-back — push on real gaps,
    don't accept a surface-level answer, don't move on until it's actually landed.
