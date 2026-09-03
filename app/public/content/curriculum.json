@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "title": "cpp-lab",
-  "generatedAt": "2026-09-03T11:00:14.996Z",
+  "generatedAt": "2026-09-03T11:30:01.097Z",
   "weeks": [
     {
       "id": "week-01",
@@ -10,7 +10,7 @@
       "days": 8,
       "availableDays": 8,
       "url": "content/weeks/week-01.json",
-      "contentHash": "sha256:359cd0a9a9bc8738226b6bc5cf7c9909",
+      "contentHash": "sha256:c41fbfc53208109f5b774dd3662c59e9",
       "available": true
     }
   ]

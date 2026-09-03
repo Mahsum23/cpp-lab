@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, ModelGoneError } = await import(file);
+const { streamReply, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, ModelGoneError, normalizeKey } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -298,6 +298,21 @@ ok('an invented verdict is not accepted', parseVerdict('[[VERDICT: brilliant]]')
 
 ok('the marker is stripped before display', stripVerdict('Nice.\n[[VERDICT: solid]]') === 'Nice.');
 ok('stripping leaves ordinary prose alone', stripVerdict('No marker here.') === 'No marker here.');
+
+// --- pasted keys ------------------------------------------------------------
+
+console.log('\n— key normalisation —');
+// Pasting the key is the one manual setup step, so it has to tolerate what a real
+// paste drags along. Every one of these otherwise 400s and reads as "my key is wrong".
+ok('a clean key is untouched', normalizeKey('AQ.Ab8dEf') === 'AQ.Ab8dEf');
+ok('trailing newline from a code block is stripped', normalizeKey('AIzaSyAbc123\n') === 'AIzaSyAbc123');
+ok('surrounding spaces go', normalizeKey('   AIzaSyAbc123  ') === 'AIzaSyAbc123');
+ok('straight quotes go', normalizeKey('"AIzaSyAbc123"') === 'AIzaSyAbc123');
+ok('smart quotes from a notes app go', normalizeKey('\u201cAIzaSyAbc123\u201d') === 'AIzaSyAbc123');
+ok('a copied env line loses its prefix', normalizeKey('GEMINI_API_KEY=AIzaSyAbc123') === 'AIzaSyAbc123');
+ok('an exported env line does too', normalizeKey('export API_KEY="AIzaSyAbc123"') === 'AIzaSyAbc123');
+ok('an internal space (mobile line-wrap) is removed', normalizeKey('AIzaSy Abc123') === 'AIzaSyAbc123');
+ok('an empty paste stays empty', normalizeKey('   ') === '');
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all mentor cases pass');
 process.exit(fails ? 1 : 0);

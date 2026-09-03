@@ -12,7 +12,7 @@ import {
 } from './types';
 import * as store from './storage';
 import * as cloud from './cloud';
-import { listModels, PROVIDERS, type ModelChoice } from './mentor';
+import { listModels, normalizeKey, PROVIDERS, type ModelChoice } from './mentor';
 import { mergeProgress } from './merge';
 import { fetchCurriculum, fetchWeek, SchemaTooNewError } from './content';
 import { completeDay as advanceStreak, displayedStreak, atRisk } from './streak';
@@ -462,7 +462,7 @@ class AppStore {
   }
 
   async setMentorKey(provider: MentorProvider, key: string | null) {
-    const value = key?.trim() || null;
+    const value = key ? normalizeKey(key) || null : null;
     this.secrets =
       provider === 'gemini'
         ? { ...this.secrets, geminiKey: value }

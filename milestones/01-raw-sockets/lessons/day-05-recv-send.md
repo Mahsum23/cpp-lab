@@ -130,6 +130,27 @@ larger than your buffer to see a short read:
 $ head -c 100000 /dev/urandom | base64 | nc 127.0.0.1 9000
 ```
 
+**Then watch the kernel hold bytes you haven't asked for yet.** `MSG_PEEK` shows the
+buffer exists; this shows how much is in it. Temporarily comment out your `recv()` so
+the server accepts the connection and then just sits there, and send it something
+substantial:
+
+```console
+$ head -c 200000 /dev/zero | tr '\0' 'x' | nc 127.0.0.1 9000
+```
+
+While that's running, in a third terminal:
+
+```console
+$ ss -tan | grep 9000
+```
+
+The server's `ESTAB` row will show a large `Recv-Q` — bytes the kernel accepted, ACKed
+and is holding for a process that has never called `recv()`. (No `ss`? The same numbers
+are in `/proc/net/tcp`, in hex, in the `tx_queue:rx_queue` column.) Then put the
+`recv()` back, run it again, and watch `Recv-Q` stay near zero because you're draining
+it. That difference is the entire point of today.
+
 - File: `src/main.cpp`
 - Compile: `g++ -std=c++20 -Wall -Wextra -o day5 src/main.cpp`
 

@@ -243,6 +243,30 @@ export function examinerPrompt(context: { week: Week; day: Day } | null): string
   return parts.join('\n');
 }
 
+/**
+ * Clean up a pasted key.
+ *
+ * The one manual step in setting this up is pasting a key, and a paste off a phone
+ * arrives with whatever came along for the ride: a trailing newline from a code block,
+ * smart quotes from a notes app, a leading "key=" from a copied env line. All of those
+ * produce a 400 from the provider and look like "my key is wrong", so strip them here
+ * rather than making someone hunt for an invisible space.
+ */
+const QUOTES = /^["'\u201c\u201d\u2018\u2019]+|["'\u201c\u201d\u2018\u2019]+$/g;
+const ENV_PREFIX = /^(?:export\s+)?[A-Z_]*(?:API_)?KEY\s*[=:]\s*/i;
+
+export function normalizeKey(raw: string): string {
+  // Quotes twice, deliberately: `export API_KEY="AIza…"` has the prefix inside the
+  // quotes, so stripping either one first leaves the other stranded.
+  return raw
+    .trim()
+    .replace(QUOTES, '')
+    .replace(ENV_PREFIX, '')
+    .replace(QUOTES, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
 export class MentorError extends Error {}
 
 /** A 404 from the provider: the selected model is gone, so the stored choice is stale. */
