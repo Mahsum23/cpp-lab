@@ -13,9 +13,9 @@ id: week-01
 title: Raw Sockets
 milestone: 01-raw-sockets
 intro: >
-  You already await async I/O at work. What you haven't done is see what's underneath
-  it. Eight sessions, and by the last one you're assembling pieces you've already
-  built — not writing an echo server from a blank page.
+  If you write C++ but have never opened a socket by hand, this is the layer underneath
+  the libraries you already use. Eight sessions, and by the last one you're assembling
+  pieces you've already built — not writing an echo server from a blank page.
 
 days:
   - id: day-01

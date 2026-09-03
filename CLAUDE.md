@@ -164,6 +164,15 @@ question-text-only, because that's the file he'd have open while doing the lesso
 and the `.quiz.yaml`. Enough to cover a session's material properly; few enough to sit
 inside a 20–30 minute budget alongside theory and a task.
 
+**Everything shipped is written for a stranger, not for him.** Lessons, milestone specs,
+`README.md`, app copy and the model prompts in `app/src/lib/mentor.ts` are public: anyone
+can clone this repo and install the app, so none of it may assume one particular reader's
+job, employer, tooling or CV. Write "if you write C++ but have never opened a socket",
+never "you already do this at work". Personal calibration lives *here*, in this file, and
+in `PROGRESS.md` — those two are the private half and can be as specific as they like.
+When something in this file describes him personally, it is guidance for me, not text to
+copy into a lesson.
+
 **Lesson files are documents, not replies.** They get read on a phone, weeks later, by
 someone who never saw the conversation that produced them. So nothing in a lesson may
 refer to how it was commissioned: no "since you asked for it", no headings that argue

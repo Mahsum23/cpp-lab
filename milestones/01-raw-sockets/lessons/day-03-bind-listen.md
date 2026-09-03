@@ -8,9 +8,16 @@ Day 1 gave you a socket with no address. Day 2 built the address. Today they mee
 then a second call turns the result into something that can receive connections.
 
 ```cpp
-bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+int listen(int sockfd, int backlog);
+```
+
+```cpp
+bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));  // addr is Day 2's sockaddr_in
 listen(fd, 128);
 ```
+
+Both return `0` on success and `-1` with `errno` set on failure.
 
 `bind()` is the claim: *this socket owns port 9000 on these interfaces.* From the moment
 it returns, no other socket can hold that same (address, port) pair — the kernel keeps a
@@ -96,8 +103,16 @@ The fix is a socket option, set **before** `bind()` — it changes what `bind()`
 allowed to do, so setting it afterwards accomplishes nothing:
 
 ```cpp
+int setsockopt(int sockfd, int level, int optname,
+               const void *optval, socklen_t optlen);
+```
+
+The option's value is passed as a `void *` plus a length, because options are variously
+ints, structs and timevals; for the boolean ones you pass the address of an `int`:
+
+```cpp
 int yes = 1;
-setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));  // before bind()
 ```
 
 Now the part that will otherwise waste an hour of your evening. On Linux, **both** the

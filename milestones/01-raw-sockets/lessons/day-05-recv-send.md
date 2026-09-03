@@ -5,8 +5,18 @@
 ### The return value is a count, not a message
 
 ```cpp
-ssize_t n = recv(fd, buf, sizeof(buf), 0);
+ssize_t recv(int sockfd, void *buf, size_t len, int flags);
+ssize_t send(int sockfd, const void *buf, size_t len, int flags);
 ```
+
+```cpp
+char buf[1024];
+ssize_t n = recv(fd, buf, sizeof(buf), 0);   // 0 = no flags
+```
+
+Note the return type: `ssize_t` is *signed*, precisely so `-1` can mean failure — which
+is why assigning it straight into a `size_t` turns an error into a gigantic length, a
+bug this API invites and `-Wconversion` catches.
 
 `recv()` returns the number of bytes it put in your buffer. Not "a message", not "the
 thing the client sent" — a count of bytes, and it can be smaller than what you asked for
@@ -69,9 +79,18 @@ Two other flags worth knowing exist:
 
 - **`MSG_WAITALL`** — don't return until the full requested count has arrived (or the
   connection ends). It turns the short-read problem off for a fixed-size read, and it's
-  the right tool when you genuinely know the length in advance.
+  the right tool when you genuinely know the length in advance:
+
+  ```cpp
+  ssize_t n = recv(fd, header, 8, MSG_WAITALL);   // all 8 bytes, or the connection ended
+  ```
 - **`MSG_DONTWAIT`** — make just this one call non-blocking, returning `EAGAIN` rather
-  than sleeping. Per-call, so you don't have to change the socket's mode.
+  than sleeping. Per-call, so you don't have to change the socket's mode:
+
+  ```cpp
+  ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) { /* nothing there right now */ }
+  ```
 
 ### Why a short read is normal, not an error
 
