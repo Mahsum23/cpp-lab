@@ -1,0 +1,177 @@
+# Answer key for day-02. Deliberately NOT in the .md — that's the file he'd have open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+#
+# Option order here is authoring order and means nothing: build-content.mjs shuffles
+# each question deterministically, so writing the correct one first is fine and the
+# learner still can't pattern-match on position.
+questions:
+  - id: q1
+    prompt: What problem does network byte order actually solve — what goes wrong without it?
+    options:
+      - text: "Different CPUs store multi-byte integers in different orders; without an agreed wire order, two machines misread each other's numbers"
+        correct: true
+        why: >
+          Little-endian and big-endian are both legitimate, and neither machine is
+          "wrong" internally. The problem only exists at the boundary: if a
+          little-endian sender puts its native byte order straight on the wire, a
+          big-endian receiver reads the same bytes back as a different number. Network
+          byte order is just an agreed convention (big-endian) that both sides convert
+          to and from, so the bytes on the wire mean the same thing regardless of
+          either machine's internals.
+      - text: "It compresses multi-byte values so addresses and ports take fewer bytes on the wire"
+        correct: false
+        why: >
+          Byte order and size are unrelated. A 16-bit port is 2 bytes in host order and
+          2 bytes in network order — htons() rearranges which byte goes where, it
+          doesn't drop or pack anything.
+      - text: "It stops a malicious host from spoofing another machine's IP address"
+        correct: false
+        why: >
+          That's a routing and authentication problem, solved (imperfectly) by things
+          entirely outside this struct — ingress filtering, TLS, etc. Byte order just
+          makes sure a correctly-sent number is read correctly; it has no opinion on
+          whether the sender is who it claims to be.
+      - text: "It lets the same sockaddr_in struct work for both IPv4 and IPv6 connections"
+        correct: false
+        why: >
+          That's a different problem, solved a different way — sockaddr_in6 is a
+          separate, larger struct, and the generic sockaddr cast (with sin_zero padding
+          it to match) is what lets one pointer type stand in for either. Byte order
+          doesn't touch which address family a struct represents.
+
+  - id: q2
+    prompt: >
+      sin_zero is 8 bytes of padding in sockaddr_in. What is it padding *to*, and why
+      does that matter for a function like bind()?
+    options:
+      - text: "It pads sockaddr_in to the same size as the generic sockaddr struct, which is the type bind() actually takes"
+        correct: true
+        why: >
+          C has no inheritance, so 1983's answer to "one function, many address types"
+          was to make every family-specific struct the same size as the generic one and
+          cast pointers between them. bind()/connect()/accept() all take a
+          `sockaddr *`; sin_zero is what makes that cast harmless for sockaddr_in
+          specifically. It carries no data — you never read it, only zero it.
+      - text: "It pads the struct to a multiple of 8 bytes so the CPU can access it with aligned loads"
+        correct: false
+        why: >
+          A plausible-sounding reason, since padding often is about alignment — but not
+          this padding. sin_zero's size was chosen to match sockaddr's size, not any
+          CPU alignment boundary; the struct isn't defined in terms of a target
+          architecture's word size at all.
+      - text: "It reserves space for IPv6 fields so old code keeps working when a socket upgrades to IPv6"
+        correct: false
+        why: >
+          sockaddr_in never becomes an IPv6 address — sockaddr_in6 is a wholly separate
+          struct with its own (larger) size, used with AF_INET6. Nothing about
+          sin_zero anticipates or enables that; there's no upgrade path through it.
+      - text: "It's memory the kernel reads as behavior flags, so leaving it nonzero can silently change how bind() behaves"
+        correct: false
+        why: >
+          The kernel doesn't read sin_zero as flags for AF_INET at all — it's ignored
+          content, not a hidden control channel. You zero it as a hygiene habit
+          (uninitialized stack memory is not something to hand the kernel), not because
+          leaving garbage in it changes behavior.
+
+  - id: q3
+    prompt: >
+      On a big-endian machine, what does htons() actually do to its argument, and why
+      is that a dangerous thing to build a testing habit around?
+    options:
+      - text: "It returns the value unchanged, because native order already equals network order — so forgetting to call it can look correct on that one architecture"
+        correct: true
+        why: >
+          htons() only has work to do when host order differs from network order. On a
+          big-endian box those already match, so a build that skips the conversion
+          entirely can still produce byte-for-byte correct output there — and then
+          corrupt every port and address the moment the same code runs on a
+          little-endian machine. Testing on one architecture doesn't prove the
+          conversion is actually happening.
+      - text: "It still swaps the bytes, just using the opposite swap direction from a little-endian machine"
+        correct: false
+        why: >
+          There's nothing to swap: if host order and network order are already the
+          same sequence of bytes, a "swap" would introduce a difference where none is
+          needed. htons() is defined to be a no-op precisely when the two orders agree.
+      - text: "It's undefined behavior on big-endian machines, since the macro assumes a little-endian host"
+        correct: false
+        why: >
+          htons() is portable and well-defined on every architecture — that's the
+          entire point of using it instead of hand-rolling a byte swap. It behaves
+          correctly (as a no-op) on big-endian and correctly (as a real swap) on
+          little-endian; nothing about calling it is ever undefined.
+      - text: "It converts the integer to a floating-point representation so it survives cross-platform math"
+        correct: false
+        why: >
+          Byte order and numeric representation (integer vs. float) are unrelated
+          concerns. htons() only ever rearranges the bytes of the integer you gave it —
+          it never changes what type of value it is.
+
+  - id: q4
+    prompt: >
+      What does binding to INADDR_ANY actually mean, in terms of what the kernel does
+      differently versus binding to one specific literal address?
+    options:
+      - text: "The kernel accepts connections arriving on any of the machine's network interfaces, instead of only the one owning a specific address"
+        correct: true
+        why: >
+          A machine with a LAN interface and a Wi-Fi interface — or a container's
+          internal bridge alongside its host-facing one — has more than one local
+          address. INADDR_ANY tells the kernel not to filter by which interface traffic
+          arrived on; a literal address restricts the socket to whichever interface
+          actually owns that address.
+      - text: "INADDR_ANY makes the socket accept both UDP and TCP traffic on the same port"
+        correct: false
+        why: >
+          The socket's type (SOCK_STREAM vs. SOCK_DGRAM) was fixed back at socket() and
+          has nothing to do with which address you bind. INADDR_ANY only affects which
+          interfaces' traffic the kernel delivers to this socket, not what protocol it
+          speaks.
+      - text: "INADDR_ANY delays choosing an address until the first connection arrives, then binds to whichever interface it came in on"
+        correct: false
+        why: >
+          bind() takes effect immediately when you call it — there's no deferred
+          binding. INADDR_ANY isn't "decide later," it's "don't filter by local address
+          at all," and the socket is fully bound (to the port, on every interface)
+          before any connection exists.
+      - text: "INADDR_ANY reserves the port on every machine on the local network, not just this one"
+        correct: false
+        why: >
+          Port numbers are a per-machine namespace; there's no mechanism by which
+          binding a socket on one host reserves anything on another. INADDR_ANY only
+          widens which of *this* machine's interfaces the socket listens on.
+
+  - id: q5
+    prompt: >
+      inet_ntoa() returns a char*. What are you not allowed to assume about that
+      pointer, and what breaks if you call it twice before using the first result?
+    options:
+      - text: "It points into a static buffer owned by the library; a second call overwrites it, so both calls end up pointing at the same (second) text"
+        correct: true
+        why: >
+          This is an old, pre-thread-safety-as-a-design-concern API. The buffer is
+          shared and reused on every call, not allocated per-call. `printf("%s %s",
+          inet_ntoa(a), inet_ntoa(b))` is a classic trap — by the time printf reads the
+          first %s, both pointers refer to the same buffer holding b's text, so it
+          prints b twice. inet_ntop(), which writes into a buffer you supply, exists
+          specifically to fix this.
+      - text: "It's heap-allocated per call, and you must free() it yourself or you leak memory"
+        correct: false
+        why: >
+          The opposite problem would be safer than the real one. You don't own this
+          pointer and must never free() it — it's static storage inside the library,
+          reused forever, not something malloc'd on your behalf.
+      - text: "The string is only valid until the socket that produced the address is closed"
+        correct: false
+        why: >
+          The pointer's validity has nothing to do with any socket's lifetime — it's
+          tied entirely to the next call to inet_ntoa() from anywhere in the process,
+          which overwrites the same static buffer regardless of what sockets are open
+          or closed.
+      - text: "It returns a fresh buffer on every call, which makes it fully safe to use from multiple threads at once"
+        correct: false
+        why: >
+          Backwards — the shared static buffer is exactly why inet_ntoa() is not
+          thread-safe. Two threads calling it concurrently can each see a mix of the
+          other's address text, which is precisely the class of bug inet_ntop() was
+          introduced to eliminate.

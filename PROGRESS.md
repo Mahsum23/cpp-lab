@@ -108,3 +108,14 @@ Verified against the live API with a real key, not stubs: `listModels` ranks
 `gemini-flash-latest` first, and a real question streams back a real answer. Also note
 Google intermittently 503s its newest models (`-latest`, `3.8`) while older ones serve
 fine; that path is transient and already reported as such.
+
+**Day 2 written (2026-09-02): addresses and byte order.** `sockaddr_in`, why
+`sin_zero` exists (padding to match the generic `sockaddr` bind()/connect()/accept()
+actually take — C's answer to polymorphism without inheritance), why network byte
+order is a fixed convention rather than "whatever the CPU prefers," and the classic
+footgun where `htons()` is a no-op on a big-endian machine so a missing conversion can
+pass testing on the wrong architecture. Task has him dump a filled `sockaddr_in`
+byte-by-byte and find `9000`'s two bytes (`23 28`) sitting in the struct by hand, plus
+a two-line host-endianness check. Verified the reference program compiles clean under
+`-Wall -Wextra` and every claim in the lesson against its actual output before writing
+it down.
