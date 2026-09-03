@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "title": "cpp-lab",
-  "generatedAt": "2026-09-03T07:08:23.049Z",
+  "generatedAt": "2026-09-03T07:35:58.716Z",
   "weeks": [
     {
       "id": "week-01",
       "title": "Raw Sockets",
       "milestone": "01-raw-sockets",
       "days": 8,
-      "availableDays": 2,
+      "availableDays": 8,
       "url": "content/weeks/week-01.json",
-      "contentHash": "sha256:6c64415b020ed4d09eca9969f96231a2",
+      "contentHash": "sha256:f3266206132eb2c5c6b54068a48b9359",
       "available": true
     }
   ]

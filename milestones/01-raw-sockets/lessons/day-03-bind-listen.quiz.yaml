@@ -1,0 +1,175 @@
+# Answer key for day-03. Deliberately NOT in the .md — that's the file he'd have open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+#
+# Option order here is authoring order and means nothing: build-content.mjs shuffles
+# each question deterministically, so writing the correct one first is fine and the
+# learner still can't pattern-match on position.
+questions:
+  - id: q1
+    prompt: >
+      The backlog argument to listen() is the depth of a queue. A queue of what,
+      exactly — and who puts things in it?
+    options:
+      - text: "Connections the kernel has already completed the handshake for, which you haven't accept()ed yet — the kernel fills it, not your code"
+        correct: true
+        why: >
+          This is the fact that reorders how you think about accept(). The kernel
+          answers SYNs and completes three-way handshakes on your behalf, with your
+          process asleep or busy elsewhere, and stacks the finished connections in this
+          queue. accept() doesn't create a connection; it hands you one the kernel
+          finished earlier. Which is why a client can connect() successfully and even
+          send data to a server that has never heard of it.
+      - text: "Bytes that have arrived on established connections but haven't been read yet"
+        correct: false
+        why: >
+          That's the socket receive buffer, and it's per-connection — each accepted
+          socket has its own. The backlog is counted in whole connections, not bytes,
+          and it belongs to the listening socket rather than to any one client.
+      - text: "The maximum number of clients the server can have connected at one time"
+        correct: false
+        why: >
+          A common misreading, and it would make listen(fd, 5) a five-client server.
+          Once you accept() a connection it leaves the queue entirely, so the backlog
+          limits how many can be *waiting to be accepted* at once, not how many you can
+          serve. Concurrent connection count is bounded by your fd limit, not this.
+      - text: "Half-finished handshakes — clients that sent a SYN but haven't completed the exchange"
+        correct: false
+        why: >
+          Very close, and Linux does keep exactly that queue — but it's the *other* one.
+          The SYN queue holds handshakes in progress; the accept queue holds finished
+          ones, and the backlog argument sizes the accept queue. The split exists partly
+          so SYN floods can't crowd out completed connections.
+
+  - id: q2
+    prompt: >
+      You call listen(fd, 4096) and it returns 0. Why might your actual backlog be far
+      smaller than 4096, and how would you find out what you really got?
+    options:
+      - text: "Linux silently clamps it to net.core.somaxconn; ss -ltn shows the effective value in Send-Q on the LISTEN row"
+        correct: true
+        why: >
+          The call succeeds either way and never warns you, which is what makes this
+          bite. somaxconn defaulted to 128 for most of Linux's history and only became
+          4096 in kernel 5.4 (2019) — so a decade of production servers ran with a
+          backlog two orders of magnitude below the number in their source. On a LISTEN
+          row ss repurposes the queue columns: Send-Q is the backlog you actually got,
+          Recv-Q is how many connections are waiting for you right now.
+      - text: "listen() rounds the backlog down to the nearest power of two"
+        correct: false
+        why: >
+          No rounding rule like that exists — and 4096 is already a power of two, so it
+          wouldn't explain a smaller effective value anyway. The limit is an
+          administrator-set ceiling, not an arithmetic adjustment.
+      - text: "It isn't smaller — a successful listen() means you got exactly the backlog you asked for"
+        correct: false
+        why: >
+          This is the assumption the clamping punishes. A zero return means the call was
+          accepted, not that the argument was honoured; the kernel silently takes
+          min(backlog, somaxconn) and reports success regardless.
+      - text: "The backlog shrinks as connections are accepted, and only refills when the server goes idle"
+        correct: false
+        why: >
+          The backlog is a fixed ceiling on queue depth, not a consumable budget.
+          Accepting a connection frees a slot immediately; nothing has to go idle for
+          the queue to accept new arrivals.
+
+  - id: q3
+    prompt: >
+      Nothing is running on port 9000, but bind() fails with EADDRINUSE. What is
+      holding the port, and why does that mechanism exist at all?
+    options:
+      - text: "A closed connection in TIME_WAIT, held so late packets from the dead connection can't be delivered into a new one reusing the same numbers"
+        correct: true
+        why: >
+          The endpoint that closes first parks in TIME_WAIT for roughly twice the
+          maximum segment lifetime. A connection is identified only by its four-tuple,
+          so if you could immediately rebind and a delayed duplicate packet from the old
+          connection arrived, it would be indistinguishable from data on the new one.
+          TIME_WAIT is the interval that lets those strays die out first.
+      - text: "The listening socket itself is still open, because killing a process doesn't close its sockets"
+        correct: false
+        why: >
+          Process death does close every fd it held, listening sockets included — and a
+          server that only ever listened, with no connections through it, can be killed
+          and restarted immediately with no error at all. It's a closed *connection*
+          that lingers here, never the listener.
+      - text: "The kernel keeps the port reserved for a fixed cooldown after any process that bound it exits"
+        correct: false
+        why: >
+          There's no per-port cooldown tied to process exit. The lingering state belongs
+          to individual connections that were closed, which is why the failure depends
+          on whether a client ever connected and who closed first — not on how the
+          process died.
+      - text: "Another process on the machine grabbed the port in the moment between your two runs"
+        correct: false
+        why: >
+          Possible in principle, but it isn't what's happening in the reproducible case,
+          and you can rule it out by looking: ss -tan (or /proc/net/tcp) will show the
+          port in TIME_WAIT with no owning process rather than LISTEN under someone
+          else's PID.
+
+  - id: q4
+    prompt: >
+      You hit EADDRINUSE, add SO_REUSEADDR, rebuild, and restart — and it fails again.
+      The next restart works. What happened?
+    options:
+      - text: "Both the lingering TIME_WAIT socket and the new one need the flag, and the TIME_WAIT socket came from the previous run, which didn't set it"
+        correct: true
+        why: >
+          Accepted connections inherit their options from the listening socket that
+          produced them, so the flag on the socket holding your port is whatever the
+          *previous* binary set — not what you just compiled. The first restart after
+          adding the option is therefore still refused; from the next run onward the
+          lingering socket carries the flag too and it works forever after. This is a
+          genuinely confusing hour if nobody warns you.
+      - text: "setsockopt() needs a moment to propagate, so the option isn't active on the very first bind after a rebuild"
+        correct: false
+        why: >
+          setsockopt() takes effect synchronously before it returns — there is no
+          propagation delay anywhere in this path. The asymmetry comes from *which
+          socket* carries the flag, not from timing.
+      - text: "The rebuild reset the TIME_WAIT timer, so the second attempt simply waited it out"
+        correct: false
+        why: >
+          Compiling a binary can't touch kernel connection state, and TIME_WAIT runs for
+          a minute or two — far longer than the gap between two restarts. If waiting it
+          out were the explanation, the option would be irrelevant, and it isn't.
+      - text: "SO_REUSEADDR only applies to the second and later sockets a process creates, never the first"
+        correct: false
+        why: >
+          There's no such ordinal rule; the option is per-socket and applies to whichever
+          socket you set it on, first or not. What matters is that the *other* socket in
+          the conflict — the one in TIME_WAIT — also carries it.
+
+  - id: q5
+    prompt: >
+      SO_REUSEPORT is one letter different from SO_REUSEADDR and does something
+      entirely different. What does it let you do that SO_REUSEADDR does not?
+    options:
+      - text: "Let several separate processes bind the same port at once, with the kernel load-balancing incoming connections across them"
+        correct: true
+        why: >
+          Added in Linux 3.9 (2013), and it's how you scale accepting across cores
+          without one thread doing all the accept()ing and handing work off: run N
+          identical processes, each with its own listening socket on port 80, and the
+          kernel distributes connections by hashing the four-tuple. It also gives you
+          zero-downtime restarts, since the new process can bind before the old one
+          exits. NGINX, HAProxy and Envoy all expose a flag for it.
+      - text: "Bind to the same port on several different network interfaces at once"
+        correct: false
+        why: >
+          You already get that from INADDR_ANY, with no special option at all — one
+          socket bound to the wildcard address receives on every interface. REUSEPORT is
+          about multiple *sockets* sharing one port, not one socket spanning interfaces.
+      - text: "Reuse a port still held in TIME_WAIT, without waiting the timer out"
+        correct: false
+        why: >
+          That's SO_REUSEADDR's job — the option you're already using. The names being
+          one letter apart is exactly why these get confused, but they solve unrelated
+          problems.
+      - text: "Bind one socket to several ports at once, so a server can listen on 80 and 443 with a single fd"
+        correct: false
+        why: >
+          A socket has exactly one local endpoint; nothing in the API binds one fd to
+          multiple ports. Serving both 80 and 443 means two listening sockets, and then
+          multiplexing between them with poll/epoll.

@@ -1,0 +1,158 @@
+# Answer key for day-05. Deliberately NOT in the .md — that's the file he'd have open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+questions:
+  - id: q1
+    prompt: What does recv() returning 0 mean, and why is it a different situation from returning -1?
+    options:
+      - text: "0 is an orderly shutdown — the peer sent FIN and no more data will ever arrive. -1 is an error with the reason in errno"
+        correct: true
+        why: >
+          They demand opposite reactions: 0 is a normal end of conversation you close
+          cleanly on, -1 is a failure you report. A blocking recv() never returns 0 to
+          mean "nothing yet" — zero is permanent end of stream. Code that collapses both
+          into "the loop is over" silently swallows real errors like ECONNRESET.
+      - text: "0 means no data was available yet, so you should call recv() again in a moment"
+        correct: false
+        why: >
+          That's what a blocking recv() will never do — it sleeps until something
+          arrives rather than returning empty-handed. The "nothing yet" answer is -1
+          with EAGAIN, and only on a non-blocking socket or with MSG_DONTWAIT.
+      - text: "0 means the connection failed, and -1 means it closed normally"
+        correct: false
+        why: >
+          Exactly inverted. It's worth fixing this one firmly, because getting it
+          backwards produces a server that treats every clean disconnect as an error and
+          every error as a clean disconnect.
+      - text: "0 means your buffer size was 0; with a non-empty buffer recv() only ever returns positive or -1"
+        correct: false
+        why: >
+          A zero-length buffer is a degenerate case, but a normal recv() on a normal
+          buffer genuinely does return 0 the moment the peer closes its sending side —
+          it's the standard, expected way you learn a client hung up.
+
+  - id: q2
+    prompt: >
+      You call recv(fd, buf, 1024, 0) and the client sent 4000 bytes. What can you say
+      about the return value, and where are the remaining bytes?
+    options:
+      - text: "It returns somewhere between 1 and 1024 — whatever is in the receive buffer now — and the rest stays in the kernel's buffer for later calls"
+        correct: true
+        why: >
+          recv() returns what's available rather than waiting for a total it has no way
+          to know, because TCP is a stream with no message boundaries. It can hand back
+          far less than either your buffer size or the sender's write size: the chunks
+          you see come from the network and the sender's kernel, not from the sender's
+          send() calls. This is the short read, and Day 6 is about designing for it.
+      - text: "It returns exactly 1024, because recv() always fills the buffer it's given if enough data exists"
+        correct: false
+        why: >
+          Only MSG_WAITALL asks for that behaviour, and even it gives up early if the
+          connection ends. A plain recv() is explicitly permitted to return less, and
+          on a real network routinely does — often at odd sizes like 1448, the payload
+          that fits one Ethernet frame.
+      - text: "It returns 4000, since the kernel reassembles the whole message before waking you"
+        correct: false
+        why: >
+          It can't return more than the buffer size you passed, and there is no
+          "message" for the kernel to reassemble — it has no idea where the sender
+          thought one ended. TCP guarantees order and delivery, never framing.
+      - text: "It returns -1 with EMSGSIZE, since the incoming data doesn't fit the buffer"
+        correct: false
+        why: >
+          Oversized data isn't an error condition on a stream socket at all. The excess
+          simply stays in the receive buffer and is delivered by subsequent calls; the
+          data is only dropped if you close the connection without reading it.
+
+  - id: q3
+    prompt: >
+      send() returns 512 when you asked it to send 512 bytes. What has actually happened
+      at that point, and what has not?
+    options:
+      - text: "512 bytes are in the kernel's send buffer and are now its problem — it does not mean they reached the peer, and no socket call tells you that"
+        correct: true
+        why: >
+          send() is a handoff to the kernel, not a delivery receipt. The bytes may still
+          be queued, in flight, or lost and awaiting retransmission. This is why
+          application-level acknowledgements exist: if your protocol needs to know the
+          other side actually got something, the other side has to say so.
+      - text: "The peer's kernel has acknowledged all 512 bytes, though the peer's application may not have read them"
+        correct: false
+        why: >
+          Closer to the truth than "the app read it", but still more than send()
+          promises. send() can return long before any ACK comes back — it returns as
+          soon as the data is copied into the send buffer.
+      - text: "The peer's application has received all 512 bytes"
+        correct: false
+        why: >
+          Two layers too optimistic. Even after the bytes genuinely arrive, they sit in
+          the peer's receive buffer until its code calls recv() — which it may never do.
+      - text: "The bytes were written directly to the network card, bypassing kernel buffering for small writes"
+        correct: false
+        why: >
+          There's no such bypass in the ordinary path; everything goes through the socket
+          send buffer, where TCP decides on segmentation and timing (Nagle, congestion
+          window, and the rest). Kernel-bypass stacks exist but are a specialist tool,
+          not what send() does.
+
+  - id: q4
+    prompt: >
+      Two consecutive MSG_PEEK reads return the same bytes. What does that tell you about
+      where the data lives and what a normal recv() does?
+    options:
+      - text: "The data sits in a kernel-side receive buffer, and a normal recv() is a copy-and-remove from it — peeking copies without removing"
+        correct: true
+        why: >
+          This is the whole mental model in one experiment. Bytes arrive into kernel
+          memory whether or not you ever call recv(); reading is not an event you're
+          notified of, it's you taking a copy and consuming it. Once you see the same
+          bytes twice and then watch a plain recv() make them disappear, short reads and
+          buffering stop being abstract.
+      - text: "The peer sent the data twice, once for each peek"
+        correct: false
+        why: >
+          Nothing goes back to the peer when you call recv() — MSG_PEEK generates no
+          network traffic whatsoever. The sender has no idea whether or how often you've
+          read.
+      - text: "MSG_PEEK caches the bytes in your process, so the second read comes from a userspace copy"
+        correct: false
+        why: >
+          There's no userspace cache in the C library here; each peek is a syscall that
+          copies out of the same kernel buffer. That's why the data survives — it was
+          never removed from the kernel's side.
+      - text: "It means the socket is in a special peek mode until you clear it with a normal read"
+        correct: false
+        why: >
+          MSG_PEEK is a per-call flag with no lasting effect on the socket. You can
+          freely interleave peeking and normal reads; nothing is latched.
+
+  - id: q5
+    prompt: >
+      Your code does buf[n] = '\0' after a successful recv() and prints buf as a string.
+      What is the assumption there, and when does it bite?
+    options:
+      - text: "That n < sizeof(buf) — if recv() filled the buffer completely, that write is one past the end"
+        correct: true
+        why: >
+          A classic off-by-one buffer overflow, and it hides for a long time because it
+          only triggers when a read happens to fill the buffer exactly. Either pass
+          sizeof(buf) - 1 as the length so the terminator always fits, or stop treating
+          network bytes as a C string and print exactly n bytes — the data has no
+          terminator of its own and may legitimately contain zero bytes anywhere.
+      - text: "That the peer sent text rather than binary, which is only a display problem"
+        correct: false
+        why: >
+          Real, but not the dangerous part. Printing binary as text is ugly; writing
+          past the end of the buffer is memory corruption, which is a different class of
+          problem entirely.
+      - text: "That recv() null-terminates the data itself, making the assignment redundant"
+        correct: false
+        why: >
+          recv() never terminates anything — it delivers exactly the bytes that arrived.
+          The assignment is necessary if you insist on C-string handling; it's the lack
+          of a bounds check that's the bug, not the assignment.
+      - text: "Nothing is assumed — writing at index n is always safe because recv() returns at most sizeof(buf)"
+        correct: false
+        why: >
+          "At most sizeof(buf)" is exactly the problem: when n equals sizeof(buf), index
+          n is the first byte past the end. The bound you need is one smaller than the
+          bound recv() respects.

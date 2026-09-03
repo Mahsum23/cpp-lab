@@ -3,7 +3,8 @@
 #
 # A day with a matching day-NN-*.md is "available". A day listed here without one is
 # "upcoming": the app shows the title and teaser, locked, so the map reads as a real
-# path instead of a cliff. Lessons stay written one at a time, per README.md.
+# path instead of a cliff. Every day of a milestone is written up front, so moving on
+# never waits on asking for the next lesson; the app paces them one a day.
 #
 # Teasers are hooks, not tables of contents. "struct sockaddr_in, htons, INADDR_ANY"
 # says nothing the day title doesn't; "why this struct carries eight bytes of

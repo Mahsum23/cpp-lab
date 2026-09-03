@@ -76,8 +76,8 @@
 
       {#if week.days.some((d) => d.status === 'upcoming')}
         <p class="pending">
-          The locked ones aren't written yet — they land one session at a time, each
-          calibrated on how the last one actually went.
+          The locked ones aren't written yet — they land with the rest of their
+          milestone, which is written once the previous one is done.
         </p>
       {/if}
     </section>

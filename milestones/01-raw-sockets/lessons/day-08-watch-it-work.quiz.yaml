@@ -1,0 +1,165 @@
+# Answer key for day-08. Deliberately NOT in the .md — that's the file he'd have open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+questions:
+  - id: q1
+    prompt: >
+      You attach strace to a server that appears hung. What does the last line give you,
+      and why is that usually enough?
+    options:
+      - text: "The syscall it's currently blocked in — which tells you what it's waiting for, and that's almost always the answer"
+        correct: true
+        why: >
+          A hung process is nearly always parked in a syscall, and which one narrows the
+          problem instantly: blocked in accept() means it's idle and waiting for
+          clients (fine); blocked in recv() means a client connected and sent nothing;
+          blocked in send() means the peer stopped reading and your send buffer filled.
+          Three very different bugs, distinguished in two seconds without a debugger or
+          a single print statement.
+      - text: "The last line of your program's own output, which strace mirrors"
+        correct: false
+        why: >
+          strace prints syscalls, not your application's logging — and your stdout is
+          separate. The value here is seeing calls you never printed anything about.
+      - text: "A stack trace of the blocked thread, showing which function called the syscall"
+        correct: false
+        why: >
+          That's a debugger's job (gdb, or eu-stack). strace shows the syscall boundary
+          only — no user-space frames — which is less information but available
+          instantly on a running process with no symbols required.
+      - text: "The signal that stopped it, since a hang is always a stopped process"
+        correct: false
+        why: >
+          A hang and a stop are different things: a blocked process is running normally
+          and merely waiting on the kernel, with no signal involved. A genuinely stopped
+          process (SIGSTOP) is a much rarer situation.
+
+  - id: q2
+    prompt: TIME_WAIT holds a port for a minute after the connection closed. What two distinct problems is it preventing?
+    options:
+      - text: "Delayed duplicate packets being delivered into a new connection with the same four-tuple, and the peer being left hanging if the final ACK is lost"
+        correct: true
+        why: >
+          Both matter and people usually only know the first. A connection is identified
+          solely by its four-tuple, so a straggler from the old one would be
+          indistinguishable from new data — TIME_WAIT keeps the tuple reserved until
+          strays expire. Second, if the closing side's last ACK is lost the peer
+          retransmits its FIN, and something has to be there to answer it; a socket that
+          vanished immediately would give the peer an RST and a confusing error instead
+          of a clean close.
+      - text: "Memory leaks in the kernel, and fd exhaustion in the closing process"
+        correct: false
+        why: >
+          Neither is at stake. The kernel reclaims the socket structure when TIME_WAIT
+          expires, and the fd was released the moment you closed it — a TIME_WAIT socket
+          has no fd in any process at all.
+      - text: "Two processes binding the same port simultaneously, and port scanning from outside"
+        correct: false
+        why: >
+          Simultaneous binding is prevented by the bind table itself, all the time, with
+          no timer involved. And TIME_WAIT has no security function whatsoever — it's
+          purely a correctness mechanism for a closing connection.
+      - text: "Data still in the send buffer being lost, and the peer's receive buffer overflowing"
+        correct: false
+        why: >
+          Unsent data is flushed before the connection reaches TIME_WAIT (that's what
+          the FIN handshake is for), and buffer overflow is prevented by flow control,
+          continuously, on every connection.
+
+  - id: q3
+    prompt: >
+      Which endpoint of a connection ends up in TIME_WAIT, and what does that imply for a
+      server that closes connections itself?
+    options:
+      - text: "Whichever side closes first — so a server that closes its own connections accumulates TIME_WAIT sockets on its own port"
+        correct: true
+        why: >
+          It's determined by who initiates the close, not by who is client or server.
+          This is why HTTP servers generally prefer the client to close, and why
+          keep-alive matters beyond saving handshakes: a high-throughput server that
+          actively closes every short connection can build up tens of thousands of
+          TIME_WAIT entries. It's also exactly why *your* server needed SO_REUSEADDR on
+          Day 3 — it closed the connection before it died.
+      - text: "Always the client, since the server outlives every connection by design"
+        correct: false
+        why: >
+          Nothing about the role decides it. You can watch your own server land in
+          TIME_WAIT on port 9000 by having it close a connection and then killing it —
+          which is precisely the Day 3 experiment.
+      - text: "Always the server, since it owns the listening port"
+        correct: false
+        why: >
+          Also role-based reasoning, also wrong. A client that closes first sits in
+          TIME_WAIT on its ephemeral port — which is a genuine operational problem for
+          machines making many short-lived outbound connections.
+      - text: "Both ends, symmetrically, for the same duration"
+        correct: false
+        why: >
+          The passive closer moves through LAST_ACK and then straight to CLOSED. Only
+          the active closer pays the TIME_WAIT wait, which is why "who closes first" is
+          a design decision with real operational consequences.
+
+  - id: q4
+    prompt: >
+      close() can fail. What does a failure actually mean, and why is ignoring it worse
+      than ignoring most errors?
+    options:
+      - text: "Buffered data may not have been delivered — so it reports data loss, and the fd is gone either way so there's nothing to retry"
+        correct: true
+        why: >
+          This is the uniquely nasty one: on most calls an unchecked error means you'll
+          fail again later and find out. Here the descriptor is released regardless, so
+          the error is your *only* notification that the write you thought succeeded
+          didn't, and it is unrecoverable by the time you see it. Never retry close()
+          on Linux either — the fd is already freed, and retrying can close a descriptor
+          another thread has since been handed.
+      - text: "Nothing meaningful — close() only ever fails with EBADF, which means a bug in your fd tracking"
+        correct: false
+        why: >
+          EBADF is one possibility and does indicate a bug, but EIO and ENOSPC also
+          occur and carry real data-loss information. Treating close() as incapable of
+          meaningful failure is exactly how silent truncation ships.
+      - text: "It means the peer hasn't acknowledged the data yet, so you should sleep and close again"
+        correct: false
+        why: >
+          close() doesn't wait for acknowledgement in the default configuration, and
+          closing twice is a genuine bug — the fd number may already have been reissued
+          to another thread's file.
+      - text: "It's only possible with SO_LINGER set, so code that doesn't use SO_LINGER can safely ignore it"
+        correct: false
+        why: >
+          SO_LINGER makes close() block and surface delivery failure more often, but it
+          isn't the only path to a failing close(); filesystem-backed and network
+          descriptors can report errors flushed at close time regardless.
+
+  - id: q5
+    prompt: >
+      You see CLOSE_WAIT connections piling up on your server and never going away. What
+      does that state mean, and whose bug is it?
+    options:
+      - text: "The peer sent FIN and your side hasn't closed its end — your code saw recv() return 0 and never called close(). It's your bug"
+        correct: true
+        why: >
+          CLOSE_WAIT literally means "waiting for the local application to close". The
+          kernel has done its part and is waiting on you, indefinitely — there's no
+          timeout that cleans this up, so the connections and their fds accumulate until
+          you hit EMFILE. Growing CLOSE_WAIT is one of the most reliable diagnostic
+          signals in server operations: it always points at a missing close() on the
+          path where recv() returned 0.
+      - text: "The peer is refusing to acknowledge your FIN — it's the client's bug, and there's nothing you can do"
+        correct: false
+        why: >
+          That situation exists but is a different state (FIN_WAIT2 on your side, waiting
+          on them). CLOSE_WAIT is unambiguously the reverse: they finished, and you are
+          the one who hasn't responded.
+      - text: "The connections are in a normal cooling-off period and will clear themselves in about a minute"
+        correct: false
+        why: >
+          That's TIME_WAIT, which does expire on its own. CLOSE_WAIT has no timer
+          whatsoever — it persists until your process closes the fd or dies, which is
+          what makes the pile-up unbounded.
+      - text: "Your backlog is too small, so completed connections are stuck in the accept queue"
+        correct: false
+        why: >
+          Queued-but-unaccepted connections show as ESTABLISHED, not CLOSE_WAIT, and are
+          bounded by the backlog rather than growing without limit. CLOSE_WAIT means the
+          connection was accepted, used, and then abandoned without being closed.
