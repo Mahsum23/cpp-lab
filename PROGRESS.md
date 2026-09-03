@@ -108,3 +108,38 @@ Verified against the live API with a real key, not stubs: `listModels` ranks
 `gemini-flash-latest` first, and a real question streams back a real answer. Also note
 Google intermittently 503s its newest models (`-latest`, `3.8`) while older ones serve
 fine; that path is transient and already reported as such.
+
+**Day 2 written (2026-09-02): addresses and byte order.** `sockaddr_in`, why
+`sin_zero` exists (padding to match the generic `sockaddr` bind()/connect()/accept()
+actually take — C's answer to polymorphism without inheritance), why network byte
+order is a fixed convention rather than "whatever the CPU prefers," and the classic
+footgun where `htons()` is a no-op on a big-endian machine so a missing conversion can
+pass testing on the wrong architecture. Task has him dump a filled `sockaddr_in`
+byte-by-byte and find `9000`'s two bytes (`23 28`) sitting in the struct by hand, plus
+a two-line host-endianness check. Verified the reference program compiles clean under
+`-Wall -Wextra` and every claim in the lesson against its actual output before writing
+it down.
+
+**Days 3-8 written, and the pacing rule changed (2026-09-02).** Lessons are no longer
+written one per request: every day of a milestone now lands up front, because being
+blocked on asking for the next lesson is friction the app exists to remove. Milestone
+*specs* are still written one at a time — the calibration worth keeping is between
+milestones, not between days whose shape the milestone README already fixed.
+
+This also fixes the "Unlock days ahead" / "Let me jump ahead" toggles, which appeared
+broken. They weren't: `stateOf()` returns `upcoming` for any day without a lesson file
+*before* it consults `peekAhead`, and with only two days written there was never a
+single day in the `locked` state for the toggle to act on. Six days now flip between
+locked and unlocked.
+
+Day 3 was corrected against measured behaviour rather than folklore, and the folklore
+was wrong twice. "Start the server, kill it, restart it, and bind fails" does not
+reproduce `EADDRINUSE` at all — a listener with no connections through it releases its
+port immediately. It needs a connection the server closed. And `SO_REUSEADDR` alone
+doesn't fix it either: on Linux both the lingering `TIME_WAIT` socket and the new one
+need the flag, and the accepted socket inherits it from the listener, so the flag only
+takes effect from the *next* run onward. Verified with a controlled A/B — first server
+without the option, restart with it: still refused; first server with it: binds
+immediately. The naive lesson would have had him add the option, still fail, and
+conclude the material was broken. `MSG_PEEK` returning identical bytes twice and
+`SIGPIPE` killing a process with exit status 141 were both verified on the box too.

@@ -191,7 +191,11 @@ The phone app (`app/`, see `app/DESIGN.md`) is built from these files, so:
 - Keep `milestones/<m>/lessons/week.yaml` current — it's the week roster (day ids,
   titles, `estMinutes`, one-line `teaser`, optional `teachBack`). Days listed there
   without a `.md` yet render as locked, titled steps on the app's map, which is how
-  the path looks whole while lessons stay written one at a time.
+  the path looks whole. Write every day of the *current* milestone up front, so he can
+  keep moving without having to ask for the next one — being blocked on a prompt to me
+  is friction the app exists to remove. Milestone *specs* are still written one at a
+  time (see README.md): the calibration that matters is between milestones, not
+  between days of a milestone whose shape is already decided.
 - In `## Task`, use the parsed conventions so the app can build real UI from them:
   `- File: \`path\``, `- Compile: \`command\``, and a `### Checklist` of `- [ ]`
   items. Everything else in the section stays free prose.

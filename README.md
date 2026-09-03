@@ -8,6 +8,9 @@ Not a tutorial collection. Every milestone produces something that runs.
 - Each milestone lives in `milestones/NN-name/` and has its own `README.md` with the task spec.
 - Milestone specs are written **one at a time**, not all upfront — each one is calibrated
   based on how the previous one actually went.
+- Within a milestone, all of its days are written up front, so progress never waits on
+  asking for the next lesson. Pacing is the app's job (one session a day), not a
+  side effect of which files happen to exist.
 - Every milestone ends with two things: a code review, and a teach-back.
 - `PROGRESS.md` is the log. Update it as you go.
 

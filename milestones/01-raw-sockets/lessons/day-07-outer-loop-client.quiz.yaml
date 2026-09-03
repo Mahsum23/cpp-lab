@@ -1,0 +1,163 @@
+# Answer key for day-07. Deliberately NOT in the .md — that's the file he'd have open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+questions:
+  - id: q1
+    prompt: >
+      In the server's loop, which socket gets closed per client and which one must not?
+      What's the symptom if you get it backwards?
+    options:
+      - text: "Close the accepted socket per client, never the listener — close the listener and the server serves exactly one client, then accepts nothing ever again"
+        correct: true
+        why: >
+          Factory and product, from Day 4. The symptom is distinctive and worth
+          recognising on sight: the first client works perfectly, then the server sits
+          there alive and healthy while every subsequent connection fails or hangs. That
+          "works once" signature almost always means a closed listening socket.
+      - text: "Close the listening socket per client and keep the accepted one, since the accepted socket is the long-lived conversation"
+        correct: false
+        why: >
+          Exactly inverted, and it produces the one-client-only server. The accepted
+          socket is the short-lived thing — it dies with its client; the listener is what
+          must outlive every connection.
+      - text: "Close both after each client; the next accept() re-creates the listener automatically"
+        correct: false
+        why: >
+          Nothing re-creates a listening socket. Once closed you'd have to socket(),
+          bind() and listen() again from scratch — and bind() would likely fail with
+          EADDRINUSE for Day 3's reasons, turning one bug into two.
+      - text: "Close neither — let process exit clean everything up, since the fds are reused anyway"
+        correct: false
+        why: >
+          This is a straight fd leak, and it's the exact scenario from Day 1's quiz: one
+          leaked fd per client, fine for hours, then every call fails at once with
+          EMFILE when the table fills. A long-lived server is the worst possible place to
+          rely on process exit for cleanup.
+
+  - id: q2
+    prompt: >
+      Your blocking server is mid-conversation with client A when client B connects. What
+      happens to B, and which mechanism from Day 3 is involved?
+    options:
+      - text: "The kernel completes B's handshake and parks it in the accept queue; B waits, connected but unserved, until the server loops back to accept()"
+        correct: true
+        why: >
+          B's connect() succeeds — the handshake is the kernel's work, not yours — so
+          from B's point of view it is connected and can even send data. It simply gets
+          no reply, because control is nowhere near accept(). That gap between "connected"
+          and "being served" is the whole limitation milestone 02 exists to remove.
+      - text: "B is refused with ECONNREFUSED, because the server is busy inside its inner loop"
+        correct: false
+        why: >
+          Refusal happens when nothing is listening at all. Your listening socket is
+          still in LISTEN with the kernel answering SYNs on it, regardless of what your
+          code is doing, so the connection is accepted at the TCP level and queued.
+      - text: "B's connect() blocks until the server calls accept(), so B knows it isn't being served yet"
+        correct: false
+        why: >
+          A reasonable guess, but connect() returns as soon as the handshake completes —
+          which the kernel does without you. B has no way to distinguish "accepted and
+          being served" from "sitting in the queue"; that's precisely why the wait is
+          confusing to debug from the client side.
+      - text: "The kernel forks a copy of your process to handle B, which is why servers scale by default"
+        correct: false
+        why: >
+          The kernel never forks your process on your behalf. Fork-per-connection is a
+          design *you* implement (it's this milestone's stretch goal) — nothing happens
+          automatically.
+
+  - id: q3
+    prompt: >
+      The client never calls bind(), yet it has a local port. Where did it come from, and
+      what range does it come from?
+    options:
+      - text: "connect() does an implicit bind, assigning a port from the ephemeral range in /proc/sys/net/ipv4/ip_local_port_range (usually 32768-60999)"
+        correct: true
+        why: >
+          Every connection needs a full four-tuple, so the local port has to exist —
+          connect() just picks one for you rather than making you choose. It's the same
+          number that shows up in the server's peer address, and it changes every run,
+          which you can watch directly. The range's size (~28,000) is also why a busy
+          client can exhaust ports long before a server does.
+      - text: "It reuses the server's port, 9000, since both ends of a connection share it"
+        correct: false
+        why: >
+          The four-tuple would then have identical local and remote endpoints on
+          loopback, which couldn't identify anything. The client's port is always
+          distinct from the server's; the server's 9000 appears only in the remote half
+          of the client's tuple.
+      - text: "It's port 0, which the kernel treats as a wildcard for the lifetime of the connection"
+        correct: false
+        why: >
+          Port 0 is what you *pass* to ask for an ephemeral assignment; it's never the
+          port you end up with. The kernel resolves it to a real number before the
+          connection is established.
+      - text: "There isn't one — only the listening side needs a port, and clients are identified by IP alone"
+        correct: false
+        why: >
+          Then two connections from the same machine to the same server would be
+          indistinguishable. The varying ephemeral port is exactly what lets one host
+          open many simultaneous connections to one service.
+
+  - id: q4
+    prompt: >
+      A client sends a request, calls close(), then tries to recv() the response, and gets
+      nothing. What's wrong, and which call fixes it?
+    options:
+      - text: "close() tore down both directions; use shutdown(fd, SHUT_WR) to send FIN while keeping the read side open, then close() after reading"
+        correct: true
+        why: >
+          A half close is the only correct way to say "that's my complete request, now
+          answer me" on a protocol without its own framing. After close() the socket is
+          gone, so the server's reply arrives at nothing and earns an RST. The right
+          sequence is shutdown(SHUT_WR), read the reply, then close().
+      - text: "The server is buffering the reply; the client should set TCP_NODELAY to force it out"
+        correct: false
+        why: >
+          TCP_NODELAY affects when small segments leave the *sender*, and setting it on
+          the client wouldn't change the server's behaviour anyway. The reply isn't
+          delayed here — it has nowhere to be delivered.
+      - text: "recv() after close() returns 0 because the fd is closed; reopen the socket and read again"
+        correct: false
+        why: >
+          You can't reopen a socket to recover a connection — a new socket is a new
+          connection, and the old reply is gone. Also, recv() on a closed fd gives EBADF,
+          not 0; conflating the two hides the real bug.
+      - text: "Nothing is wrong with the close(); the server must be failing to flush, and needs its own shutdown() call"
+        correct: false
+        why: >
+          There's no flush step missing on the server: send() already handed the bytes to
+          the kernel. The problem is entirely on the client side, where close() destroyed
+          the endpoint the reply needed to arrive at.
+
+  - id: q5
+    prompt: >
+      connect() fails instantly with ECONNREFUSED on one host and hangs a long time before
+      ETIMEDOUT on another. What does each tell you?
+    options:
+      - text: "Refused fast means a host answered your SYN with RST — it's up, nothing is listening there. A slow timeout means SYNs vanished — usually a firewall dropping them, or no host at all"
+        correct: true
+        why: >
+          This is one of the most useful production diagnostics in the whole API, and it
+          costs nothing to learn. A fast, definite "no" means you reached a live machine
+          and the service is down. Silence followed by a patient timeout means your
+          packets are being swallowed — the stack retried politely for a while before
+          giving up. "Is the service down or is it the firewall" is answered by how long
+          the failure took.
+      - text: "Both mean the same thing; the difference is only whether the socket was in blocking mode"
+        correct: false
+        why: >
+          Blocking mode changes how you *observe* the failure (immediately versus via
+          poll), not which failure occurs. ECONNREFUSED and ETIMEDOUT are genuinely
+          different network outcomes: an active rejection versus no answer at all.
+      - text: "ECONNREFUSED means DNS failed; ETIMEDOUT means the route is wrong"
+        correct: false
+        why: >
+          connect() takes an address, not a name — DNS has already happened (or never
+          did) before this call. Routing failures have their own errors,
+          ENETUNREACH/EHOSTUNREACH, which come back before anything reaches the wire.
+      - text: "ECONNREFUSED means the server's backlog is full, and ETIMEDOUT means it's slightly less full"
+        correct: false
+        why: >
+          A full accept queue on Linux normally causes the SYN to be *dropped*, so the
+          client retries and sees a slow connect — never a refusal. Refusal specifically
+          means nothing is listening on that port at all.

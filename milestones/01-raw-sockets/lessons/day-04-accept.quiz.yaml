@@ -1,0 +1,163 @@
+# Answer key for day-04. Deliberately NOT in the .md — that's the file he'd have open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+questions:
+  - id: q1
+    prompt: >
+      accept() returns a new fd rather than reusing the listening one. What is the
+      listening socket doing while you're talking to a client, and what breaks if you
+      close the wrong one?
+    options:
+      - text: "It stays in LISTEN collecting new handshakes; close it and the server can never accept again, though the current client keeps working"
+        correct: true
+        why: >
+          The listening socket is a factory and the accepted socket is a product. The
+          kernel keeps completing handshakes into the accept queue the whole time you're
+          busy with a client. Closing the listener leaves the current conversation
+          perfectly healthy — which is exactly what makes the bug confusing, because it
+          looks fine until the *second* client never connects.
+      - text: "It's idle and does nothing until you call accept() again, so closing it early is harmless"
+        correct: false
+        why: >
+          The kernel is answering SYNs and completing three-way handshakes on that
+          socket continuously, with no involvement from your code — that's what Day 3's
+          accept queue is filling up with. It is never idle while it's in LISTEN.
+      - text: "It becomes the connection once accept() returns, so the returned fd is really just a duplicate of it"
+        correct: false
+        why: >
+          They're two distinct kernel objects with different states and different
+          buffers — /proc/<pid>/fd shows different inode numbers, and ss shows one row
+          in LISTEN and another in ESTAB. Treating them as duplicates is precisely the
+          mistake this day exists to prevent.
+      - text: "It holds the shared receive buffer that every client's data arrives in, so closing it loses in-flight data"
+        correct: false
+        why: >
+          Buffers are per-connection, living on the accepted socket, not pooled on the
+          listener. A listening socket never carries application data at all — it only
+          ever produces new connections.
+
+  - id: q2
+    prompt: >
+      Three clients are connected to your server on port 9000 at the same time. What
+      distinguishes their three connections from each other, given they share a local
+      port?
+    options:
+      - text: "The four-tuple — local IP, local port, remote IP, remote port. Only the remote half differs, and that's enough"
+        correct: true
+        why: >
+          A connection is identified by all four values together, never by a port alone.
+          That's why port 9000 isn't consumed by the first client and never gets divided
+          up, and why a busy server can hold tens of thousands of simultaneous
+          connections on a single port without running out of anything port-shaped.
+      - text: "The kernel assigns each accepted connection a different local port behind the scenes"
+        correct: false
+        why: >
+          The server's local port stays 9000 on every accepted connection — you can see
+          it directly in ss, where several ESTAB rows share the same local address and
+          port. It's the *client* that uses a fresh ephemeral port per connection.
+      - text: "The fd number is what identifies the connection to the kernel"
+        correct: false
+        why: >
+          The fd is your process's private handle, meaningful only inside your fd table
+          — another process can hold fd 5 for something entirely unrelated. TCP
+          identifies the connection on the wire by the four-tuple; the fd never leaves
+          your machine.
+      - text: "Nothing distinguishes them at the TCP layer; the application has to tag each message to tell clients apart"
+        correct: false
+        why: >
+          Backwards — the demultiplexing is precisely what TCP does for you. The kernel
+          routes each arriving segment to the right socket by matching the four-tuple,
+          which is why recv() on one client's fd never returns another client's bytes.
+
+  - id: q3
+    prompt: >
+      The socklen_t argument to accept() is passed by pointer rather than by value.
+      Why — and what goes wrong if you forget to initialise it?
+    options:
+      - text: "It's a value-result argument: you pass in your buffer's size, the kernel writes back the size it used. Uninitialised, the kernel sees stack garbage as your buffer size"
+        correct: true
+        why: >
+          C can't return two things, so the API borrows the caller's variable to carry a
+          value in each direction — a pattern that recurs all over these calls. Leaving
+          it uninitialised is nasty precisely because it often appears to work: whenever
+          the garbage happens to be large enough, the kernel fills the address normally,
+          so the bug hides until the day the stack contains something small.
+      - text: "So accept() can resize your buffer with realloc() if the peer address doesn't fit"
+        correct: false
+        why: >
+          The kernel never allocates or reallocates memory in your process — it only
+          writes into the buffer you supplied, and truncates if it's too small. Nothing
+          in this API takes ownership of your storage.
+      - text: "Because socklen_t is too large to pass in a register on most architectures"
+        correct: false
+        why: >
+          socklen_t is a 32-bit integer; passing it by value would be trivial. The
+          pointer exists for the return direction, not for the argument direction.
+      - text: "It's a legacy quirk with no effect — passing nullptr for the length works identically"
+        correct: false
+        why: >
+          Passing nullptr for *both* the address and the length is legal and means "I
+          don't care who connected". Passing a real address buffer with a null or
+          uninitialised length is not the same thing, and is a genuine bug.
+
+  - id: q4
+    prompt: >
+      What does accept4(fd, ..., SOCK_CLOEXEC) give you that accept() followed by
+      fcntl(F_SETFD, FD_CLOEXEC) does not?
+    options:
+      - text: "Atomicity — between accept() returning and fcntl() running, another thread can fork+exec and leak the connection to the child"
+        correct: true
+        why: >
+          Exactly the race from Day 1, one level up. Close-on-exec is not inherited from
+          the listening socket, so every accepted connection starts life inheritable, and
+          the two-call fix has a window measured in instructions. On a server accepting
+          thousands of connections a second while also spawning helpers, that window gets
+          hit. accept4() collapses both into one syscall.
+      - text: "Nothing functionally — accept4() is just a convenience that saves you typing a second call"
+        correct: false
+        why: >
+          The convenience is real but incidental; the reason the flag was added to the
+          creating call was the race, not ergonomics. That's the same motivation behind
+          pipe2(), dup3() and open()'s O_CLOEXEC.
+      - text: "It makes the connection non-blocking as well, which FD_CLOEXEC does not"
+        correct: false
+        why: >
+          That's a different flag — SOCK_NONBLOCK, which accept4() also accepts.
+          SOCK_CLOEXEC controls only what survives an exec(); it has no effect on
+          whether reads and writes block.
+      - text: "It sets close-on-exec on the listening socket too, covering both fds at once"
+        correct: false
+        why: >
+          accept4()'s flags apply to the newly created connection only. The listening
+          socket's flags are whatever you set when you created it, and are unaffected.
+
+  - id: q5
+    prompt: >
+      Your process is blocked in accept() with no clients connecting. What is it costing
+      the machine while it waits?
+    options:
+      - text: "Essentially nothing — the kernel deschedules the process, so it burns no CPU until a connection arrives"
+        correct: true
+        why: >
+          Blocking here is a sleep, not a spin: the process leaves the run queue entirely
+          and the scheduler wakes it when the accept queue gets an entry. What it does
+          cost is the thread and its stack — which is fine for one client and hopeless
+          for ten thousand, and is the whole reason readiness notification (select,
+          poll, epoll) and this curriculum's later milestones exist.
+      - text: "A full CPU core, since accept() polls the accept queue in a tight loop"
+        correct: false
+        why: >
+          Nothing in the blocking path spins. You can watch this directly: a server
+          parked in accept() sits at 0% CPU in top no matter how long it waits.
+      - text: "One kernel thread per waiting socket, scheduled alongside your process"
+        correct: false
+        why: >
+          The kernel doesn't spawn a thread to babysit a waiting socket; your own
+          process's thread is simply parked on a wait queue attached to the socket, and
+          the arriving connection wakes it.
+      - text: "Nothing at all — a blocked process is completely free, which is why one-thread-per-connection scales fine"
+        correct: false
+        why: >
+          The CPU cost is genuinely near zero, but "completely free" is the trap. Each
+          blocked thread still holds its stack (commonly 8 MB of reserved address space)
+          and adds scheduler bookkeeping — which is precisely why
+          thread-per-connection collapses long before readiness-based designs do.

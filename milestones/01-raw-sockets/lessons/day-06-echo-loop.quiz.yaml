@@ -1,0 +1,165 @@
+# Answer key for day-06. Deliberately NOT in the .md — that's the file he'd have open
+# while doing the lesson. Distractors are real misconceptions, not filler.
+questions:
+  - id: q1
+    prompt: >
+      A client calls send() twice, with "HELLO" then "WORLD". What might the server's
+      recv() calls legitimately return, and why?
+    options:
+      - text: "Anything that preserves the byte order — one recv of HELLOWORLD, two of HELLO and WORLD, or three like HEL / LOWOR / LD. All are correct TCP"
+        correct: true
+        why: >
+          TCP guarantees that every byte arrives, once, in order. It guarantees nothing
+          about grouping: the boundaries between your send() calls exist only in your
+          process's memory and are never transmitted. Coalescing and splitting are both
+          normal — driven by Nagle, MTU, congestion control and timing — so any split
+          that preserves order is a correct delivery of the same stream.
+      - text: "Always two recv()s returning HELLO and WORLD, since TCP preserves record boundaries"
+        correct: false
+        why: >
+          That's SOCK_DGRAM's behaviour (UDP), where one datagram is one recv and
+          boundaries genuinely are preserved. A stream socket has no records at all —
+          this expectation is the single most common source of framing bugs.
+      - text: "One recv() returning HELLOWORLD, always, because the kernel coalesces before delivering"
+        correct: false
+        why: >
+          Coalescing is permitted, not guaranteed. Whether the two writes end up in one
+          segment depends on timing, Nagle, and how quickly the receiver drains — code
+          that relies on it breaks the first time the writes are far enough apart.
+      - text: "Two recv()s, unless the total exceeds the MTU, in which case the split follows packet boundaries exactly"
+        correct: false
+        why: >
+          The MTU influences segmentation but recv() boundaries don't track packets
+          either: the kernel may deliver part of a segment if that's all your buffer
+          fits, or several segments' worth in one call if they've already arrived.
+          Nothing at the application layer sees packets.
+
+  - id: q2
+    prompt: >
+      Given that TCP has no message boundaries, how does a real protocol know where one
+      message ends and the next begins?
+    options:
+      - text: "It defines its own framing: a length prefix, a delimiter, or closing the connection to signal the end"
+        correct: true
+        why: >
+          Those are the only three options, and you can name the protocol for each:
+          length prefixes in most binary and RPC protocols, delimiters in HTTP headers,
+          SMTP and IRC (read until CRLF), and connection-close-means-done in HTTP/1.0 —
+          which is exactly why Content-Length had to exist once keep-alive arrived.
+      - text: "The kernel exposes the sender's send() sizes through recvmsg(), so framing is recoverable if you ask for it"
+        correct: false
+        why: >
+          Nothing anywhere records the sender's write sizes — they're discarded as the
+          bytes enter the send buffer. recvmsg() gives you scatter-gather and ancillary
+          data, not the sender's call boundaries.
+      - text: "TCP's PSH flag marks the end of each message, and the receiving stack surfaces it"
+        correct: false
+        why: >
+          A tempting-looking answer, since PSH does relate to delivery timing, but it's
+          a hint to the stack about flushing rather than a message terminator, and the
+          sockets API doesn't expose it to applications at all.
+      - text: "You use a fixed message size everywhere, which is why most binary protocols pad to a constant width"
+        correct: false
+        why: >
+          Fixed-size records are a special case of length-prefixing where the length is
+          known in advance, and they still need the recv loop to handle short reads.
+          It's not how most protocols work, and it doesn't answer the variable-length
+          case at all.
+
+  - id: q3
+    prompt: >
+      send(conn, buf, n, 0) returns a value smaller than n. What happened, and what must
+      your code do about it?
+    options:
+      - text: "Only that many bytes fit in the kernel's send buffer; you must loop, sending from buf + sent until everything is gone"
+        correct: true
+        why: >
+          It's Day 5's buffering from the writing side: the kernel takes what fits and
+          tells you how much. Ignoring the return value silently truncates your data —
+          and because it almost never happens on loopback with small messages, the bug
+          survives every local test and appears the first time a slow client or a real
+          network is involved.
+      - text: "The connection is failing; a short write means you should close and reconnect"
+        correct: false
+        why: >
+          A short write is completely normal flow control, not an error signal. Errors
+          come back as -1 with errno set; a positive return smaller than n just means
+          "here's how much I took, send the rest".
+      - text: "The peer only had room for that much, so the remaining bytes must be dropped"
+        correct: false
+        why: >
+          Nothing is dropped and nothing is lost — the untaken bytes are still in *your*
+          buffer, and it's your job to send them. TCP never discards data it has
+          accepted.
+      - text: "It can't happen on a blocking socket — blocking send() always sends everything or returns -1"
+        correct: false
+        why: >
+          A blocking send() blocks only when the buffer is completely full. With partial
+          room available it takes what fits and returns immediately, which is exactly
+          the short write. The guarantee you're imagining doesn't exist.
+
+  - id: q4
+    prompt: >
+      Your server dies with no log output whenever a client disconnects abruptly. What is
+      killing it, and why does the first send() after the disconnect often succeed?
+    options:
+      - text: "SIGPIPE, whose default action terminates the process; the first send() succeeds because those bytes just go into the send buffer before the failure is known"
+        correct: true
+        why: >
+          It's process death rather than an error return, which is why there's no log
+          line — your error handling never runs. The delay is the giveaway: the first
+          write is accepted locally, the peer's RST comes back, and the *second* write
+          hits a socket now known to be dead. Suppress it with MSG_NOSIGNAL or
+          signal(SIGPIPE, SIG_IGN) and handle EPIPE like any other end-of-connection.
+          A process killed this way exits with status 141.
+      - text: "A segfault from writing to a closed fd, because the socket's kernel memory was freed"
+        correct: false
+        why: >
+          Closing a peer's socket doesn't invalidate your fd or touch your address
+          space; writing to a dead socket is a well-defined operation that reports an
+          error. Nothing here dereferences freed memory.
+      - text: "The kernel closes your process's remaining sockets, so the next accept() returns EBADF and you exit"
+        correct: false
+        why: >
+          Your fds are unaffected by a peer disappearing, and this wouldn't be silent —
+          you'd get an error return you could log. The silence is the clue that a signal
+          killed you before any of your code ran.
+      - text: "ECONNRESET from recv() being treated as fatal by your loop"
+        correct: false
+        why: >
+          Plausible, and worth handling, but that path returns -1 through your code —
+          so you'd see whatever your error branch prints. Total silence points at a
+          signal, not an error return.
+
+  - id: q5
+    prompt: >
+      TCP_NODELAY disables Nagle's algorithm. What problem was Nagle solving, and what
+      does it interact badly with?
+    options:
+      - text: "It stopped tiny writes flooding the network (a 41-byte packet per telnet keystroke); it interacts badly with delayed ACK, producing ~40 ms stalls"
+        correct: true
+        why: >
+          Both optimisations are sensible alone. Nagle holds a small segment until the
+          previous one is ACKed; delayed ACK holds the ACK hoping to piggyback it on a
+          reply. In a request-response protocol where one side writes in two pieces they
+          deadlock each other until the delayed-ACK timer fires — a wildly reproducible
+          stall that vanishes under a profiler and has ambushed engineers since the
+          1980s. TCP_NODELAY = 1 means "do not delay", i.e. Nagle off.
+      - text: "It was solving packet reordering, and interacts badly with congestion control on lossy links"
+        correct: false
+        why: >
+          Reordering is handled by sequence numbers and the receiver's reassembly, not by
+          Nagle. Nagle is purely about *when* to send small amounts of data, never about
+          the order it arrives in.
+      - text: "It compresses small packets, and interacts badly with encryption because compressed ciphertext leaks length information"
+        correct: false
+        why: >
+          Nagle doesn't compress anything — it batches writes into fewer segments. The
+          compression-and-encryption interaction is a real security concern (CRIME and
+          BREACH), but it belongs to a completely different layer.
+      - text: "It limits how much unacknowledged data can be in flight, and interacts badly with high-bandwidth links"
+        correct: false
+        why: >
+          That describes the congestion window and the receive window — genuinely a
+          bandwidth-delay-product problem on fast long links, but a separate mechanism.
+          Nagle's rule is about small segments specifically, not total bytes in flight.

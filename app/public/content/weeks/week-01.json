@@ -170,10 +170,155 @@
       "estMinutes": 25,
       "teaser": "Why sockaddr_in carries eight bytes of deliberate padding, and why htons() compiles to nothing on half the machines ever built.",
       "teachBack": "Explain why network byte order exists at all — what would break if every machine just sent its integers however it stores them. Then: which fields of sockaddr_in need htons/htonl and which don't, and how would you know without looking it up?",
-      "status": "upcoming",
-      "theoryMarkdown": null,
-      "quiz": null,
-      "task": null
+      "slug": "addresses",
+      "status": "available",
+      "theoryMarkdown": "### `sockaddr_in`: the address socket() was missing\n\nDay 1 left the fd with no address — the kernel had a TCP socket in state `CLOSED`,\nallocated but unconfigured. `bind()`, three days from now, needs an address to give it,\nand that address is a struct:\n\n```cpp\nstruct sockaddr_in {\n    sa_family_t    sin_family;   // AF_INET\n    in_port_t      sin_port;     // port, in network byte order\n    struct in_addr sin_addr;     // IPv4 address, in network byte order\n    unsigned char  sin_zero[8];  // padding — see below\n};\n```\n\nFour fields, and every one of them is trying to solve a different problem.\n\n### Why `sin_zero` is there at all\n\n`bind()`, `connect()`, and `accept()` don't take a `sockaddr_in *`. They take a\n`sockaddr *` — a *generic* address struct that's supposed to work for `AF_INET`,\n`AF_INET6`, `AF_UNIX`, and anything else anyone invents later. C has no inheritance, so\nin 1983 the answer was: make every address-family-specific struct exactly the same\n*size* as the generic one, and let callers cast between the pointer types. `sin_zero`\nis filler that exists purely to pad `sockaddr_in` out to match `sizeof(struct\nsockaddr)` — it carries no data and you never read it. It's the C-shaped version of a\nbase class, four decades before anyone would call it that.\n\n(`sockaddr_in6`, for IPv6, is a different size again — which is exactly why every one\nof these calls also takes an explicit length parameter alongside the pointer. The\nstruct can't tell you its own size once it's been cast to the generic type.)\n\n### Byte order: the actual problem being solved\n\n`sin_port` and `sin_addr` are multi-byte integers, and a multi-byte integer has no\nsingle obvious way to sit in memory. Take the port `9000`, decimal — in hex that's\n`0x2328`. A CPU has to decide which byte goes at the lower address: the `0x23` or the\n`0x28`. Intel chips (and ARM, in its usual mode) put the *least* significant byte\nfirst — **little-endian**. Older Motorola and SPARC chips did the opposite —\n**big-endian**. Neither is \"correct\"; they're just two equally valid conventions that\ndifferent hardware vendors picked independently.\n\nThat's fine as long as a number never leaves the machine that produced it. The moment\ntwo different computers need to agree on what bytes on the wire *mean*, they need to\nagree on an order — otherwise a little-endian machine sends `9000` and a big-endian\nmachine reads it back as `9217`. The internet's answer, baked into TCP/IP from the\nstart, is: **network byte order is always big-endian**, full stop, regardless of what\neither endpoint's CPU prefers internally. `htons()` (host-to-network-short, for 16-bit\nvalues like ports) and `htonl()` (host-to-network-long, for 32-bit values like\naddresses) convert *your* machine's native order into that fixed wire order. Their\ninverses, `ntohs()`/`ntohl()`, undo it on the way back in.\n\nHere's the detail that trips people up the first time: on a big-endian machine,\n`htons()` has nothing to do — the native order and the network order are already the\nsame — so it's typically defined to literally return its argument unchanged. It still\ncompiles, still runs, still \"works\" if you forget to call it on a little-endian box\nand test only on a big-endian one. That asymmetry is exactly how byte-order bugs used\nto hide from a whole team for months: it worked on one architecture and silently\ncorrupted data on another.\n\n### `INADDR_ANY` vs. a literal address\n\n`sin_addr` needs a value too. `INADDR_ANY` (numerically `0.0.0.0`) doesn't mean \"no\naddress\" — it tells the kernel *\"accept connections arriving on any of this machine's\nnetwork interfaces,\"* which matters the moment a box has more than one (a LAN\ninterface and a Wi-Fi interface, say, or a container's internal bridge alongside its\nhost-facing one). Binding to a literal IP instead restricts you to traffic that\narrived on that one specific interface. A server binds `INADDR_ANY` almost always; a\nliteral address shows up when a machine deliberately wants to be reachable on only one\nof its networks.\n\n### A sharp edge in the API you're about to use\n\n`inet_ntoa()`, which turns a `struct in_addr` back into a printable string, returns a\n`char *` into a **static buffer owned by the library** — not memory you allocated, and\nnot memory that's yours alone. Call it twice before using the first result and you'll\nget the same pointer back with the second address's text in it. This is a very old API\n(pre-thread-safety as a design concern at all), which is exactly why `inet_ntop()`\nexists as its replacement — it writes into a buffer *you* supply. You'll likely still\nrun into `inet_ntoa()` in code older than you are; know what it's actually handing back\nbefore you trust it.\n\n### Is any of this still how it's done?\n\nThe byte-order rule, yes, completely — every IP packet, every TCP header, every DNS\nmessage on the internet today is big-endian on the wire, unchanged since the 1970s\nARPANET days, regardless of what's inside your phone or your laptop. What's changed is\nhow much of this you touch by hand: `getaddrinfo()` (a level up from what you're doing\nthis week) hides most manual byte-order juggling behind name resolution, and\n`inet_pton()`/`inet_ntop()` replaced the address-conversion functions that weren't\nIPv6-aware or thread-safe. You're doing it by hand this week for the same reason as\nDay 1 — so the abstraction is a convenience later, not a black box.\n\n### The Great Endian War\n\nThe terms \"big-endian\" and \"little-endian\" aren't engineering jargon invented for this\n— they're a deliberate joke. In 1980, Danny Cohen wrote an internet-famous paper called\n*\"On Holy Wars and a Plea for Peace,\"* borrowing the words straight from *Gulliver's\nTravels*, where the empires of Lilliput and Blefuscu go to actual war over which end\nof a soft-boiled egg you're supposed to crack. His point was that the byte-order\nargument between hardware vendors was exactly that pointless — two functionally\nequivalent conventions, fought over as if one were obviously correct. The joke stuck so\nwell that it's now the only name anyone uses, in every networking textbook and every\nRFC that has to specify it.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "What problem does network byte order actually solve — what goes wrong without it?",
+          "options": [
+            {
+              "text": "It stops a malicious host from spoofing another machine's IP address",
+              "correct": false,
+              "why": "That's a routing and authentication problem, solved (imperfectly) by things entirely outside this struct — ingress filtering, TLS, etc. Byte order just makes sure a correctly-sent number is read correctly; it has no opinion on whether the sender is who it claims to be."
+            },
+            {
+              "text": "Different CPUs store multi-byte integers in different orders; without an agreed wire order, two machines misread each other's numbers",
+              "correct": true,
+              "why": "Little-endian and big-endian are both legitimate, and neither machine is \"wrong\" internally. The problem only exists at the boundary: if a little-endian sender puts its native byte order straight on the wire, a big-endian receiver reads the same bytes back as a different number. Network byte order is just an agreed convention (big-endian) that both sides convert to and from, so the bytes on the wire mean the same thing regardless of either machine's internals."
+            },
+            {
+              "text": "It lets the same sockaddr_in struct work for both IPv4 and IPv6 connections",
+              "correct": false,
+              "why": "That's a different problem, solved a different way — sockaddr_in6 is a separate, larger struct, and the generic sockaddr cast (with sin_zero padding it to match) is what lets one pointer type stand in for either. Byte order doesn't touch which address family a struct represents."
+            },
+            {
+              "text": "It compresses multi-byte values so addresses and ports take fewer bytes on the wire",
+              "correct": false,
+              "why": "Byte order and size are unrelated. A 16-bit port is 2 bytes in host order and 2 bytes in network order — htons() rearranges which byte goes where, it doesn't drop or pack anything."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "sin_zero is 8 bytes of padding in sockaddr_in. What is it padding *to*, and why does that matter for a function like bind()?",
+          "options": [
+            {
+              "text": "It pads sockaddr_in to the same size as the generic sockaddr struct, which is the type bind() actually takes",
+              "correct": true,
+              "why": "C has no inheritance, so 1983's answer to \"one function, many address types\" was to make every family-specific struct the same size as the generic one and cast pointers between them. bind()/connect()/accept() all take a `sockaddr *`; sin_zero is what makes that cast harmless for sockaddr_in specifically. It carries no data — you never read it, only zero it."
+            },
+            {
+              "text": "It's memory the kernel reads as behavior flags, so leaving it nonzero can silently change how bind() behaves",
+              "correct": false,
+              "why": "The kernel doesn't read sin_zero as flags for AF_INET at all — it's ignored content, not a hidden control channel. You zero it as a hygiene habit (uninitialized stack memory is not something to hand the kernel), not because leaving garbage in it changes behavior."
+            },
+            {
+              "text": "It pads the struct to a multiple of 8 bytes so the CPU can access it with aligned loads",
+              "correct": false,
+              "why": "A plausible-sounding reason, since padding often is about alignment — but not this padding. sin_zero's size was chosen to match sockaddr's size, not any CPU alignment boundary; the struct isn't defined in terms of a target architecture's word size at all."
+            },
+            {
+              "text": "It reserves space for IPv6 fields so old code keeps working when a socket upgrades to IPv6",
+              "correct": false,
+              "why": "sockaddr_in never becomes an IPv6 address — sockaddr_in6 is a wholly separate struct with its own (larger) size, used with AF_INET6. Nothing about sin_zero anticipates or enables that; there's no upgrade path through it."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "On a big-endian machine, what does htons() actually do to its argument, and why is that a dangerous thing to build a testing habit around?",
+          "options": [
+            {
+              "text": "It still swaps the bytes, just using the opposite swap direction from a little-endian machine",
+              "correct": false,
+              "why": "There's nothing to swap: if host order and network order are already the same sequence of bytes, a \"swap\" would introduce a difference where none is needed. htons() is defined to be a no-op precisely when the two orders agree."
+            },
+            {
+              "text": "It converts the integer to a floating-point representation so it survives cross-platform math",
+              "correct": false,
+              "why": "Byte order and numeric representation (integer vs. float) are unrelated concerns. htons() only ever rearranges the bytes of the integer you gave it — it never changes what type of value it is."
+            },
+            {
+              "text": "It's undefined behavior on big-endian machines, since the macro assumes a little-endian host",
+              "correct": false,
+              "why": "htons() is portable and well-defined on every architecture — that's the entire point of using it instead of hand-rolling a byte swap. It behaves correctly (as a no-op) on big-endian and correctly (as a real swap) on little-endian; nothing about calling it is ever undefined."
+            },
+            {
+              "text": "It returns the value unchanged, because native order already equals network order — so forgetting to call it can look correct on that one architecture",
+              "correct": true,
+              "why": "htons() only has work to do when host order differs from network order. On a big-endian box those already match, so a build that skips the conversion entirely can still produce byte-for-byte correct output there — and then corrupt every port and address the moment the same code runs on a little-endian machine. Testing on one architecture doesn't prove the conversion is actually happening."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "What does binding to INADDR_ANY actually mean, in terms of what the kernel does differently versus binding to one specific literal address?",
+          "options": [
+            {
+              "text": "INADDR_ANY delays choosing an address until the first connection arrives, then binds to whichever interface it came in on",
+              "correct": false,
+              "why": "bind() takes effect immediately when you call it — there's no deferred binding. INADDR_ANY isn't \"decide later,\" it's \"don't filter by local address at all,\" and the socket is fully bound (to the port, on every interface) before any connection exists."
+            },
+            {
+              "text": "INADDR_ANY makes the socket accept both UDP and TCP traffic on the same port",
+              "correct": false,
+              "why": "The socket's type (SOCK_STREAM vs. SOCK_DGRAM) was fixed back at socket() and has nothing to do with which address you bind. INADDR_ANY only affects which interfaces' traffic the kernel delivers to this socket, not what protocol it speaks."
+            },
+            {
+              "text": "INADDR_ANY reserves the port on every machine on the local network, not just this one",
+              "correct": false,
+              "why": "Port numbers are a per-machine namespace; there's no mechanism by which binding a socket on one host reserves anything on another. INADDR_ANY only widens which of *this* machine's interfaces the socket listens on."
+            },
+            {
+              "text": "The kernel accepts connections arriving on any of the machine's network interfaces, instead of only the one owning a specific address",
+              "correct": true,
+              "why": "A machine with a LAN interface and a Wi-Fi interface — or a container's internal bridge alongside its host-facing one — has more than one local address. INADDR_ANY tells the kernel not to filter by which interface traffic arrived on; a literal address restricts the socket to whichever interface actually owns that address."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "inet_ntoa() returns a char*. What are you not allowed to assume about that pointer, and what breaks if you call it twice before using the first result?",
+          "options": [
+            {
+              "text": "It's heap-allocated per call, and you must free() it yourself or you leak memory",
+              "correct": false,
+              "why": "The opposite problem would be safer than the real one. You don't own this pointer and must never free() it — it's static storage inside the library, reused forever, not something malloc'd on your behalf."
+            },
+            {
+              "text": "It returns a fresh buffer on every call, which makes it fully safe to use from multiple threads at once",
+              "correct": false,
+              "why": "Backwards — the shared static buffer is exactly why inet_ntoa() is not thread-safe. Two threads calling it concurrently can each see a mix of the other's address text, which is precisely the class of bug inet_ntop() was introduced to eliminate."
+            },
+            {
+              "text": "It points into a static buffer owned by the library; a second call overwrites it, so both calls end up pointing at the same (second) text",
+              "correct": true,
+              "why": "This is an old, pre-thread-safety-as-a-design-concern API. The buffer is shared and reused on every call, not allocated per-call. `printf(\"%s %s\", inet_ntoa(a), inet_ntoa(b))` is a classic trap — by the time printf reads the first %s, both pointers refer to the same buffer holding b's text, so it prints b twice. inet_ntop(), which writes into a buffer you supply, exists specifically to fix this."
+            },
+            {
+              "text": "The string is only valid until the socket that produced the address is closed",
+              "correct": false,
+              "why": "The pointer's validity has nothing to do with any socket's lifetime — it's tied entirely to the next call to inet_ntoa() from anywhere in the process, which overwrites the same static buffer regardless of what sockets are open or closed."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Extend Day 1's program:\n\n1. Build a `sockaddr_in` for port `9000`, address `INADDR_ANY`. Set `sin_family`,\n   `sin_port` (through `htons`), `sin_addr.s_addr` (through `htonl`, or directly —\n   `INADDR_ANY` is `0` either way, but write the conversion so the pattern is there for\n   the next literal address you use). Zero `sin_zero` explicitly rather than relying on\n   it being zeroed for you — `memset` the whole struct to `0` before filling it in is\n   the idiom you'll see everywhere, and it also means you don't have to think about\n   `sin_zero` again.\n2. Print `sin_port` **twice**: once as the raw stored value, once run back through\n   `ntohs()`. On a little-endian machine (almost certainly what you're on) those two\n   numbers should look different, and the second one should read `9000`.\n3. Dump the whole struct byte-by-byte: cast a pointer to it as\n   `unsigned char *` and print each byte in hex, in memory order. Find the two bytes\n   that hold the port and confirm which one is `0x23` and which is `0x28` — that's\n   `9000` in big-endian, sitting right there in memory, regardless of what your CPU's\n   own native order is.\n4. As a two-line aside — not part of the checklist, just worth seeing once — detect\n   your own machine's endianness at runtime: put a 4-byte `int` with the value `1` in\n   memory, look at its first byte through an `unsigned char *`. `1` if little-endian,\n   `0` if big-endian. This is the same trick `htons()` is built on internally.\n\nKeep the `socket()`/`close()` scaffolding from Day 1 around it — this program still\ndoesn't call `bind()` yet, that's Day 3.\n\n- You'll need `<netinet/in.h>` for `sockaddr_in`/`htons`/`htonl`, `<cstring>` for\n  `memset`, in addition to what Day 1 already pulled in",
+        "files": [
+          "src/main.cpp"
+        ],
+        "compile": "g++ -std=c++20 -Wall -Wextra -o day2 src/main.cpp",
+        "checklist": [
+          "`sockaddr_in` filled for port `9000` on `INADDR_ANY`, zeroed first",
+          "`sin_port` printed both raw and through `ntohs()`, and they differ",
+          "the struct dumped byte-by-byte in hex, and the two port bytes identified by hand",
+          "host endianness detected at runtime with the 1-byte trick",
+          "zero warnings under `-Wall -Wextra`"
+        ]
+      }
     },
     {
       "id": "day-03",
@@ -182,10 +327,157 @@
       "estMinutes": 30,
       "teaser": "Break your own port on purpose, then find the option that fixes it — and the one letter that turns it into kernel load balancing.",
       "teachBack": "The backlog you pass to listen() is a queue of what, exactly — and who puts things in it? Then explain why the port was still busy after you killed the server, and what SO_REUSEADDR is actually overriding.",
-      "status": "upcoming",
-      "theoryMarkdown": null,
-      "quiz": null,
-      "task": null
+      "slug": "bind-listen",
+      "status": "available",
+      "theoryMarkdown": "### Two calls, two completely different jobs\n\nDay 1 gave you a socket with no address. Day 2 built the address. Today they meet, and\nthen a second call turns the result into something that can receive connections.\n\n```cpp\nbind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));\nlisten(fd, 128);\n```\n\n`bind()` is the claim: *this socket owns port 9000 on these interfaces.* From the moment\nit returns, no other socket can hold that same (address, port) pair — the kernel keeps a\ntable of bound endpoints, and yours is now in it. That's the whole job. A bound socket\nstill can't accept anything.\n\n`listen()` is the state change. It takes the socket from \"has an address\" to\n`LISTEN` — the TCP state machine from Day 1 finally starts running. The kernel begins\nanswering SYN packets on that port on your behalf, completing handshakes *without your\nprocess being involved at all*, and stacking the finished connections somewhere for you\nto collect later.\n\nThat \"somewhere\" is the interesting part.\n\n### The backlog is a queue of finished handshakes\n\nThe second argument to `listen()` is the backlog, and almost everyone's first guess\nabout what it queues is wrong. It is not a queue of bytes, and it is not a limit on how\nmany clients you can serve. It's the depth of the queue of **connections the kernel has\nalready completed the three-way handshake for, which your code has not yet called\n`accept()` on.**\n\nRead that again, because it has a consequence people find genuinely surprising: a client\ncan `connect()` successfully, send data, and get an acknowledgement, all while your\nserver is busy elsewhere and has never heard of it. The handshake is the kernel's\nbusiness, not yours. `accept()` doesn't create the connection — it hands you one the\nkernel finished earlier.\n\nSo the backlog is a shock absorber. If ten clients connect during the second your\nprocess spends serving someone else, they sit in that queue and get accepted as soon as\nyou come back around. If the queue is full when an eleventh arrives, the kernel's\nbehaviour depends on configuration, but the usual outcome on Linux is that it drops the\nSYN, and the client's TCP stack retries a moment later — so the client sees a slow\nconnect rather than a refused one.\n\nLinux actually keeps two queues here: a SYN queue for handshakes *in progress* and an\naccept queue for handshakes that are *done*. The backlog argument sizes the second one.\n(The split exists partly because of SYN flood attacks — a trivially cheap DoS where an\nattacker sends handshake openings and never completes them, filling a single combined\nqueue with garbage. SYN cookies, which let the kernel forget about half-open connections\nentirely and reconstruct them from the client's reply, were invented in 1996 for exactly\nthis.)\n\n### Your backlog number is a suggestion\n\nPass `listen(fd, 4096)` and you will very likely not get 4096. Linux silently clamps the\nvalue to `net.core.somaxconn`, and it does not tell you:\n\n```console\n$ cat /proc/sys/net/core/somaxconn\n4096\n```\n\nThat default was `128` for most of Linux's history and only changed to `4096` in kernel\n5.4 (2019) — which means a decade of servers all over the internet were quietly running\nwith a backlog two orders of magnitude smaller than the number in their source code.\nNothing warns you. The call succeeds either way.\n\n### Reproducing \"Address already in use\" on purpose\n\nThis is the classic restart failure, and the usual folklore version of it —\n*\"start the server, kill it, start it again, and bind fails\"* — is **wrong**. Try it\nwith a server that has only ever listened, and the restart works fine. A listening\nsocket with no connections through it releases its port the moment the process dies.\n\nWhat actually holds the port is a *connection*, not a listener. When a TCP connection\ncloses, the endpoint that closed **first** parks in `TIME_WAIT` for a couple of minutes,\nholding its (address, port) pair so that stray packets from the dead connection can't be\ndelivered into a fresh one that happens to reuse the same numbers. If your server closed\na client's connection before it died, the server's own port is what's sitting in\n`TIME_WAIT`, and the restart fails:\n\n```\nbind FAILED: Address already in use\n```\n\nSo to reproduce it deliberately you need three things, in order: a client that connects,\na server that closes that connection, and only then a restart.\n\n### SO_REUSEADDR, and the part nobody mentions\n\nThe fix is a socket option, set **before** `bind()` — it changes what `bind()` is\nallowed to do, so setting it afterwards accomplishes nothing:\n\n```cpp\nint yes = 1;\nsetsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));\n```\n\nNow the part that will otherwise waste an hour of your evening. On Linux, **both** the\nlingering `TIME_WAIT` socket and the new one have to carry `SO_REUSEADDR` for the bind\nto be allowed. The connection your server accepted inherits its options from the\nlistening socket it came from — so the flag on the `TIME_WAIT` socket is whatever the\n*previous run* of your server had set.\n\nThe consequence is genuinely confusing the first time: you hit `EADDRINUSE`, you add\n`SO_REUSEADDR`, you rebuild, you restart — and it fails again, because the socket\nholding the port was created by the old binary that didn't set it. Run it once more and\nit works, and will keep working forever after. Verified, on this exact question:\n\n| Previous run set `SO_REUSEADDR`? | Restart *with* `SO_REUSEADDR` |\n| --- | --- |\n| no | `EADDRINUSE` — still refused |\n| yes | binds immediately |\n\nThere's one more case where the option can't save you at all. If the *client* never\nclosed its end, the connection isn't in `TIME_WAIT` — it's in `FIN_WAIT2`, which is a\nlive connection still waiting on the other side's FIN, not a lingering corpse.\n`SO_REUSEADDR` only forgives `TIME_WAIT`. A half-closed connection holds the port until\nthe client goes away or `tcp_fin_timeout` (60 seconds, by default) expires.\n\n### The one letter that changes everything\n\n`SO_REUSEADDR` has a near-twin: **`SO_REUSEPORT`**, added in Linux 3.9 (2013), and it\ndoes something completely different despite the almost identical name. It lets *multiple\nseparate sockets — in multiple separate processes —* bind the exact same port\nsimultaneously, and has the kernel load-balance incoming connections across them by\nhashing each connection's four-tuple.\n\nThat is a genuinely big deal. It's how you scale an accept loop across CPU cores without\na single thread doing all the accepting and handing work off: run N identical processes,\neach with its own listening socket on port 80, and the kernel distributes the\nconnections. NGINX, HAProxy and Envoy all have a flag for it. It also enables\nzero-downtime restarts — the new process binds the same port before the old one exits,\nso no connection is ever refused in the gap.\n\nYou don't need it for this milestone. You should know it's one letter away from the\noption you *are* using.\n\n### Go and look at the listening socket\n\nOnce `listen()` has run, the socket is visible from outside your process:\n\n```console\n$ ss -ltn\nState    Recv-Q   Send-Q   Local Address:Port   Peer Address:Port\nLISTEN   0        128            0.0.0.0:9000        0.0.0.0:*\n```\n\n`ss` is the modern replacement for `netstat` (same information, reads\n`/proc/net/tcp` far more efficiently). `-l` is listening sockets, `-t` is TCP, `-n`\nskips DNS resolution so you see numbers instead of hostnames.\n\nOn a `LISTEN` row those two queue columns are repurposed and worth knowing: **`Recv-Q`\nis the number of connections currently sitting in the accept queue waiting for you**,\nand **`Send-Q` is the backlog you actually got** — the clamped value, not the number you\npassed. That's how you check what `somaxconn` did to your argument without guessing.\n\n`0.0.0.0` in the local address is `INADDR_ANY` from Day 2, printed back at you.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "The backlog argument to listen() is the depth of a queue. A queue of what, exactly — and who puts things in it?",
+          "options": [
+            {
+              "text": "Half-finished handshakes — clients that sent a SYN but haven't completed the exchange",
+              "correct": false,
+              "why": "Very close, and Linux does keep exactly that queue — but it's the *other* one. The SYN queue holds handshakes in progress; the accept queue holds finished ones, and the backlog argument sizes the accept queue. The split exists partly so SYN floods can't crowd out completed connections."
+            },
+            {
+              "text": "Bytes that have arrived on established connections but haven't been read yet",
+              "correct": false,
+              "why": "That's the socket receive buffer, and it's per-connection — each accepted socket has its own. The backlog is counted in whole connections, not bytes, and it belongs to the listening socket rather than to any one client."
+            },
+            {
+              "text": "The maximum number of clients the server can have connected at one time",
+              "correct": false,
+              "why": "A common misreading, and it would make listen(fd, 5) a five-client server. Once you accept() a connection it leaves the queue entirely, so the backlog limits how many can be *waiting to be accepted* at once, not how many you can serve. Concurrent connection count is bounded by your fd limit, not this."
+            },
+            {
+              "text": "Connections the kernel has already completed the handshake for, which you haven't accept()ed yet — the kernel fills it, not your code",
+              "correct": true,
+              "why": "This is the fact that reorders how you think about accept(). The kernel answers SYNs and completes three-way handshakes on your behalf, with your process asleep or busy elsewhere, and stacks the finished connections in this queue. accept() doesn't create a connection; it hands you one the kernel finished earlier. Which is why a client can connect() successfully and even send data to a server that has never heard of it."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "You call listen(fd, 4096) and it returns 0. Why might your actual backlog be far smaller than 4096, and how would you find out what you really got?",
+          "options": [
+            {
+              "text": "listen() rounds the backlog down to the nearest power of two",
+              "correct": false,
+              "why": "No rounding rule like that exists — and 4096 is already a power of two, so it wouldn't explain a smaller effective value anyway. The limit is an administrator-set ceiling, not an arithmetic adjustment."
+            },
+            {
+              "text": "It isn't smaller — a successful listen() means you got exactly the backlog you asked for",
+              "correct": false,
+              "why": "This is the assumption the clamping punishes. A zero return means the call was accepted, not that the argument was honoured; the kernel silently takes min(backlog, somaxconn) and reports success regardless."
+            },
+            {
+              "text": "The backlog shrinks as connections are accepted, and only refills when the server goes idle",
+              "correct": false,
+              "why": "The backlog is a fixed ceiling on queue depth, not a consumable budget. Accepting a connection frees a slot immediately; nothing has to go idle for the queue to accept new arrivals."
+            },
+            {
+              "text": "Linux silently clamps it to net.core.somaxconn; ss -ltn shows the effective value in Send-Q on the LISTEN row",
+              "correct": true,
+              "why": "The call succeeds either way and never warns you, which is what makes this bite. somaxconn defaulted to 128 for most of Linux's history and only became 4096 in kernel 5.4 (2019) — so a decade of production servers ran with a backlog two orders of magnitude below the number in their source. On a LISTEN row ss repurposes the queue columns: Send-Q is the backlog you actually got, Recv-Q is how many connections are waiting for you right now."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "Nothing is running on port 9000, but bind() fails with EADDRINUSE. What is holding the port, and why does that mechanism exist at all?",
+          "options": [
+            {
+              "text": "A closed connection in TIME_WAIT, held so late packets from the dead connection can't be delivered into a new one reusing the same numbers",
+              "correct": true,
+              "why": "The endpoint that closes first parks in TIME_WAIT for roughly twice the maximum segment lifetime. A connection is identified only by its four-tuple, so if you could immediately rebind and a delayed duplicate packet from the old connection arrived, it would be indistinguishable from data on the new one. TIME_WAIT is the interval that lets those strays die out first."
+            },
+            {
+              "text": "The kernel keeps the port reserved for a fixed cooldown after any process that bound it exits",
+              "correct": false,
+              "why": "There's no per-port cooldown tied to process exit. The lingering state belongs to individual connections that were closed, which is why the failure depends on whether a client ever connected and who closed first — not on how the process died."
+            },
+            {
+              "text": "The listening socket itself is still open, because killing a process doesn't close its sockets",
+              "correct": false,
+              "why": "Process death does close every fd it held, listening sockets included — and a server that only ever listened, with no connections through it, can be killed and restarted immediately with no error at all. It's a closed *connection* that lingers here, never the listener."
+            },
+            {
+              "text": "Another process on the machine grabbed the port in the moment between your two runs",
+              "correct": false,
+              "why": "Possible in principle, but it isn't what's happening in the reproducible case, and you can rule it out by looking: ss -tan (or /proc/net/tcp) will show the port in TIME_WAIT with no owning process rather than LISTEN under someone else's PID."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "You hit EADDRINUSE, add SO_REUSEADDR, rebuild, and restart — and it fails again. The next restart works. What happened?",
+          "options": [
+            {
+              "text": "The rebuild reset the TIME_WAIT timer, so the second attempt simply waited it out",
+              "correct": false,
+              "why": "Compiling a binary can't touch kernel connection state, and TIME_WAIT runs for a minute or two — far longer than the gap between two restarts. If waiting it out were the explanation, the option would be irrelevant, and it isn't."
+            },
+            {
+              "text": "SO_REUSEADDR only applies to the second and later sockets a process creates, never the first",
+              "correct": false,
+              "why": "There's no such ordinal rule; the option is per-socket and applies to whichever socket you set it on, first or not. What matters is that the *other* socket in the conflict — the one in TIME_WAIT — also carries it."
+            },
+            {
+              "text": "Both the lingering TIME_WAIT socket and the new one need the flag, and the TIME_WAIT socket came from the previous run, which didn't set it",
+              "correct": true,
+              "why": "Accepted connections inherit their options from the listening socket that produced them, so the flag on the socket holding your port is whatever the *previous* binary set — not what you just compiled. The first restart after adding the option is therefore still refused; from the next run onward the lingering socket carries the flag too and it works forever after. This is a genuinely confusing hour if nobody warns you."
+            },
+            {
+              "text": "setsockopt() needs a moment to propagate, so the option isn't active on the very first bind after a rebuild",
+              "correct": false,
+              "why": "setsockopt() takes effect synchronously before it returns — there is no propagation delay anywhere in this path. The asymmetry comes from *which socket* carries the flag, not from timing."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "SO_REUSEPORT is one letter different from SO_REUSEADDR and does something entirely different. What does it let you do that SO_REUSEADDR does not?",
+          "options": [
+            {
+              "text": "Let several separate processes bind the same port at once, with the kernel load-balancing incoming connections across them",
+              "correct": true,
+              "why": "Added in Linux 3.9 (2013), and it's how you scale accepting across cores without one thread doing all the accept()ing and handing work off: run N identical processes, each with its own listening socket on port 80, and the kernel distributes connections by hashing the four-tuple. It also gives you zero-downtime restarts, since the new process can bind before the old one exits. NGINX, HAProxy and Envoy all expose a flag for it."
+            },
+            {
+              "text": "Bind one socket to several ports at once, so a server can listen on 80 and 443 with a single fd",
+              "correct": false,
+              "why": "A socket has exactly one local endpoint; nothing in the API binds one fd to multiple ports. Serving both 80 and 443 means two listening sockets, and then multiplexing between them with poll/epoll."
+            },
+            {
+              "text": "Bind to the same port on several different network interfaces at once",
+              "correct": false,
+              "why": "You already get that from INADDR_ANY, with no special option at all — one socket bound to the wildcard address receives on every interface. REUSEPORT is about multiple *sockets* sharing one port, not one socket spanning interfaces."
+            },
+            {
+              "text": "Reuse a port still held in TIME_WAIT, without waiting the timer out",
+              "correct": false,
+              "why": "That's SO_REUSEADDR's job — the option you're already using. The names being one letter apart is exactly why these get confused, but they solve unrelated problems."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Extend Day 2's program:\n\n1. `bind()` the socket to the `sockaddr_in` you built yesterday. Cast to `sockaddr *`\n   and pass `sizeof(addr)` — Day 2's `sin_zero` discussion is what makes that cast safe.\n2. `listen()` on it, with a backlog of your choosing.\n3. Check both return values properly and print `strerror(errno)` on failure.\n4. Then keep the process alive — a `std::getchar()` is fine — so the socket stays in\n   `LISTEN` while you go and look at it.\n\nNow the two experiments, which are the actual point of today:\n\n**Break it on purpose.** With the server running, open another terminal and run\n`ss -ltn`. Find your socket. Note what `Send-Q` says versus the backlog number you\npassed.\n\nNow reproduce `EADDRINUSE` properly — and note that just killing and restarting a\nserver that never had a client will *not* do it. You need a connection that your server\nclosed:\n\n```console\n$ nc 127.0.0.1 9000          # connect, then Ctrl-C after a second\n```\n\nHave your server `accept()` it and `close()` it (a temporary two lines — you'll write\n`accept()` properly tomorrow), then kill the server and restart immediately. That should\nfail. Confirm the port is genuinely still held:\n\n```console\n$ ss -tan | grep 9000        # look for TIME_WAIT\n```\n\nIf `ss` isn't installed, `/proc/net/tcp` has the same information in hex — state `06`\nis `TIME_WAIT`, and the port is the half after the colon in the local address column\n(9000 is `2328`).\n\nThen add `SO_REUSEADDR` before `bind()`. Expect the *first* restart after adding it to\nstill fail, for the reason in the theory above, and the one after that to work.\n\n**Watch the backlog fill.** Do not call `accept()` (you don't have it yet — that's\ntomorrow). With the server sitting in `listen()`, connect to it several times from\nanother terminal:\n\n```console\n$ for i in $(seq 1 5); do nc -z 127.0.0.1 9000 & done\n```\n\nThen run `ss -ltn` again and look at `Recv-Q`. Those are completed connections the\nkernel handshook for you, waiting in the accept queue, for a program that has never\ncalled `accept()`. That number is the theory above made visible.\n\n- You'll need `<sys/socket.h>` for `setsockopt`, alongside Day 2's includes",
+        "files": [
+          "src/main.cpp"
+        ],
+        "compile": "g++ -std=c++20 -Wall -Wextra -o day3 src/main.cpp",
+        "checklist": [
+          "`bind()` called with the `sockaddr *` cast and an explicit length, return checked",
+          "`listen()` called, return checked",
+          "reproduced `EADDRINUSE` deliberately by restarting immediately",
+          "`SO_REUSEADDR` set *before* `bind()`, and the restart now succeeds",
+          "found the socket in `ss -ltn`, and compared `Send-Q` to the backlog you passed",
+          "saw `Recv-Q` rise with connections you never accepted",
+          "zero warnings under `-Wall -Wextra`"
+        ]
+      }
     },
     {
       "id": "day-04",
@@ -194,10 +486,156 @@
       "estMinutes": 25,
       "teaser": "Two fds, one connection. The single most-missed fact in hand-rolled socket code.",
       "teachBack": "Explain why accept() returns a new fd instead of reusing the listening one. What is the listening socket doing while you're talking to a client, and what breaks if you close the wrong one?",
-      "status": "upcoming",
-      "theoryMarkdown": null,
-      "quiz": null,
-      "task": null
+      "slug": "accept",
+      "status": "available",
+      "theoryMarkdown": "### Two file descriptors, one connection\n\n```cpp\nsockaddr_in peer{};\nsocklen_t len = sizeof(peer);\nint conn = accept(listen_fd, reinterpret_cast<sockaddr *>(&peer), &len);\n```\n\n`accept()` hands back a **new** fd. Your listening fd is untouched and still in `LISTEN`,\nstill collecting handshakes the kernel completes for you. The new one represents exactly\none conversation with exactly one client.\n\nThis is the single most-missed fact in hand-rolled socket code, and every bug that comes\nfrom missing it looks baffling: servers that serve one client and then hang forever,\nservers that die when a client disconnects, servers that accept a second connection onto\nthe first client's socket. All of them are the same mistake — treating the two fds as\ninterchangeable.\n\nIf you only remember one sentence from this milestone, make it this one: **the listening\nsocket is a factory, the accepted socket is a product.** You close products when you're\ndone with them. You do not close the factory.\n\n### Why a new fd is the only design that works\n\nThe deeper answer is about how TCP identifies a connection at all. A connection is not\nnamed by a port. It's named by a **four-tuple**: local IP, local port, remote IP, remote\nport. All four together.\n\nSo when three clients connect to your server, you get three connected sockets that all\nshare the *same* local port 9000, and differ only in the remote half:\n\n```\n127.0.0.1:9000  <->  127.0.0.1:51234\n127.0.0.1:9000  <->  127.0.0.1:51235\n127.0.0.1:9000  <->  127.0.0.1:51236\n```\n\nPort 9000 is not \"used up\" by the first client, and it never gets divided between them.\nThat's also why a busy web server can hold sixty thousand simultaneous connections on\nport 443 without running out of anything port-shaped. Each of those needs its own kernel\nsocket object — its own buffers, its own sequence numbers, its own state machine — and\ntherefore its own fd. There is nowhere else for them to live.\n\n### The kernel fills in the address for you\n\nThe second and third arguments are how you find out who connected. You pass a buffer and\n*a pointer to* its size; the kernel writes the peer's address into the buffer and writes\nthe number of bytes it actually used back through the pointer.\n\nThat in-and-out parameter is called a **value-result** argument, and it's all over this\nAPI for one reason: C can't return two things. You must initialise `len` to the size of\nyour buffer before the call — passing an uninitialised `socklen_t` is a real and\nirritating bug, because it often \"works\" by accident when the stack garbage happens to\nbe large enough.\n\nIf you don't care who connected, both arguments can be `nullptr`.\n\nTo print the address, use `inet_ntop()` and not `inet_ntoa()` — Day 2 covered why the\nolder one hands you a pointer into a static buffer that the next call overwrites.\n\n### accept4(), and Day 1's race again\n\nLinux has `accept4()`, which takes the same arguments plus a flags word:\n\n```cpp\nint conn = accept4(listen_fd, nullptr, nullptr, SOCK_CLOEXEC);\n```\n\nThis is exactly the `SOCK_CLOEXEC` problem from Day 1, one level up. Close-on-exec is\n*not* inherited from the listening socket, so every connection you accept starts life\ninheritable by any program you `exec()`. Setting it afterwards with `fcntl()` reopens the\nsame nanosecond race Day 1 described. `accept4()` closes it by doing both in one syscall.\n\n`SOCK_NONBLOCK` is the other flag it takes, and that one becomes interesting the moment\nyou have an event loop — milestone 02's problem rather than today's.\n\n### What blocking actually means here\n\nYour `accept()` will block. The process stops, the kernel deschedules it, and it consumes\nno CPU at all while waiting — this is a sleep, not a spin. When a connection lands in the\naccept queue, the kernel wakes you and `accept()` returns.\n\nThat's fine for one client at a time and completely useless for many, which is the\nmotivation for most of the rest of this curriculum. It's also the origin of a classic\npiece of systems folklore: if several processes are blocked in `accept()` on the *same*\nlistening socket and one connection arrives, older kernels woke all of them, and all but\none immediately went back to sleep having found nothing. That's the **thundering herd**;\nmodern Linux wakes only one, but the phrase outlived the bug and now gets used for any\nstampede-on-a-single-event problem.\n\n### Go and look at both sockets\n\nWith a client connected, your process holds two sockets on port 9000 in different\nstates. They show up separately:\n\n```console\n$ ss -tan | grep 9000\nLISTEN  0  4096   0.0.0.0:9000    0.0.0.0:*\nESTAB   0  0    127.0.0.1:9000  127.0.0.1:51234\n```\n\nOne row is the factory, still listening. The other is the product — same local port,\ndifferent remote address, which is the four-tuple made visible. `/proc/<pid>/fd` from\nDay 1 shows them as two separate `socket:[...]` entries with different inode numbers.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "accept() returns a new fd rather than reusing the listening one. What is the listening socket doing while you're talking to a client, and what breaks if you close the wrong one?",
+          "options": [
+            {
+              "text": "It stays in LISTEN collecting new handshakes; close it and the server can never accept again, though the current client keeps working",
+              "correct": true,
+              "why": "The listening socket is a factory and the accepted socket is a product. The kernel keeps completing handshakes into the accept queue the whole time you're busy with a client. Closing the listener leaves the current conversation perfectly healthy — which is exactly what makes the bug confusing, because it looks fine until the *second* client never connects."
+            },
+            {
+              "text": "It's idle and does nothing until you call accept() again, so closing it early is harmless",
+              "correct": false,
+              "why": "The kernel is answering SYNs and completing three-way handshakes on that socket continuously, with no involvement from your code — that's what Day 3's accept queue is filling up with. It is never idle while it's in LISTEN."
+            },
+            {
+              "text": "It holds the shared receive buffer that every client's data arrives in, so closing it loses in-flight data",
+              "correct": false,
+              "why": "Buffers are per-connection, living on the accepted socket, not pooled on the listener. A listening socket never carries application data at all — it only ever produces new connections."
+            },
+            {
+              "text": "It becomes the connection once accept() returns, so the returned fd is really just a duplicate of it",
+              "correct": false,
+              "why": "They're two distinct kernel objects with different states and different buffers — /proc/<pid>/fd shows different inode numbers, and ss shows one row in LISTEN and another in ESTAB. Treating them as duplicates is precisely the mistake this day exists to prevent."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "Three clients are connected to your server on port 9000 at the same time. What distinguishes their three connections from each other, given they share a local port?",
+          "options": [
+            {
+              "text": "The four-tuple — local IP, local port, remote IP, remote port. Only the remote half differs, and that's enough",
+              "correct": true,
+              "why": "A connection is identified by all four values together, never by a port alone. That's why port 9000 isn't consumed by the first client and never gets divided up, and why a busy server can hold tens of thousands of simultaneous connections on a single port without running out of anything port-shaped."
+            },
+            {
+              "text": "Nothing distinguishes them at the TCP layer; the application has to tag each message to tell clients apart",
+              "correct": false,
+              "why": "Backwards — the demultiplexing is precisely what TCP does for you. The kernel routes each arriving segment to the right socket by matching the four-tuple, which is why recv() on one client's fd never returns another client's bytes."
+            },
+            {
+              "text": "The fd number is what identifies the connection to the kernel",
+              "correct": false,
+              "why": "The fd is your process's private handle, meaningful only inside your fd table — another process can hold fd 5 for something entirely unrelated. TCP identifies the connection on the wire by the four-tuple; the fd never leaves your machine."
+            },
+            {
+              "text": "The kernel assigns each accepted connection a different local port behind the scenes",
+              "correct": false,
+              "why": "The server's local port stays 9000 on every accepted connection — you can see it directly in ss, where several ESTAB rows share the same local address and port. It's the *client* that uses a fresh ephemeral port per connection."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "The socklen_t argument to accept() is passed by pointer rather than by value. Why — and what goes wrong if you forget to initialise it?",
+          "options": [
+            {
+              "text": "So accept() can resize your buffer with realloc() if the peer address doesn't fit",
+              "correct": false,
+              "why": "The kernel never allocates or reallocates memory in your process — it only writes into the buffer you supplied, and truncates if it's too small. Nothing in this API takes ownership of your storage."
+            },
+            {
+              "text": "It's a value-result argument: you pass in your buffer's size, the kernel writes back the size it used. Uninitialised, the kernel sees stack garbage as your buffer size",
+              "correct": true,
+              "why": "C can't return two things, so the API borrows the caller's variable to carry a value in each direction — a pattern that recurs all over these calls. Leaving it uninitialised is nasty precisely because it often appears to work: whenever the garbage happens to be large enough, the kernel fills the address normally, so the bug hides until the day the stack contains something small."
+            },
+            {
+              "text": "Because socklen_t is too large to pass in a register on most architectures",
+              "correct": false,
+              "why": "socklen_t is a 32-bit integer; passing it by value would be trivial. The pointer exists for the return direction, not for the argument direction."
+            },
+            {
+              "text": "It's a legacy quirk with no effect — passing nullptr for the length works identically",
+              "correct": false,
+              "why": "Passing nullptr for *both* the address and the length is legal and means \"I don't care who connected\". Passing a real address buffer with a null or uninitialised length is not the same thing, and is a genuine bug."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "What does accept4(fd, ..., SOCK_CLOEXEC) give you that accept() followed by fcntl(F_SETFD, FD_CLOEXEC) does not?",
+          "options": [
+            {
+              "text": "It sets close-on-exec on the listening socket too, covering both fds at once",
+              "correct": false,
+              "why": "accept4()'s flags apply to the newly created connection only. The listening socket's flags are whatever you set when you created it, and are unaffected."
+            },
+            {
+              "text": "It makes the connection non-blocking as well, which FD_CLOEXEC does not",
+              "correct": false,
+              "why": "That's a different flag — SOCK_NONBLOCK, which accept4() also accepts. SOCK_CLOEXEC controls only what survives an exec(); it has no effect on whether reads and writes block."
+            },
+            {
+              "text": "Atomicity — between accept() returning and fcntl() running, another thread can fork+exec and leak the connection to the child",
+              "correct": true,
+              "why": "Exactly the race from Day 1, one level up. Close-on-exec is not inherited from the listening socket, so every accepted connection starts life inheritable, and the two-call fix has a window measured in instructions. On a server accepting thousands of connections a second while also spawning helpers, that window gets hit. accept4() collapses both into one syscall."
+            },
+            {
+              "text": "Nothing functionally — accept4() is just a convenience that saves you typing a second call",
+              "correct": false,
+              "why": "The convenience is real but incidental; the reason the flag was added to the creating call was the race, not ergonomics. That's the same motivation behind pipe2(), dup3() and open()'s O_CLOEXEC."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "Your process is blocked in accept() with no clients connecting. What is it costing the machine while it waits?",
+          "options": [
+            {
+              "text": "A full CPU core, since accept() polls the accept queue in a tight loop",
+              "correct": false,
+              "why": "Nothing in the blocking path spins. You can watch this directly: a server parked in accept() sits at 0% CPU in top no matter how long it waits."
+            },
+            {
+              "text": "Essentially nothing — the kernel deschedules the process, so it burns no CPU until a connection arrives",
+              "correct": true,
+              "why": "Blocking here is a sleep, not a spin: the process leaves the run queue entirely and the scheduler wakes it when the accept queue gets an entry. What it does cost is the thread and its stack — which is fine for one client and hopeless for ten thousand, and is the whole reason readiness notification (select, poll, epoll) and this curriculum's later milestones exist."
+            },
+            {
+              "text": "One kernel thread per waiting socket, scheduled alongside your process",
+              "correct": false,
+              "why": "The kernel doesn't spawn a thread to babysit a waiting socket; your own process's thread is simply parked on a wait queue attached to the socket, and the arriving connection wakes it."
+            },
+            {
+              "text": "Nothing at all — a blocked process is completely free, which is why one-thread-per-connection scales fine",
+              "correct": false,
+              "why": "The CPU cost is genuinely near zero, but \"completely free\" is the trap. Each blocked thread still holds its stack (commonly 8 MB of reserved address space) and adds scheduler bookkeeping — which is precisely why thread-per-connection collapses long before readiness-based designs do."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Extend Day 3's program:\n\n1. After `listen()`, call `accept()` **once**, into a `sockaddr_in` with a properly\n   initialised `socklen_t`.\n2. Print both fds — the listening one and the connected one — clearly labelled. Predict\n   the connected fd's number before you run it.\n3. Print the client's IP and port, using `inet_ntop()` for the address and `ntohs()` for\n   the port. Both come out of the struct the kernel filled in.\n4. `close()` **both** sockets and exit.\n\nTrigger it from another terminal with `nc 127.0.0.1 9000`. No client program of your own\nyet — that's Day 7.\n\nThen the experiment: while the connection is open (a `std::getchar()` before the closes\nwill hold it), run `ss -tan | grep 9000` in another terminal and find both rows. Confirm\nthe local port is identical on both and only the remote half differs.\n\n- You'll need `<arpa/inet.h>` for `inet_ntop`",
+        "files": [
+          "src/main.cpp"
+        ],
+        "compile": "g++ -std=c++20 -Wall -Wextra -o day4 src/main.cpp",
+        "checklist": [
+          "`accept()` return value checked, `socklen_t` initialised before the call",
+          "both fds printed and distinguishable, connected fd predicted correctly",
+          "client IP and port printed, using `inet_ntop` rather than `inet_ntoa`",
+          "both sockets closed",
+          "saw `LISTEN` and `ESTAB` rows sharing the same local port",
+          "zero warnings under `-Wall -Wextra`"
+        ]
+      }
     },
     {
       "id": "day-05",
@@ -206,10 +644,156 @@
       "estMinutes": 25,
       "teaser": "Read the same bytes twice without consuming them, and prove the kernel's buffer is not yours.",
       "teachBack": "What does the return value of recv() mean — all three cases. Then: your buffer is 1024 bytes and the client sent 4000. Walk through what actually happens, and where the other bytes are in the meantime.",
-      "status": "upcoming",
-      "theoryMarkdown": null,
-      "quiz": null,
-      "task": null
+      "slug": "recv-send",
+      "status": "available",
+      "theoryMarkdown": "### The return value is a count, not a message\n\n```cpp\nssize_t n = recv(fd, buf, sizeof(buf), 0);\n```\n\n`recv()` returns the number of bytes it put in your buffer. Not \"a message\", not \"the\nthing the client sent\" — a count of bytes, and it can be smaller than what you asked for\nand smaller than what the client sent in one go.\n\nThree outcomes, and all three must be handled:\n\n- **`n > 0`** — that many bytes are in your buffer. Nothing more is promised. In\n  particular there is no null terminator, so treating `buf` as a C string without\n  writing one yourself reads whatever was in memory after the data.\n- **`n == 0`** — **orderly shutdown**. The peer sent a FIN: they have closed their\n  sending side and no more data will ever arrive on this connection. This is not an\n  error, and it is not \"nothing arrived yet\" — a blocking `recv()` never returns 0 for\n  \"wait a moment\". Zero means end of stream, permanently.\n- **`n < 0`** — error, with the reason in `errno`. `ECONNRESET` means the peer's end\n  died rudely (an RST rather than a FIN). `EINTR` means a signal interrupted the call\n  before any data arrived, and you should simply call it again.\n\nThe 0-versus-negative distinction is the one that matters most, because they demand\nopposite reactions: `0` is a normal end-of-conversation you should close cleanly on,\n`-1` is a failure you should report. Code that lumps them together as \"the loop is over\"\nsilently swallows real errors.\n\n`send()` mirrors it, and has the same trap in the other direction: **its return value is\nhow many bytes it actually accepted**, which can be fewer than you asked it to send.\nThat's Day 6's problem, but the return value is the same kind of promise — a count, not\nan acknowledgement.\n\nNeither call tells you anything about whether the data reached the other machine.\n`send()` returning 512 means 512 bytes are now in the kernel's send buffer and are the\nkernel's problem. It does not mean they arrived, and there is no socket API call that\ntells you they did.\n\n### The kernel's buffer is not your buffer\n\nEvery socket has receive and send buffers in kernel memory (Day 1's list). Bytes arrive\nfrom the network into the receive buffer whether or not your process ever calls\n`recv()`, and `recv()` copies from that buffer into yours and *removes* what it copied.\n\nYou can prove this in two lines with a flag most people never learn, `MSG_PEEK`, which\ncopies without consuming:\n\n```cpp\nrecv(fd, buf, sizeof(buf), MSG_PEEK);   // look\nrecv(fd, buf, sizeof(buf), MSG_PEEK);   // look again — identical bytes\nrecv(fd, buf, sizeof(buf), 0);          // now actually take them\nrecv(fd, buf, sizeof(buf), MSG_DONTWAIT); // -1, EAGAIN — the buffer is empty\n```\n\nRun that and the first two calls return the same bytes and the same count. Nothing about\nthe connection changed between them; the data was sitting in kernel memory the whole\ntime, and \"reading\" is a copy-and-remove operation, not an event.\n\n`MSG_PEEK` is genuinely useful beyond the demo: protocol dispatchers use it to look at\nthe first few bytes and decide which handler should own the connection before any of the\ndata has been consumed. It's also a good way to lose an afternoon, because peeking in a\nloop while waiting for more data is a busy-wait that will happily spin a core.\n\nTwo other flags worth knowing exist:\n\n- **`MSG_WAITALL`** — don't return until the full requested count has arrived (or the\n  connection ends). It turns the short-read problem off for a fixed-size read, and it's\n  the right tool when you genuinely know the length in advance.\n- **`MSG_DONTWAIT`** — make just this one call non-blocking, returning `EAGAIN` rather\n  than sleeping. Per-call, so you don't have to change the socket's mode.\n\n### Why a short read is normal, not an error\n\nYou ask for 1024 bytes; the client sent 4000. `recv()` gives you, say, 1448 — or 512, or\n73. It returns what's in the receive buffer *now* rather than waiting for more, because\nTCP is a stream and there is no \"rest of the message\" for it to wait for: it has no idea\nwhere your message ends. Bytes arrive in whatever chunks the network and the sender's\nkernel produced, and those chunks have nothing to do with the sizes the sender passed to\n`send()`.\n\nToday you call `recv()` exactly once and see this happen. Tomorrow you loop, which is\nwhere it stops being a curiosity and starts being a bug you have to design against.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "What does recv() returning 0 mean, and why is it a different situation from returning -1?",
+          "options": [
+            {
+              "text": "0 means your buffer size was 0; with a non-empty buffer recv() only ever returns positive or -1",
+              "correct": false,
+              "why": "A zero-length buffer is a degenerate case, but a normal recv() on a normal buffer genuinely does return 0 the moment the peer closes its sending side — it's the standard, expected way you learn a client hung up."
+            },
+            {
+              "text": "0 is an orderly shutdown — the peer sent FIN and no more data will ever arrive. -1 is an error with the reason in errno",
+              "correct": true,
+              "why": "They demand opposite reactions: 0 is a normal end of conversation you close cleanly on, -1 is a failure you report. A blocking recv() never returns 0 to mean \"nothing yet\" — zero is permanent end of stream. Code that collapses both into \"the loop is over\" silently swallows real errors like ECONNRESET."
+            },
+            {
+              "text": "0 means no data was available yet, so you should call recv() again in a moment",
+              "correct": false,
+              "why": "That's what a blocking recv() will never do — it sleeps until something arrives rather than returning empty-handed. The \"nothing yet\" answer is -1 with EAGAIN, and only on a non-blocking socket or with MSG_DONTWAIT."
+            },
+            {
+              "text": "0 means the connection failed, and -1 means it closed normally",
+              "correct": false,
+              "why": "Exactly inverted. It's worth fixing this one firmly, because getting it backwards produces a server that treats every clean disconnect as an error and every error as a clean disconnect."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "You call recv(fd, buf, 1024, 0) and the client sent 4000 bytes. What can you say about the return value, and where are the remaining bytes?",
+          "options": [
+            {
+              "text": "It returns somewhere between 1 and 1024 — whatever is in the receive buffer now — and the rest stays in the kernel's buffer for later calls",
+              "correct": true,
+              "why": "recv() returns what's available rather than waiting for a total it has no way to know, because TCP is a stream with no message boundaries. It can hand back far less than either your buffer size or the sender's write size: the chunks you see come from the network and the sender's kernel, not from the sender's send() calls. This is the short read, and Day 6 is about designing for it."
+            },
+            {
+              "text": "It returns 4000, since the kernel reassembles the whole message before waking you",
+              "correct": false,
+              "why": "It can't return more than the buffer size you passed, and there is no \"message\" for the kernel to reassemble — it has no idea where the sender thought one ended. TCP guarantees order and delivery, never framing."
+            },
+            {
+              "text": "It returns exactly 1024, because recv() always fills the buffer it's given if enough data exists",
+              "correct": false,
+              "why": "Only MSG_WAITALL asks for that behaviour, and even it gives up early if the connection ends. A plain recv() is explicitly permitted to return less, and on a real network routinely does — often at odd sizes like 1448, the payload that fits one Ethernet frame."
+            },
+            {
+              "text": "It returns -1 with EMSGSIZE, since the incoming data doesn't fit the buffer",
+              "correct": false,
+              "why": "Oversized data isn't an error condition on a stream socket at all. The excess simply stays in the receive buffer and is delivered by subsequent calls; the data is only dropped if you close the connection without reading it."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "send() returns 512 when you asked it to send 512 bytes. What has actually happened at that point, and what has not?",
+          "options": [
+            {
+              "text": "The bytes were written directly to the network card, bypassing kernel buffering for small writes",
+              "correct": false,
+              "why": "There's no such bypass in the ordinary path; everything goes through the socket send buffer, where TCP decides on segmentation and timing (Nagle, congestion window, and the rest). Kernel-bypass stacks exist but are a specialist tool, not what send() does."
+            },
+            {
+              "text": "The peer's kernel has acknowledged all 512 bytes, though the peer's application may not have read them",
+              "correct": false,
+              "why": "Closer to the truth than \"the app read it\", but still more than send() promises. send() can return long before any ACK comes back — it returns as soon as the data is copied into the send buffer."
+            },
+            {
+              "text": "512 bytes are in the kernel's send buffer and are now its problem — it does not mean they reached the peer, and no socket call tells you that",
+              "correct": true,
+              "why": "send() is a handoff to the kernel, not a delivery receipt. The bytes may still be queued, in flight, or lost and awaiting retransmission. This is why application-level acknowledgements exist: if your protocol needs to know the other side actually got something, the other side has to say so."
+            },
+            {
+              "text": "The peer's application has received all 512 bytes",
+              "correct": false,
+              "why": "Two layers too optimistic. Even after the bytes genuinely arrive, they sit in the peer's receive buffer until its code calls recv() — which it may never do."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "Two consecutive MSG_PEEK reads return the same bytes. What does that tell you about where the data lives and what a normal recv() does?",
+          "options": [
+            {
+              "text": "The peer sent the data twice, once for each peek",
+              "correct": false,
+              "why": "Nothing goes back to the peer when you call recv() — MSG_PEEK generates no network traffic whatsoever. The sender has no idea whether or how often you've read."
+            },
+            {
+              "text": "It means the socket is in a special peek mode until you clear it with a normal read",
+              "correct": false,
+              "why": "MSG_PEEK is a per-call flag with no lasting effect on the socket. You can freely interleave peeking and normal reads; nothing is latched."
+            },
+            {
+              "text": "The data sits in a kernel-side receive buffer, and a normal recv() is a copy-and-remove from it — peeking copies without removing",
+              "correct": true,
+              "why": "This is the whole mental model in one experiment. Bytes arrive into kernel memory whether or not you ever call recv(); reading is not an event you're notified of, it's you taking a copy and consuming it. Once you see the same bytes twice and then watch a plain recv() make them disappear, short reads and buffering stop being abstract."
+            },
+            {
+              "text": "MSG_PEEK caches the bytes in your process, so the second read comes from a userspace copy",
+              "correct": false,
+              "why": "There's no userspace cache in the C library here; each peek is a syscall that copies out of the same kernel buffer. That's why the data survives — it was never removed from the kernel's side."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "Your code does buf[n] = '\\0' after a successful recv() and prints buf as a string. What is the assumption there, and when does it bite?",
+          "options": [
+            {
+              "text": "That n < sizeof(buf) — if recv() filled the buffer completely, that write is one past the end",
+              "correct": true,
+              "why": "A classic off-by-one buffer overflow, and it hides for a long time because it only triggers when a read happens to fill the buffer exactly. Either pass sizeof(buf) - 1 as the length so the terminator always fits, or stop treating network bytes as a C string and print exactly n bytes — the data has no terminator of its own and may legitimately contain zero bytes anywhere."
+            },
+            {
+              "text": "That recv() null-terminates the data itself, making the assignment redundant",
+              "correct": false,
+              "why": "recv() never terminates anything — it delivers exactly the bytes that arrived. The assignment is necessary if you insist on C-string handling; it's the lack of a bounds check that's the bug, not the assignment."
+            },
+            {
+              "text": "Nothing is assumed — writing at index n is always safe because recv() returns at most sizeof(buf)",
+              "correct": false,
+              "why": "\"At most sizeof(buf)\" is exactly the problem: when n equals sizeof(buf), index n is the first byte past the end. The bound you need is one smaller than the bound recv() respects."
+            },
+            {
+              "text": "That the peer sent text rather than binary, which is only a display problem",
+              "correct": false,
+              "why": "Real, but not the dangerous part. Printing binary as text is ugly; writing past the end of the buffer is memory corruption, which is a different class of problem entirely."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Extend Day 4's program. After `accept()`:\n\n1. `recv()` **once** into a buffer. Check all three outcomes explicitly — `> 0`, `== 0`,\n   `< 0` — and print which one you got, with `strerror(errno)` on the error path.\n2. Print how many bytes arrived, and the bytes themselves. Print the count *before* the\n   content, so a mismatch between \"how much\" and \"what\" is obvious.\n3. `send()` those exact bytes back — exactly `n` of them, not `sizeof(buf)`. Check its\n   return value and print how many it accepted.\n4. Close both sockets. No loop, even though you will want one.\n\nThen the experiment, which is the point of today:\n\nBefore your real `recv()`, add two `MSG_PEEK` reads and print what each returns. Confirm\nyou get the same bytes twice, that the normal `recv()` afterwards still gets them, and\nthat a following `MSG_DONTWAIT` read returns `-1` with `EAGAIN`. That sequence is the\nkernel's buffer, your buffer, and the difference between them, made visible.\n\nFeed it with `nc 127.0.0.1 9000` and type a line. Then try feeding it something much\nlarger than your buffer to see a short read:\n\n```console\n$ head -c 100000 /dev/urandom | base64 | nc 127.0.0.1 9000\n```",
+        "files": [
+          "src/main.cpp"
+        ],
+        "compile": "g++ -std=c++20 -Wall -Wextra -o day5 src/main.cpp",
+        "checklist": [
+          "all three `recv()` outcomes handled distinctly, not collapsed into two",
+          "byte count printed, and only `n` bytes echoed back — never `sizeof(buf)`",
+          "`send()` return value checked and printed",
+          "`MSG_PEEK` read the same bytes twice, then a normal `recv()` consumed them",
+          "saw a short read: asked for the full buffer, got fewer bytes than were sent",
+          "zero warnings under `-Wall -Wextra`"
+        ]
+      }
     },
     {
       "id": "day-06",
@@ -218,10 +802,158 @@
       "estMinutes": 30,
       "teaser": "TCP is a byte stream, not a message stream — plus the 40-millisecond stall that has been ambushing engineers since the 1980s.",
       "teachBack": "Explain why one send() on the client does not equal one recv() on the server, and what that means for anyone who wants to send \"messages\" over TCP. Then: how would you know where a message ends?",
-      "status": "upcoming",
-      "theoryMarkdown": null,
-      "quiz": null,
-      "task": null
+      "slug": "echo-loop",
+      "status": "available",
+      "theoryMarkdown": "### One send() is not one recv()\n\nThis is the day the abstraction you have been half-assuming falls over.\n\nTCP is a **byte stream**. It guarantees that every byte you send arrives, exactly once,\nin order. It guarantees nothing whatsoever about *grouping*. The boundaries between your\n`send()` calls are not transmitted, not recorded, and not recoverable — they exist only\nin your process's memory and are gone the moment the bytes hit the kernel.\n\nSo a client that does this:\n\n```cpp\nsend(fd, \"HELLO\", 5, 0);\nsend(fd, \"WORLD\", 5, 0);\n```\n\nmay produce, on the server, any of:\n\n- one `recv()` returning `HELLOWORLD` (10 bytes, both writes coalesced)\n- two `recv()`s returning `HELLO` then `WORLD` (what you naively expect)\n- three `recv()`s returning `HEL`, `LOWOR`, `LD` (split anywhere at all)\n\nAll three are correct TCP. Nothing is broken. The stream was delivered in order and\nintact; only your assumption about framing was imaginary.\n\nThis is why every real protocol over TCP has to define its own message boundaries, and\nthere are only three ways to do it: a **length prefix** (send the size, then that many\nbytes — what most binary protocols do), a **delimiter** (read until `\\n` — what HTTP\nheaders, SMTP and IRC do), or **close the connection to mean \"done\"** (HTTP/1.0's\noriginal answer, and the reason `Content-Length` had to be invented).\n\nAn echo server is the one case where you can dodge the question entirely, because\nechoing bytes back doesn't require understanding where a message starts or ends. Enjoy\nthat; you don't get it again.\n\n### Short writes: the mirror image\n\n`send()` can accept fewer bytes than you gave it. Its return value is the count it took.\n\nThe reason is Day 5's buffer, from the other side: the kernel copies your bytes into the\nsocket's send buffer, and if that buffer is nearly full — because the network is slower\nthan you, or the peer isn't reading — it takes what fits and returns. It doesn't wait\nfor room unless the socket is blocking *and* the buffer is completely full.\n\nSo this is a bug:\n\n```cpp\nsend(conn, buf, n, 0);      // wrong: ignores the return value\n```\n\nand this is the correct shape:\n\n```cpp\nsize_t sent = 0;\nwhile (sent < n) {\n    ssize_t k = send(conn, buf + sent, n - sent, 0);\n    if (k < 0) { /* handle EINTR by retrying, everything else is fatal */ }\n    sent += static_cast<size_t>(k);\n}\n```\n\nYou will almost never see a short write on loopback with small messages, which is\nexactly what makes it dangerous: the code looks correct for months, then truncates data\nthe first time it runs against a slow client on a real network. To force one, you need a\npeer that stops reading while you keep writing until the send buffer fills.\n\n### SIGPIPE will kill your server, silently\n\nWrite to a socket whose peer has fully closed, and the kernel raises **`SIGPIPE`**, whose\ndefault disposition is to **terminate your process**. Not an error return — process\ndeath, with no message.\n\nThe first `send()` after the peer disappears often succeeds (the bytes go into your send\nbuffer, the failure isn't known yet). It's the *second* one that kills you. So a server\nthat doesn't handle this dies at an unpredictable moment, with no log line, whenever a\nclient hangs up rudely. It looks like a crash with no cause.\n\nThree fixes, any of which works:\n\n- pass **`MSG_NOSIGNAL`** to each `send()` — the signal is suppressed and you get `-1`\n  with `EPIPE` instead, which is what you actually wanted\n- `signal(SIGPIPE, SIG_IGN)` once at startup, same effect process-wide\n- set `SO_NOSIGPIPE` on the socket (BSD and macOS; not Linux)\n\nHandling it as an ordinary error is always right. `EPIPE` means \"this connection is\nover\" and belongs on the same path as `recv()` returning 0.\n\n### Nagle and delayed ACK: the classic 40 ms\n\nTwo optimisations, each sensible alone, that interact badly.\n\n**Nagle's algorithm** (1984) stops a socket from sending a small segment while a\nprevious small segment is still unacknowledged — it buffers the little writes and sends\nthem as one. It exists because of a real crisis: telnet sessions were putting a\n41-byte packet on the wire for every single keystroke, and the overhead was congesting\nearly networks.\n\n**Delayed ACK** does the opposite favour: on receiving data, wait a moment (up to 40 ms\non Linux, 200 ms elsewhere) before acknowledging, hoping to piggyback the ACK on a reply\nand save a packet.\n\nPut them together in a request-response protocol where one side writes in two pieces,\nand you get a standoff: the sender is holding the second piece until the first is ACKed;\nthe receiver is holding the ACK hoping for data to attach it to. Nobody moves until the\ndelayed-ACK timer expires. The result is a mysterious, wildly reproducible ~40 ms stall\nper exchange that shows up in production and vanishes under a profiler.\n\nThe fix is `TCP_NODELAY`, which turns Nagle off:\n\n```cpp\nint yes = 1;\nsetsockopt(conn, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));\n```\n\nEssentially every RPC framework, database driver and game server sets it. Note it goes on\nthe *connected* socket, and note the name is a double negative you'll misread at least\nonce: `TCP_NODELAY = 1` means \"do not delay\", i.e. Nagle **off**.\n\nBeing honest about what you'll see today: on loopback, with an echo server, you probably\n*won't* reproduce the stall — there's no real network latency, and the traffic pattern\nis too simple to trigger the standoff. Knowing the mechanism matters more than measuring\nit here; the day you meet an unexplained 40 ms in a request/response system, you'll know\nwhere to look immediately.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "A client calls send() twice, with \"HELLO\" then \"WORLD\". What might the server's recv() calls legitimately return, and why?",
+          "options": [
+            {
+              "text": "Anything that preserves the byte order — one recv of HELLOWORLD, two of HELLO and WORLD, or three like HEL / LOWOR / LD. All are correct TCP",
+              "correct": true,
+              "why": "TCP guarantees that every byte arrives, once, in order. It guarantees nothing about grouping: the boundaries between your send() calls exist only in your process's memory and are never transmitted. Coalescing and splitting are both normal — driven by Nagle, MTU, congestion control and timing — so any split that preserves order is a correct delivery of the same stream."
+            },
+            {
+              "text": "Always two recv()s returning HELLO and WORLD, since TCP preserves record boundaries",
+              "correct": false,
+              "why": "That's SOCK_DGRAM's behaviour (UDP), where one datagram is one recv and boundaries genuinely are preserved. A stream socket has no records at all — this expectation is the single most common source of framing bugs."
+            },
+            {
+              "text": "One recv() returning HELLOWORLD, always, because the kernel coalesces before delivering",
+              "correct": false,
+              "why": "Coalescing is permitted, not guaranteed. Whether the two writes end up in one segment depends on timing, Nagle, and how quickly the receiver drains — code that relies on it breaks the first time the writes are far enough apart."
+            },
+            {
+              "text": "Two recv()s, unless the total exceeds the MTU, in which case the split follows packet boundaries exactly",
+              "correct": false,
+              "why": "The MTU influences segmentation but recv() boundaries don't track packets either: the kernel may deliver part of a segment if that's all your buffer fits, or several segments' worth in one call if they've already arrived. Nothing at the application layer sees packets."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "Given that TCP has no message boundaries, how does a real protocol know where one message ends and the next begins?",
+          "options": [
+            {
+              "text": "You use a fixed message size everywhere, which is why most binary protocols pad to a constant width",
+              "correct": false,
+              "why": "Fixed-size records are a special case of length-prefixing where the length is known in advance, and they still need the recv loop to handle short reads. It's not how most protocols work, and it doesn't answer the variable-length case at all."
+            },
+            {
+              "text": "TCP's PSH flag marks the end of each message, and the receiving stack surfaces it",
+              "correct": false,
+              "why": "A tempting-looking answer, since PSH does relate to delivery timing, but it's a hint to the stack about flushing rather than a message terminator, and the sockets API doesn't expose it to applications at all."
+            },
+            {
+              "text": "The kernel exposes the sender's send() sizes through recvmsg(), so framing is recoverable if you ask for it",
+              "correct": false,
+              "why": "Nothing anywhere records the sender's write sizes — they're discarded as the bytes enter the send buffer. recvmsg() gives you scatter-gather and ancillary data, not the sender's call boundaries."
+            },
+            {
+              "text": "It defines its own framing: a length prefix, a delimiter, or closing the connection to signal the end",
+              "correct": true,
+              "why": "Those are the only three options, and you can name the protocol for each: length prefixes in most binary and RPC protocols, delimiters in HTTP headers, SMTP and IRC (read until CRLF), and connection-close-means-done in HTTP/1.0 — which is exactly why Content-Length had to exist once keep-alive arrived."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "send(conn, buf, n, 0) returns a value smaller than n. What happened, and what must your code do about it?",
+          "options": [
+            {
+              "text": "The connection is failing; a short write means you should close and reconnect",
+              "correct": false,
+              "why": "A short write is completely normal flow control, not an error signal. Errors come back as -1 with errno set; a positive return smaller than n just means \"here's how much I took, send the rest\"."
+            },
+            {
+              "text": "The peer only had room for that much, so the remaining bytes must be dropped",
+              "correct": false,
+              "why": "Nothing is dropped and nothing is lost — the untaken bytes are still in *your* buffer, and it's your job to send them. TCP never discards data it has accepted."
+            },
+            {
+              "text": "It can't happen on a blocking socket — blocking send() always sends everything or returns -1",
+              "correct": false,
+              "why": "A blocking send() blocks only when the buffer is completely full. With partial room available it takes what fits and returns immediately, which is exactly the short write. The guarantee you're imagining doesn't exist."
+            },
+            {
+              "text": "Only that many bytes fit in the kernel's send buffer; you must loop, sending from buf + sent until everything is gone",
+              "correct": true,
+              "why": "It's Day 5's buffering from the writing side: the kernel takes what fits and tells you how much. Ignoring the return value silently truncates your data — and because it almost never happens on loopback with small messages, the bug survives every local test and appears the first time a slow client or a real network is involved."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "Your server dies with no log output whenever a client disconnects abruptly. What is killing it, and why does the first send() after the disconnect often succeed?",
+          "options": [
+            {
+              "text": "The kernel closes your process's remaining sockets, so the next accept() returns EBADF and you exit",
+              "correct": false,
+              "why": "Your fds are unaffected by a peer disappearing, and this wouldn't be silent — you'd get an error return you could log. The silence is the clue that a signal killed you before any of your code ran."
+            },
+            {
+              "text": "SIGPIPE, whose default action terminates the process; the first send() succeeds because those bytes just go into the send buffer before the failure is known",
+              "correct": true,
+              "why": "It's process death rather than an error return, which is why there's no log line — your error handling never runs. The delay is the giveaway: the first write is accepted locally, the peer's RST comes back, and the *second* write hits a socket now known to be dead. Suppress it with MSG_NOSIGNAL or signal(SIGPIPE, SIG_IGN) and handle EPIPE like any other end-of-connection. A process killed this way exits with status 141."
+            },
+            {
+              "text": "ECONNRESET from recv() being treated as fatal by your loop",
+              "correct": false,
+              "why": "Plausible, and worth handling, but that path returns -1 through your code — so you'd see whatever your error branch prints. Total silence points at a signal, not an error return."
+            },
+            {
+              "text": "A segfault from writing to a closed fd, because the socket's kernel memory was freed",
+              "correct": false,
+              "why": "Closing a peer's socket doesn't invalidate your fd or touch your address space; writing to a dead socket is a well-defined operation that reports an error. Nothing here dereferences freed memory."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "TCP_NODELAY disables Nagle's algorithm. What problem was Nagle solving, and what does it interact badly with?",
+          "options": [
+            {
+              "text": "It compresses small packets, and interacts badly with encryption because compressed ciphertext leaks length information",
+              "correct": false,
+              "why": "Nagle doesn't compress anything — it batches writes into fewer segments. The compression-and-encryption interaction is a real security concern (CRIME and BREACH), but it belongs to a completely different layer."
+            },
+            {
+              "text": "It limits how much unacknowledged data can be in flight, and interacts badly with high-bandwidth links",
+              "correct": false,
+              "why": "That describes the congestion window and the receive window — genuinely a bandwidth-delay-product problem on fast long links, but a separate mechanism. Nagle's rule is about small segments specifically, not total bytes in flight."
+            },
+            {
+              "text": "It was solving packet reordering, and interacts badly with congestion control on lossy links",
+              "correct": false,
+              "why": "Reordering is handled by sequence numbers and the receiver's reassembly, not by Nagle. Nagle is purely about *when* to send small amounts of data, never about the order it arrives in."
+            },
+            {
+              "text": "It stopped tiny writes flooding the network (a 41-byte packet per telnet keystroke); it interacts badly with delayed ACK, producing ~40 ms stalls",
+              "correct": true,
+              "why": "Both optimisations are sensible alone. Nagle holds a small segment until the previous one is ACKed; delayed ACK holds the ACK hoping to piggyback it on a reply. In a request-response protocol where one side writes in two pieces they deadlock each other until the delayed-ACK timer fires — a wildly reproducible stall that vanishes under a profiler and has ambushed engineers since the 1980s. TCP_NODELAY = 1 means \"do not delay\", i.e. Nagle off."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Turn Day 5's single exchange into a loop:\n\n1. Loop: `recv()` into a buffer, and echo back exactly the bytes that arrived.\n2. Exit the loop cleanly when `recv()` returns `0` (peer hung up), and on error report\n   `strerror(errno)` — but retry rather than bail on `EINTR`.\n3. Write the send loop properly, so a short write can't truncate your echo. Even though\n   you're unlikely to see one today, write it as if you will.\n4. Suppress `SIGPIPE` by whichever of the three methods you prefer, and handle `EPIPE`\n   as a normal end-of-connection.\n5. Close the connected socket when the loop ends. Leave the listening socket alone —\n   Day 4's rule.\n\nTwo experiments:\n\n**Kill the server with SIGPIPE, then fix it.** First *without* any SIGPIPE handling:\nconnect with `nc`, then kill `nc` abruptly (Ctrl-C) while your server is mid-echo, and\nwatch your server die. Confirm what killed it — a process terminated by SIGPIPE exits\nwith status 141:\n\n```console\n$ ./day6; echo \"exit=$?\"\n```\n\nThen add the suppression and confirm you get `EPIPE` as a return value instead, and the\nserver survives.\n\n**Prove the byte stream has no boundaries.** Paste a large blob into `nc` in one go, with\na deliberately small server buffer (64 bytes is plenty):\n\n```console\n$ head -c 4000 /dev/urandom | base64 | tr -d '\\n' | nc 127.0.0.1 9000\n```\n\nCount how many `recv()` calls it takes. One `send()` on the client became many reads on\nthe server, and the sizes are whatever the network felt like.\n\n- You'll need `<netinet/tcp.h>` if you experiment with `TCP_NODELAY`, `<csignal>` for\n  the signal approach",
+        "files": [
+          "src/main.cpp"
+        ],
+        "compile": "g++ -std=c++20 -Wall -Wextra -o day6 src/main.cpp",
+        "checklist": [
+          "loop exits cleanly on `recv()` returning 0, distinctly from the error path",
+          "`EINTR` retried rather than treated as fatal",
+          "`send()` wrapped in a loop that handles a partial write",
+          "`SIGPIPE` suppressed, `EPIPE` handled as end-of-connection",
+          "observed the server dying with exit status 141 before the fix",
+          "one client `send()` observed arriving as several `recv()`s",
+          "connected socket closed, listening socket left open",
+          "zero warnings under `-Wall -Wextra`"
+        ]
+      }
     },
     {
       "id": "day-07",
@@ -230,10 +962,155 @@
       "estMinutes": 30,
       "teaser": "Accept, serve, disconnect, accept again — and the difference between hanging up and hanging up politely.",
       "teachBack": "Walk the whole lifecycle from both sides — what the server calls, what the client calls, and where the two meet. Then: what does connect() do that bind/listen/accept do on the other end, and why is there no accept() on the client side?",
-      "status": "upcoming",
-      "theoryMarkdown": null,
-      "quiz": null,
-      "task": null
+      "slug": "outer-loop-client",
+      "status": "available",
+      "theoryMarkdown": "### The server, finally whole\n\nEverything so far served one client and exited. The fix is one more loop, wrapped around\n`accept()`:\n\n```\nsocket() -> bind() -> listen()          once, at startup\n    accept()                            per client\n        recv()/send() until recv()==0   per exchange\n    close(conn)                         per client\n                                        then back to accept()\n```\n\nNote where `close()` is and is not. The connected socket dies with its client. The\nlistening socket outlives all of them — Day 4's factory-and-product rule, now load\nbearing. Get it inverted and your server handles exactly one client, which is the exact\nsymptom the mistake produces.\n\nThis structure is also, precisely, why a blocking server can't serve two clients at once:\nwhile you're inside the inner loop talking to client A, control is nowhere near\n`accept()`. Client B's connection gets handshaken by the kernel and sits in the accept\nqueue from Day 3, waiting for you to come back around. It isn't refused, and it isn't\nlost — it's just *ignored*, for as long as A holds you. Everything in milestone 02\nexists to break that constraint.\n\n### The client is the same API with one call swapped\n\n```\nsocket()  ->  connect()  ->  send()/recv()  ->  close()\n```\n\nNo `bind()`, no `listen()`, no `accept()`. Just `connect()`, which does three things\nat once:\n\n1. An **implicit bind**. Your client never picked a port, so the kernel assigns one from\n   the ephemeral range (`/proc/sys/net/ipv4/ip_local_port_range`, usually 32768–60999).\n   That's the `51234` you saw in the remote column on Day 4.\n2. The **three-way handshake** — SYN, SYN-ACK, ACK — which is the part that blocks.\n3. On success, the socket is `ESTABLISHED` and the very same `send()`/`recv()` you wrote\n   for the server work here unchanged. There is no \"client API\"; a connected socket is a\n   connected socket, and both ends are peers from here on.\n\n`connect()` takes the same `sockaddr *` cast and length as `bind()` — but the address you\nfill in is now the *destination*, not the local endpoint. Use `inet_pton()` to turn\n`\"127.0.0.1\"` into `sin_addr` (the modern counterpart to Day 4's `inet_ntop`), and\n`htons()` on the port exactly as before.\n\nIts failure modes are worth knowing by name, because each one tells you something\ndifferent:\n\n- **`ECONNREFUSED`** — a machine is there and answered your SYN with an **RST**. Nothing\n  is listening on that port. This comes back fast, which is the pleasant case: an\n  immediate, unambiguous \"no\".\n- **`ETIMEDOUT`** — no answer at all. Your SYNs vanished into the void: a firewall\n  dropping packets silently, or a host that isn't there. This takes a long time to\n  report, because the stack retries patiently before giving up.\n- **`ENETUNREACH` / `EHOSTUNREACH`** — routing failed before anything left the building.\n\nThe gap between the first two is a genuinely useful diagnostic in production: *refused\nfast* means the host is up and the service is down; *hangs then times out* usually means\na firewall.\n\n### close() versus shutdown()\n\n`close()` drops your process's reference to the socket. If that was the last reference,\nthe kernel begins tearing the connection down — both directions at once.\n\n`shutdown()` is more precise, and it's the call people don't learn until they need it:\n\n```cpp\nshutdown(fd, SHUT_WR);   // send FIN: \"I'm done sending\", still able to read\nshutdown(fd, SHUT_RD);   // stop receiving\nshutdown(fd, SHUT_RDWR); // both\n```\n\n`shutdown(fd, SHUT_WR)` performs a **half close**. It sends the FIN — so the peer's\n`recv()` returns 0 and it knows your request is complete — while leaving your read side\nopen, so you can still receive their reply. That's the only correct way to say \"that's\nmy whole request, now answer me\" on a protocol without its own framing.\n\nThe classic bug it fixes: a client that sends a request, calls `close()`, and then tries\nto read the response. The response never comes, because `close()` tore down both\ndirections and the server's reply hit a socket that no longer exists — it gets an RST for\nits trouble. `shutdown(SHUT_WR)` then read, *then* `close()`, is the correct sequence.\n\nThere's also a refcount difference worth knowing: after `fork()`, two processes hold the\nsame socket, and `close()` in one only decrements the count — the connection stays up\nuntil the last holder closes. `shutdown()` ignores refcounts entirely and acts on the\nconnection itself, affecting every process that shares it.\n\n### The ephemeral port range, and why clients run out first\n\nA client's four-tuple is (local IP, **ephemeral port**, server IP, server port). Three of\nthose are fixed when you connect to one service, so the only thing that varies is the\nephemeral port — roughly 28,000 of them by default. That's why the machine that exhausts\nports is almost always the *client* side of a busy service-to-service link, and why\n`TIME_WAIT` on the client matters so much more than people expect: each closed connection\nholds its ephemeral port for a minute or two, so a client opening thousands of short\nconnections per second can genuinely run out.\n\nThe fix isn't a bigger port range, it's connection reuse — which is why HTTP keep-alive\nand connection pools exist at all.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "In the server's loop, which socket gets closed per client and which one must not? What's the symptom if you get it backwards?",
+          "options": [
+            {
+              "text": "Close the accepted socket per client, never the listener — close the listener and the server serves exactly one client, then accepts nothing ever again",
+              "correct": true,
+              "why": "Factory and product, from Day 4. The symptom is distinctive and worth recognising on sight: the first client works perfectly, then the server sits there alive and healthy while every subsequent connection fails or hangs. That \"works once\" signature almost always means a closed listening socket."
+            },
+            {
+              "text": "Close both after each client; the next accept() re-creates the listener automatically",
+              "correct": false,
+              "why": "Nothing re-creates a listening socket. Once closed you'd have to socket(), bind() and listen() again from scratch — and bind() would likely fail with EADDRINUSE for Day 3's reasons, turning one bug into two."
+            },
+            {
+              "text": "Close the listening socket per client and keep the accepted one, since the accepted socket is the long-lived conversation",
+              "correct": false,
+              "why": "Exactly inverted, and it produces the one-client-only server. The accepted socket is the short-lived thing — it dies with its client; the listener is what must outlive every connection."
+            },
+            {
+              "text": "Close neither — let process exit clean everything up, since the fds are reused anyway",
+              "correct": false,
+              "why": "This is a straight fd leak, and it's the exact scenario from Day 1's quiz: one leaked fd per client, fine for hours, then every call fails at once with EMFILE when the table fills. A long-lived server is the worst possible place to rely on process exit for cleanup."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "Your blocking server is mid-conversation with client A when client B connects. What happens to B, and which mechanism from Day 3 is involved?",
+          "options": [
+            {
+              "text": "B is refused with ECONNREFUSED, because the server is busy inside its inner loop",
+              "correct": false,
+              "why": "Refusal happens when nothing is listening at all. Your listening socket is still in LISTEN with the kernel answering SYNs on it, regardless of what your code is doing, so the connection is accepted at the TCP level and queued."
+            },
+            {
+              "text": "B's connect() blocks until the server calls accept(), so B knows it isn't being served yet",
+              "correct": false,
+              "why": "A reasonable guess, but connect() returns as soon as the handshake completes — which the kernel does without you. B has no way to distinguish \"accepted and being served\" from \"sitting in the queue\"; that's precisely why the wait is confusing to debug from the client side."
+            },
+            {
+              "text": "The kernel completes B's handshake and parks it in the accept queue; B waits, connected but unserved, until the server loops back to accept()",
+              "correct": true,
+              "why": "B's connect() succeeds — the handshake is the kernel's work, not yours — so from B's point of view it is connected and can even send data. It simply gets no reply, because control is nowhere near accept(). That gap between \"connected\" and \"being served\" is the whole limitation milestone 02 exists to remove."
+            },
+            {
+              "text": "The kernel forks a copy of your process to handle B, which is why servers scale by default",
+              "correct": false,
+              "why": "The kernel never forks your process on your behalf. Fork-per-connection is a design *you* implement (it's this milestone's stretch goal) — nothing happens automatically."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "The client never calls bind(), yet it has a local port. Where did it come from, and what range does it come from?",
+          "options": [
+            {
+              "text": "It's port 0, which the kernel treats as a wildcard for the lifetime of the connection",
+              "correct": false,
+              "why": "Port 0 is what you *pass* to ask for an ephemeral assignment; it's never the port you end up with. The kernel resolves it to a real number before the connection is established."
+            },
+            {
+              "text": "connect() does an implicit bind, assigning a port from the ephemeral range in /proc/sys/net/ipv4/ip_local_port_range (usually 32768-60999)",
+              "correct": true,
+              "why": "Every connection needs a full four-tuple, so the local port has to exist — connect() just picks one for you rather than making you choose. It's the same number that shows up in the server's peer address, and it changes every run, which you can watch directly. The range's size (~28,000) is also why a busy client can exhaust ports long before a server does."
+            },
+            {
+              "text": "It reuses the server's port, 9000, since both ends of a connection share it",
+              "correct": false,
+              "why": "The four-tuple would then have identical local and remote endpoints on loopback, which couldn't identify anything. The client's port is always distinct from the server's; the server's 9000 appears only in the remote half of the client's tuple."
+            },
+            {
+              "text": "There isn't one — only the listening side needs a port, and clients are identified by IP alone",
+              "correct": false,
+              "why": "Then two connections from the same machine to the same server would be indistinguishable. The varying ephemeral port is exactly what lets one host open many simultaneous connections to one service."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "A client sends a request, calls close(), then tries to recv() the response, and gets nothing. What's wrong, and which call fixes it?",
+          "options": [
+            {
+              "text": "close() tore down both directions; use shutdown(fd, SHUT_WR) to send FIN while keeping the read side open, then close() after reading",
+              "correct": true,
+              "why": "A half close is the only correct way to say \"that's my complete request, now answer me\" on a protocol without its own framing. After close() the socket is gone, so the server's reply arrives at nothing and earns an RST. The right sequence is shutdown(SHUT_WR), read the reply, then close()."
+            },
+            {
+              "text": "The server is buffering the reply; the client should set TCP_NODELAY to force it out",
+              "correct": false,
+              "why": "TCP_NODELAY affects when small segments leave the *sender*, and setting it on the client wouldn't change the server's behaviour anyway. The reply isn't delayed here — it has nowhere to be delivered."
+            },
+            {
+              "text": "Nothing is wrong with the close(); the server must be failing to flush, and needs its own shutdown() call",
+              "correct": false,
+              "why": "There's no flush step missing on the server: send() already handed the bytes to the kernel. The problem is entirely on the client side, where close() destroyed the endpoint the reply needed to arrive at."
+            },
+            {
+              "text": "recv() after close() returns 0 because the fd is closed; reopen the socket and read again",
+              "correct": false,
+              "why": "You can't reopen a socket to recover a connection — a new socket is a new connection, and the old reply is gone. Also, recv() on a closed fd gives EBADF, not 0; conflating the two hides the real bug."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "connect() fails instantly with ECONNREFUSED on one host and hangs a long time before ETIMEDOUT on another. What does each tell you?",
+          "options": [
+            {
+              "text": "Refused fast means a host answered your SYN with RST — it's up, nothing is listening there. A slow timeout means SYNs vanished — usually a firewall dropping them, or no host at all",
+              "correct": true,
+              "why": "This is one of the most useful production diagnostics in the whole API, and it costs nothing to learn. A fast, definite \"no\" means you reached a live machine and the service is down. Silence followed by a patient timeout means your packets are being swallowed — the stack retried politely for a while before giving up. \"Is the service down or is it the firewall\" is answered by how long the failure took."
+            },
+            {
+              "text": "ECONNREFUSED means the server's backlog is full, and ETIMEDOUT means it's slightly less full",
+              "correct": false,
+              "why": "A full accept queue on Linux normally causes the SYN to be *dropped*, so the client retries and sees a slow connect — never a refusal. Refusal specifically means nothing is listening on that port at all."
+            },
+            {
+              "text": "Both mean the same thing; the difference is only whether the socket was in blocking mode",
+              "correct": false,
+              "why": "Blocking mode changes how you *observe* the failure (immediately versus via poll), not which failure occurs. ECONNREFUSED and ETIMEDOUT are genuinely different network outcomes: an active rejection versus no answer at all."
+            },
+            {
+              "text": "ECONNREFUSED means DNS failed; ETIMEDOUT means the route is wrong",
+              "correct": false,
+              "why": "connect() takes an address, not a name — DNS has already happened (or never did) before this call. Routing failures have their own errors, ENETUNREACH/EHOSTUNREACH, which come back before anything reaches the wire."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Two programs. This is the day the pieces become the milestone's deliverable.\n\n**`src/server.cpp`** — take Day 6 and wrap `accept()` in an outer loop:\n\n1. `accept()`, serve the client with Day 6's echo loop, `close()` the connected socket,\n   then loop back to `accept()`.\n2. Print a line when each client connects and disconnects, with their address, so you can\n   watch the cycle.\n3. The server should never exit on its own. A client disconnecting is a normal event.\n\n**`src/client.cpp`** — the mirror image:\n\n1. `socket()`, then `connect()` to `127.0.0.1:9000` using `inet_pton()`.\n2. Read lines from stdin. Send each one, `recv()` the echo, print it.\n3. On EOF (Ctrl-D), `shutdown(fd, SHUT_WR)`, drain any remaining reply, then `close()`\n   and exit cleanly.\n4. Check every return value, including `connect()`.\n\nExperiments:\n\n**Prove the outer loop works.** Connect, disconnect, connect again, several times. The\nserver must survive every one. Then connect two clients at once and watch the second one\nsit there getting nothing until the first disconnects — that's the accept queue holding\nit, and it's the limitation milestone 02 removes.\n\n**See ECONNREFUSED.** Run the client with no server running. Note how fast it fails,\nand what `strerror(errno)` says.\n\n**Watch your ephemeral port change.** Run the client several times, and each time have\nthe server print the client's port. It's different every run — that's the kernel's\nimplicit bind picking from the ephemeral range.\n\n- Files: `src/server.cpp`, `src/client.cpp`",
+        "files": [],
+        "compile": "g++ -std=c++20 -Wall -Wextra -o server src/server.cpp && g++ -std=c++20 -Wall -Wextra -o client src/client.cpp",
+        "checklist": [
+          "server survives a client disconnecting and accepts the next one",
+          "connected socket closed per client; listening socket never closed in the loop",
+          "client connects with `inet_pton()`, every return value checked",
+          "client uses `shutdown(SHUT_WR)` on EOF and still reads the remaining reply",
+          "observed a second client waiting in the accept queue while the first is served",
+          "observed `ECONNREFUSED` and how quickly it returns",
+          "zero warnings under `-Wall -Wextra` on both files"
+        ]
+      }
     },
     {
       "id": "day-08",
@@ -242,10 +1119,155 @@
       "estMinutes": 30,
       "teaser": "Point strace, ss and tcpdump at your own server. Every claim from Day 1 onward, finally visible.",
       "teachBack": "Explain the socket lifecycle end to end, and why accept() returns a new fd rather than reusing the listening one. Then: what breaks if you get that wrong?",
-      "status": "upcoming",
-      "theoryMarkdown": null,
-      "quiz": null,
-      "task": null
+      "slug": "watch-it-work",
+      "status": "available",
+      "theoryMarkdown": "### Two halves: rigor, and finally seeing it\n\nNo new syscalls today. This session is the difference between code that works on your\nmachine and code you'd defend in a review — and then the part that makes every claim\nfrom Day 1 onward something you have *observed* rather than something you were told.\n\nThe observability half matters more than it sounds. The distinguishing habit of a senior\nengineer here isn't knowing more syscalls; it's refusing to guess. \"The connection is\nprobably still open\" and \"it's probably a firewall\" are things a junior says. The tools\nbelow turn all of those into two seconds of looking.\n\n### strace: your own syscalls, in order\n\n```console\n$ strace -e trace=network -f ./server\n```\n\n`strace` intercepts every syscall a process makes and prints it with its arguments and\nreturn value. `-e trace=network` filters to the socket family; `-f` follows forks.\n\nYou'll see exactly the sequence you wrote, and — this is the useful part — the arguments\nthe kernel actually received, including the ones your constants expanded to:\n\n```\nsocket(AF_INET, SOCK_STREAM, IPPROTO_IP)   = 3\nbind(3, {sa_family=AF_INET, sin_port=htons(9000), sin_addr=inet_addr(\"0.0.0.0\")}, 16) = 0\nlisten(3, 4096)                            = 0\naccept(3, {sa_family=AF_INET, sin_port=htons(51234), ...}, [16]) = 4\nrecvfrom(4, \"hello\\n\", 1024, 0, NULL, NULL) = 6\nsendto(4, \"hello\\n\", 6, 0, NULL, NULL)     = 6\nclose(4)                                   = 0\n```\n\nRead that listing against your own source and several days of theory become concrete at\nonce: the listening fd is 3 and the accepted fd is 4 (Day 4); `bind()` really did get 16\nbytes, the size of `sockaddr_in` (Day 2); `recvfrom` returned 6 for a 6-byte line even\nthough you asked for 1024 (Day 5).\n\n`strace` is also the fastest way to answer \"why is my program stuck\" — attach with\n`strace -p <pid>` and the last line is what it's blocked in.\n\n### ss: the connections, from outside\n\n```console\n$ ss -tan                     # all TCP sockets, numeric\n$ ss -tan state time-wait     # just the lingering ones\n$ ss -tanp                    # add the owning process (needs privileges)\n$ ss -tin                     # add per-connection TCP internals: rtt, cwnd, retransmits\n```\n\n`ss -tin` is the one most people never try. It prints the congestion window, smoothed\nround-trip time, and retransmission counts *per connection* — the actual state of the TCP\nstate machine Day 1 claimed was in there, available to look at any time.\n\nIf `ss` isn't installed, `/proc/net/tcp` has all of it in hex, which is where `ss` reads\nfrom anyway. States are numeric: `01` ESTABLISHED, `06` TIME_WAIT, `08` CLOSE_WAIT, `0A`\nLISTEN. Ports are hex too — 9000 is `2328`.\n\n### Answering the question Day 3 left open\n\nDay 3 had you reproduce `EADDRINUSE`, fix it with `SO_REUSEADDR`, and deliberately left\n*why* unexplained. Here it is.\n\nWhen a TCP connection closes, the endpoint that closed **first** enters `TIME_WAIT` and\nstays there for twice the maximum segment lifetime — 60 seconds on Linux. It is holding\nits (address, port) pair on purpose, and it's protecting against two things:\n\n1. **Stray duplicates.** A connection is identified only by its four-tuple. A delayed\n   packet from the old connection, arriving after you've bound a new one with the same\n   four numbers, would be indistinguishable from legitimate new data. `TIME_WAIT` keeps\n   the tuple reserved until anything still wandering the network has expired.\n2. **A reliable final handshake.** The closing side's last ACK might be lost. If it is,\n   the peer retransmits its FIN, and someone has to be there to answer — that's the\n   `TIME_WAIT` socket's other job. Vanish immediately and the peer gets an RST and a\n   confusing error instead of a clean close.\n\nSo `TIME_WAIT` is not a bug or a leak. It's a deliberate cooling-off period, and the\nreason your server needed `SO_REUSEADDR` to restart promptly.\n\nNow go and see it: run your server, connect and disconnect a client, kill the server,\nand immediately look for the port in `TIME_WAIT`. Then watch it disappear about a minute\nlater.\n\n### tcpdump: the actual packets\n\n```console\n$ sudo tcpdump -i lo -n 'port 9000'\n```\n\nThis is the ground truth — the SYN, SYN-ACK, ACK of the handshake; the data segments;\nthe FIN and its ACK at the end; the RST when something goes wrong. Everything Days 3–7\ndescribed in prose, as lines of output.\n\nTwo practical notes: it usually needs root (packet capture is privileged), and on\nloopback the interface is `lo`, not your ethernet device. If you can't install it or get\nthe privileges, you have not missed the core of today — `strace` and `ss` cover the\nlesson. Wireshark is the same capture with a GUI and much better protocol decoding, and\nit's worth an evening of curiosity at some point.\n\n### The rigor half\n\nGo back through both files and check the return value of **every** syscall: `socket`,\n`setsockopt`, `bind`, `listen`, `accept`, `recv`, `send`, `close`, `connect`,\n`shutdown`, `inet_pton`. On failure, print `strerror(errno)` and exit non-zero.\n\nYes, `close()` too. It can fail, and the failure means data may have been lost.\n\nThen compile both with `-Wall -Wextra` and fix every warning — no exceptions, no \"that\none's harmless\". If Days 1–7 were done properly, this should be a quiet session; if it\nisn't, that's a `TODO` you skipped, and finding it now is the point.\n\nTwo habits worth taking to milestone 02: `-fsanitize=address,undefined` catches buffer\nmistakes that `-Wall` can't see, and is free to enable on a debug build. And\n`-Wconversion` will complain about the `ssize_t`-to-`size_t` narrowing that socket code\nis full of — it's noisy, but it finds real bugs in exactly this kind of code.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "You attach strace to a server that appears hung. What does the last line give you, and why is that usually enough?",
+          "options": [
+            {
+              "text": "The syscall it's currently blocked in — which tells you what it's waiting for, and that's almost always the answer",
+              "correct": true,
+              "why": "A hung process is nearly always parked in a syscall, and which one narrows the problem instantly: blocked in accept() means it's idle and waiting for clients (fine); blocked in recv() means a client connected and sent nothing; blocked in send() means the peer stopped reading and your send buffer filled. Three very different bugs, distinguished in two seconds without a debugger or a single print statement."
+            },
+            {
+              "text": "The signal that stopped it, since a hang is always a stopped process",
+              "correct": false,
+              "why": "A hang and a stop are different things: a blocked process is running normally and merely waiting on the kernel, with no signal involved. A genuinely stopped process (SIGSTOP) is a much rarer situation."
+            },
+            {
+              "text": "The last line of your program's own output, which strace mirrors",
+              "correct": false,
+              "why": "strace prints syscalls, not your application's logging — and your stdout is separate. The value here is seeing calls you never printed anything about."
+            },
+            {
+              "text": "A stack trace of the blocked thread, showing which function called the syscall",
+              "correct": false,
+              "why": "That's a debugger's job (gdb, or eu-stack). strace shows the syscall boundary only — no user-space frames — which is less information but available instantly on a running process with no symbols required."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "TIME_WAIT holds a port for a minute after the connection closed. What two distinct problems is it preventing?",
+          "options": [
+            {
+              "text": "Delayed duplicate packets being delivered into a new connection with the same four-tuple, and the peer being left hanging if the final ACK is lost",
+              "correct": true,
+              "why": "Both matter and people usually only know the first. A connection is identified solely by its four-tuple, so a straggler from the old one would be indistinguishable from new data — TIME_WAIT keeps the tuple reserved until strays expire. Second, if the closing side's last ACK is lost the peer retransmits its FIN, and something has to be there to answer it; a socket that vanished immediately would give the peer an RST and a confusing error instead of a clean close."
+            },
+            {
+              "text": "Data still in the send buffer being lost, and the peer's receive buffer overflowing",
+              "correct": false,
+              "why": "Unsent data is flushed before the connection reaches TIME_WAIT (that's what the FIN handshake is for), and buffer overflow is prevented by flow control, continuously, on every connection."
+            },
+            {
+              "text": "Two processes binding the same port simultaneously, and port scanning from outside",
+              "correct": false,
+              "why": "Simultaneous binding is prevented by the bind table itself, all the time, with no timer involved. And TIME_WAIT has no security function whatsoever — it's purely a correctness mechanism for a closing connection."
+            },
+            {
+              "text": "Memory leaks in the kernel, and fd exhaustion in the closing process",
+              "correct": false,
+              "why": "Neither is at stake. The kernel reclaims the socket structure when TIME_WAIT expires, and the fd was released the moment you closed it — a TIME_WAIT socket has no fd in any process at all."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "Which endpoint of a connection ends up in TIME_WAIT, and what does that imply for a server that closes connections itself?",
+          "options": [
+            {
+              "text": "Whichever side closes first — so a server that closes its own connections accumulates TIME_WAIT sockets on its own port",
+              "correct": true,
+              "why": "It's determined by who initiates the close, not by who is client or server. This is why HTTP servers generally prefer the client to close, and why keep-alive matters beyond saving handshakes: a high-throughput server that actively closes every short connection can build up tens of thousands of TIME_WAIT entries. It's also exactly why *your* server needed SO_REUSEADDR on Day 3 — it closed the connection before it died."
+            },
+            {
+              "text": "Always the server, since it owns the listening port",
+              "correct": false,
+              "why": "Also role-based reasoning, also wrong. A client that closes first sits in TIME_WAIT on its ephemeral port — which is a genuine operational problem for machines making many short-lived outbound connections."
+            },
+            {
+              "text": "Both ends, symmetrically, for the same duration",
+              "correct": false,
+              "why": "The passive closer moves through LAST_ACK and then straight to CLOSED. Only the active closer pays the TIME_WAIT wait, which is why \"who closes first\" is a design decision with real operational consequences."
+            },
+            {
+              "text": "Always the client, since the server outlives every connection by design",
+              "correct": false,
+              "why": "Nothing about the role decides it. You can watch your own server land in TIME_WAIT on port 9000 by having it close a connection and then killing it — which is precisely the Day 3 experiment."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "close() can fail. What does a failure actually mean, and why is ignoring it worse than ignoring most errors?",
+          "options": [
+            {
+              "text": "It's only possible with SO_LINGER set, so code that doesn't use SO_LINGER can safely ignore it",
+              "correct": false,
+              "why": "SO_LINGER makes close() block and surface delivery failure more often, but it isn't the only path to a failing close(); filesystem-backed and network descriptors can report errors flushed at close time regardless."
+            },
+            {
+              "text": "Nothing meaningful — close() only ever fails with EBADF, which means a bug in your fd tracking",
+              "correct": false,
+              "why": "EBADF is one possibility and does indicate a bug, but EIO and ENOSPC also occur and carry real data-loss information. Treating close() as incapable of meaningful failure is exactly how silent truncation ships."
+            },
+            {
+              "text": "Buffered data may not have been delivered — so it reports data loss, and the fd is gone either way so there's nothing to retry",
+              "correct": true,
+              "why": "This is the uniquely nasty one: on most calls an unchecked error means you'll fail again later and find out. Here the descriptor is released regardless, so the error is your *only* notification that the write you thought succeeded didn't, and it is unrecoverable by the time you see it. Never retry close() on Linux either — the fd is already freed, and retrying can close a descriptor another thread has since been handed."
+            },
+            {
+              "text": "It means the peer hasn't acknowledged the data yet, so you should sleep and close again",
+              "correct": false,
+              "why": "close() doesn't wait for acknowledgement in the default configuration, and closing twice is a genuine bug — the fd number may already have been reissued to another thread's file."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "You see CLOSE_WAIT connections piling up on your server and never going away. What does that state mean, and whose bug is it?",
+          "options": [
+            {
+              "text": "The peer sent FIN and your side hasn't closed its end — your code saw recv() return 0 and never called close(). It's your bug",
+              "correct": true,
+              "why": "CLOSE_WAIT literally means \"waiting for the local application to close\". The kernel has done its part and is waiting on you, indefinitely — there's no timeout that cleans this up, so the connections and their fds accumulate until you hit EMFILE. Growing CLOSE_WAIT is one of the most reliable diagnostic signals in server operations: it always points at a missing close() on the path where recv() returned 0."
+            },
+            {
+              "text": "The peer is refusing to acknowledge your FIN — it's the client's bug, and there's nothing you can do",
+              "correct": false,
+              "why": "That situation exists but is a different state (FIN_WAIT2 on your side, waiting on them). CLOSE_WAIT is unambiguously the reverse: they finished, and you are the one who hasn't responded."
+            },
+            {
+              "text": "Your backlog is too small, so completed connections are stuck in the accept queue",
+              "correct": false,
+              "why": "Queued-but-unaccepted connections show as ESTABLISHED, not CLOSE_WAIT, and are bounded by the backlog rather than growing without limit. CLOSE_WAIT means the connection was accepted, used, and then abandoned without being closed."
+            },
+            {
+              "text": "The connections are in a normal cooling-off period and will clear themselves in about a minute",
+              "correct": false,
+              "why": "That's TIME_WAIT, which does expire on its own. CLOSE_WAIT has no timer whatsoever — it persists until your process closes the fd or dies, which is what makes the pile-up unbounded."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "**Harden.** Every syscall in `server.cpp` and `client.cpp` checked, `strerror(errno)` on\nfailure, non-zero exit. Zero warnings under `-Wall -Wextra`. Zero tolerance.\n\n**Observe.** Four things to see with your own eyes:\n\n1. `strace -e trace=network ./server`, then connect a client. Read the syscall listing\n   against your source and confirm the fd numbers, the `sockaddr_in` size, and a `recv`\n   that returned less than you asked for.\n2. `ss -tan | grep 9000` with a client connected — find the `LISTEN` and `ESTAB` rows\n   from Day 4 again.\n3. Kill the server after a client has connected and disconnected. Find the port in\n   `TIME_WAIT`, then confirm it's gone about a minute later.\n4. `ss -tin` on a live connection. Find the RTT and congestion window.\n\nThen, in your own words, write two or three sentences in `PROGRESS.md` answering: *why\nwas the port still busy, and what is `TIME_WAIT` protecting?* That's the note that turns\nDay 3's workaround into understanding.\n\n- Files: `src/server.cpp`, `src/client.cpp`",
+        "files": [],
+        "compile": "g++ -std=c++20 -Wall -Wextra -o server src/server.cpp && g++ -std=c++20 -Wall -Wextra -o client src/client.cpp",
+        "checklist": [
+          "every syscall's return value checked in both files, `close()` included",
+          "`strerror(errno)` printed and non-zero exit on every failure path",
+          "zero warnings under `-Wall -Wextra` on both files",
+          "read your own syscall sequence in `strace` and matched it to your source",
+          "found `LISTEN` and `ESTAB` rows for port 9000 simultaneously",
+          "found the port in `TIME_WAIT` after a disconnect, and watched it expire",
+          "wrote the `TIME_WAIT` explanation in `PROGRESS.md` in your own words"
+        ]
+      }
     }
   ]
 }
