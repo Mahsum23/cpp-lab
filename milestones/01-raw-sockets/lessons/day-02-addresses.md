@@ -19,20 +19,62 @@ struct sockaddr_in {
 
 Four fields, and every one of them is trying to solve a different problem.
 
-### Why `sin_zero` is there at all
+### `struct sockaddr`: the shape everything gets cast to
 
 `bind()`, `connect()`, and `accept()` don't take a `sockaddr_in *`. They take a
 `sockaddr *` — a *generic* address struct that's supposed to work for `AF_INET`,
-`AF_INET6`, `AF_UNIX`, and anything else anyone invents later. C has no inheritance, so
-in 1983 the answer was: make every address-family-specific struct exactly the same
-*size* as the generic one, and let callers cast between the pointer types. `sin_zero`
-is filler that exists purely to pad `sockaddr_in` out to match `sizeof(struct
-sockaddr)` — it carries no data and you never read it. It's the C-shaped version of a
-base class, four decades before anyone would call it that.
+`AF_INET6`, `AF_UNIX`, and anything else anyone invents later:
+
+```cpp
+struct sockaddr {
+    sa_family_t sa_family;    // address family — AF_INET, AF_INET6, AF_UNIX, ...
+    char        sa_data[14];  // protocol-specific address — opaque at this type
+};
+```
+
+You never construct one of these directly. It exists purely as the type these calls are
+declared to take, so that one function signature can accept any address family without
+C needing a concept of inheritance. `sa_data` is 14 bytes of "whatever the real struct
+needs there" — from `sockaddr`'s own point of view, meaningless bytes.
+
+### Why `sin_zero` is there at all
+
+C has no inheritance, so in 1983 the answer was: make every address-family-specific
+struct exactly the same *size* as the generic one, and let callers cast between the
+pointer types. `sin_zero` is filler that exists purely to pad `sockaddr_in` out to
+match `sizeof(struct sockaddr)` — it carries no data and you never read it. It's the
+C-shaped version of a base class, four decades before anyone would call it that.
+
+The arithmetic is exact, and worth doing once by hand. `sockaddr` is 2 bytes of family
+plus 14 bytes of data — 16 bytes total. `sockaddr_in`'s real fields are 2 bytes of
+family, 2 of port, 4 of address — 8 bytes, less than half of what `sockaddr` promises
+callers they can rely on being there. `sin_zero`'s 8 bytes exist to make up the
+difference: `8 + 8 = 16`, matching `sockaddr` exactly. On this machine:
+
+```cpp
+sizeof(struct sockaddr)    // 16
+sizeof(struct sockaddr_in) // 16 — matches, which is the whole point
+```
 
 (`sockaddr_in6`, for IPv6, is a different size again — which is exactly why every one
 of these calls also takes an explicit length parameter alongside the pointer. The
 struct can't tell you its own size once it's been cast to the generic type.)
+
+Since `sin_zero` carries no data and you never touch it by name, the idiom everywhere is
+to zero the whole struct up front rather than set every field yourself:
+
+```cpp
+void *memset(void *s, int c, size_t n);
+```
+
+```cpp
+sockaddr_in addr;
+std::memset(&addr, 0, sizeof(addr));   // sin_zero handled; every other field about to be overwritten anyway
+addr.sin_family = AF_INET;
+```
+
+One call, `sin_zero` is correctly zero, and you never have to think about the padding
+field by name again.
 
 ### Byte order: the actual problem being solved
 
@@ -49,10 +91,32 @@ two different computers need to agree on what bytes on the wire *mean*, they nee
 agree on an order — otherwise a little-endian machine sends `9000` and a big-endian
 machine reads it back as `9217`. The internet's answer, baked into TCP/IP from the
 start, is: **network byte order is always big-endian**, full stop, regardless of what
-either endpoint's CPU prefers internally. `htons()` (host-to-network-short, for 16-bit
-values like ports) and `htonl()` (host-to-network-long, for 32-bit values like
-addresses) convert *your* machine's native order into that fixed wire order. Their
-inverses, `ntohs()`/`ntohl()`, undo it on the way back in.
+either endpoint's CPU prefers internally. Four functions convert between the two, and
+they only ever differ in direction and width:
+
+```cpp
+uint16_t htons(uint16_t hostshort);  // host  -> network, 16-bit (ports)
+uint32_t htonl(uint32_t hostlong);   // host  -> network, 32-bit (addresses)
+uint16_t ntohs(uint16_t netshort);   // network -> host, 16-bit
+uint32_t ntohl(uint32_t netlong);    // network -> host, 32-bit
+```
+
+`h`/`n` is which side you're converting *from*; `s`/`l` is *short* (16-bit) or *long*
+(32-bit). Read the name and you already know the signature. In use, filling in the two
+multi-byte fields of yesterday's struct:
+
+```cpp
+sockaddr_in addr{};
+addr.sin_family = AF_INET;
+addr.sin_port = htons(9000);              // host uint16_t -> network order
+addr.sin_addr.s_addr = htonl(INADDR_ANY); // host uint32_t -> network order
+```
+
+and undoing it on the way back, once you have a peer's address to print (Day 4):
+
+```cpp
+uint16_t port = ntohs(peer.sin_port);     // network order -> host uint16_t, e.g. 9000
+```
 
 Here's the detail that trips people up the first time: on a big-endian machine,
 `htons()` has nothing to do — the native order and the network order are already the
@@ -75,14 +139,43 @@ of its networks.
 
 ### A sharp edge in the API you're about to use
 
-`inet_ntoa()`, which turns a `struct in_addr` back into a printable string, returns a
-`char *` into a **static buffer owned by the library** — not memory you allocated, and
-not memory that's yours alone. Call it twice before using the first result and you'll
-get the same pointer back with the second address's text in it. This is a very old API
-(pre-thread-safety as a design concern at all), which is exactly why `inet_ntop()`
-exists as its replacement — it writes into a buffer *you* supply. You'll likely still
-run into `inet_ntoa()` in code older than you are; know what it's actually handing back
-before you trust it.
+```cpp
+char *inet_ntoa(struct in_addr in);
+```
+
+`inet_ntoa()` turns a `struct in_addr` back into a printable string, and its return
+type is the trap: a `char *` into a **static buffer owned by the library** — not
+memory you allocated, and not memory that's yours alone.
+
+```cpp
+printf("%s\n", inet_ntoa(a));                    // fine on its own
+printf("%s %s\n", inet_ntoa(a), inet_ntoa(b));   // prints the SAME text twice — whichever
+                                                  // call the compiler happened to run last
+```
+
+Call it twice before using the first result and you get the same pointer back both
+times, holding whichever address was converted most recently — C++ doesn't even
+guarantee which of the two `inet_ntoa()` calls in that second line runs first, so you
+can't reliably predict *which* address wins, only that both printed values will match.
+This is a very old API
+(pre-thread-safety as a design concern at all), which is exactly why its replacement
+takes a caller-supplied buffer instead:
+
+```cpp
+const char *inet_ntop(int af, const void *restrict src,
+                       char *restrict dst, socklen_t size);
+```
+
+```cpp
+char text[INET_ADDRSTRLEN];               // 16 bytes — big enough for any IPv4 text form
+inet_ntop(AF_INET, &addr.sin_addr, text, sizeof(text));
+printf("%s\n", text);                     // yours; a second call elsewhere can't touch it
+```
+
+You'll likely still run into `inet_ntoa()` in code older than you are; know what it's
+actually handing back before you trust it. `inet_ntop()`'s counterpart going the other
+direction, `inet_pton()` (text to binary), is Day 7's tool once you're building
+addresses to `connect()` to rather than just printing ones you received.
 
 ### Is any of this still how it's done?
 
@@ -90,10 +183,10 @@ The byte-order rule, yes, completely — every IP packet, every TCP header, ever
 message on the internet today is big-endian on the wire, unchanged since the 1970s
 ARPANET days, regardless of what's inside your phone or your laptop. What's changed is
 how much of this you touch by hand: `getaddrinfo()` (a level up from what you're doing
-this week) hides most manual byte-order juggling behind name resolution, and
-`inet_pton()`/`inet_ntop()` replaced the address-conversion functions that weren't
-IPv6-aware or thread-safe. You're doing it by hand this week for the same reason as
-Day 1 — so the abstraction is a convenience later, not a black box.
+this week, and a fair bit more machinery than one function signature is worth showing
+here) hides most manual byte-order juggling behind name resolution, doing both DNS
+lookup and struct-filling in one call. You're doing it by hand this week for the same
+reason as Day 1 — so the abstraction is a convenience later, not a black box.
 
 ### The Great Endian War
 
