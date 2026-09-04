@@ -194,3 +194,18 @@ Google" needs a hosted backend (Firebase AI Logic is built for it) where the ope
 pays everyone's token bill. Documented in app/README.md. What *was* possible: pasted
 keys are now normalised, since a phone paste arrives with newlines, smart quotes or a
 `GEMINI_API_KEY=` prefix, all of which 400 and read as "my key is wrong".
+
+**Mentor reachable from the theory screen (2026-09-04).** Asking a question used to mean
+leaving the lesson for the Mentor tab and losing your place mid-paragraph. There's now a
+floating "Ask" pill on the Theory step that opens a bottom sheet with the mentor in it.
+
+The design decision worth recording: the sheet drives the *same* `chat` store and the
+same per-day thread key the Mentor tab uses, rather than owning its own conversation. A
+question asked while reading is the same thread you find later under Mentor — no second
+transcript that quietly disagrees with the first. Verified end to end in a real browser:
+saved a key through the Settings UI, tapped a starter on Day 1, watched the reply stream
+into the sheet, then opened the Mentor tab and found the same exchange there.
+
+The sheet is capped at 70vh rather than filling the screen, because the question is
+usually about the paragraph you were just reading and you want to be able to refer back
+to it.
