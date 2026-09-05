@@ -4,6 +4,7 @@
   import Markdown from '../../components/Markdown.svelte';
   import Button from '../../components/Button.svelte';
   import CopyLine from '../../components/CopyLine.svelte';
+  import MentorSheet from '../../components/MentorSheet.svelte';
   import { today } from '../../lib/date';
 
   interface Props {
@@ -16,6 +17,18 @@
   const dp = $derived(app.dayProgress(day.id, weekId));
   const task = $derived(day.task);
   const score = $derived(app.quizScore(day, weekId));
+
+  let asking = $state(false);
+  const week = $derived(app.findDay(weekId, day.id)?.week ?? null);
+
+  // Openers for someone mid-attempt. None of them ask for the implementation — the
+  // mentor refuses that anyway, and a starter that invites it would just teach the
+  // wrong habit. The stuck one is a prefill: it's meaningless without your attempt.
+  const suggestions = [
+    { text: "I'm stuck. Here's what I tried:", send: false },
+    { text: 'What does this error mean?', send: false },
+    { text: 'What should I be checking the return value for here?' },
+  ];
 
   let notes = $state('');
   let hydrated = $state(false);
@@ -138,6 +151,15 @@
   </Button>
   <Button onclick={done}>Done ✓</Button>
 </div>
+
+<button class="ask" onclick={() => (asking = true)} aria-label="Ask the mentor">
+  <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3 1-5.5A8 8 0 1 1 21 12z" /></svg>
+  <span>Ask</span>
+</button>
+
+{#if week}
+  <MentorSheet {week} {day} open={asking} onclose={() => (asking = false)} {suggestions} />
+{/if}
 
 <style>
   h1 {
@@ -292,12 +314,41 @@
   }
 
 
+  .ask {
+    position: fixed;
+    right: 16px;
+    bottom: calc(var(--safe-b) + 18px);
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 15px 10px 13px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14.5px;
+    font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  }
+
+  .ask svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 9px;
     margin-top: 28px;
     padding-top: 20px;
+    /* Clears the floating Ask pill, which is fixed over this corner. */
+    margin-bottom: 78px;
     border-top: 1px solid var(--border);
   }
 

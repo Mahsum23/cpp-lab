@@ -209,3 +209,14 @@ into the sheet, then opened the Mentor tab and found the same exchange there.
 The sheet is capped at 70vh rather than filling the screen, because the question is
 usually about the paragraph you were just reading and you want to be able to refer back
 to it.
+
+**Mentor on the task screen too (2026-09-04).** Same sheet, same per-day thread — a
+question asked mid-attempt is the same conversation as one asked while reading the
+theory, verified by asking from the Task step and finding it in the Theory step's sheet.
+
+The starters needed a new mode to be worth anything here. "I'm stuck. Here's what I
+tried:" auto-sent is useless, so `MentorSheet` now takes starters as
+`{ text, send }` and a `send: false` one drops the text into the composer with the
+cursor after it instead of firing. Marked with a ✎ so the difference is visible before
+you tap. None of the three ask for the implementation — the mentor refuses that anyway,
+and a starter that invited it would teach the wrong habit.

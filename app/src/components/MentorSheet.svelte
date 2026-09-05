@@ -14,15 +14,26 @@
   import Markdown from './Markdown.svelte';
   import Button from './Button.svelte';
 
+  /**
+   * A tappable opener. `send: false` drops the text into the composer instead of
+   * sending it, which is the only sane behaviour for one that needs finishing —
+   * "I'm stuck, here's what I tried:" is worthless sent on its own.
+   */
+  export type Starter = { text: string; send?: boolean };
+
   interface Props {
     week: Week;
     day: Day;
     open: boolean;
     onclose: () => void;
     /** Shown as tappable starters when the thread is empty. */
-    suggestions?: string[];
+    suggestions?: (string | Starter)[];
   }
   let { week, day, open, onclose, suggestions = [] }: Props = $props();
+
+  const starters = $derived(
+    suggestions.map((s) => (typeof s === 'string' ? { text: s, send: true } : { send: true, ...s })),
+  );
 
   let draft = $state('');
   let box = $state<HTMLTextAreaElement | null>(null);
@@ -55,6 +66,12 @@
     draft = '';
     if (box) box.style.height = 'auto';
     await chat.send(content);
+  }
+
+  function prefill(text: string) {
+    draft = text.endsWith(':') ? `${text} ` : text;
+    box?.focus();
+    requestAnimationFrame(grow);
   }
 
   function onKey(e: KeyboardEvent) {
@@ -93,13 +110,16 @@
       {:else}
         {#if chat.empty}
           <p class="hint">
-            Ask anything about what you're reading. It knows which day you're on and what
-            today's theory said — and it won't write the task for you, by design.
+            Ask anything about today's material. It knows which day you're on, what the
+            theory said and what the task is — and it won't write that task for you, by
+            design.
           </p>
           {#if suggestions.length}
             <div class="starters">
-              {#each suggestions as s}
-                <button onclick={() => void send(s)}>{s}</button>
+              {#each starters as s}
+                <button onclick={() => (s.send ? void send(s.text) : prefill(s.text))}>
+                  {s.text}{#if !s.send}<span class="pen">✎</span>{/if}
+                </button>
               {/each}
             </div>
           {/if}
@@ -262,6 +282,11 @@
     padding: 9px 12px;
     color: var(--text);
     line-height: 1.4;
+  }
+
+  .pen {
+    color: var(--text-faint);
+    margin-left: 6px;
   }
 
   .thread {
