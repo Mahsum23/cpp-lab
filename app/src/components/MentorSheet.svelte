@@ -13,7 +13,7 @@
   import { router } from '../lib/router.svelte';
   import Markdown from './Markdown.svelte';
   import Button from './Button.svelte';
-  import { asCodeBlock, indentAt, isFenced, looksLikeCode } from '../lib/compose';
+  import { asCodeBlock, hasFence, indentAt, looksLikeCode, shapeOf, wrapSelection } from '../lib/compose';
 
   /**
    * A tappable opener. `send: false` drops the text into the composer instead of
@@ -60,6 +60,35 @@
     });
   }
 
+  /**
+   * The `</>` button, contextual — so a mixed message doesn't need hand-typed markdown.
+   *
+   * With a selection, it fences exactly that, which is the shape most questions
+   * actually take: a line of prose, the code, then "why does it fail?". With the
+   * cursor in a draft it drops an empty block in and lands inside it, ready to paste.
+   * With nothing typed at all the whole message is going to be code, so it flips the
+   * field itself into code mode instead.
+   */
+  function codeAction() {
+    if (!box) {
+      codeMode = !codeMode;
+      return;
+    }
+    const { selectionStart: from, selectionEnd: to, value } = box;
+    if (from === to && !value.trim()) {
+      codeMode = !codeMode;
+      box.focus();
+      return;
+    }
+    const r = wrapSelection(value, from, to);
+    draft = r.value;
+    requestAnimationFrame(() => {
+      box?.focus();
+      box?.setSelectionRange(r.start, r.end);
+      grow();
+    });
+  }
+
 
   $effect(() => {
     if (!open) return;
@@ -87,7 +116,7 @@
     if (!raw || chat.streaming) return;
     // Fence it on the way out, so the model is told it's source and the transcript
     // renders it highlighted rather than reflowed.
-    const content = codeMode && !isFenced(raw) ? asCodeBlock(raw) : raw;
+    const content = codeMode && !hasFence(raw) ? asCodeBlock(raw) : raw;
     draft = '';
     codeMode = false;
     if (box) box.style.height = 'auto';
@@ -102,6 +131,11 @@
 
   function onKey(e: KeyboardEvent) {
     onTab(e);
+    // Ctrl/Cmd+E does what the button does, for anyone typing on a real keyboard.
+    if (e.key.toLowerCase() === 'e' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      codeAction();
+    }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void send();
@@ -156,11 +190,12 @@
           {#each chat.messages as message, i}
             <li class={message.role}>
               {#if message.role === 'user'}
-                <div class="bubble" class:has-code={isFenced(message.content)}>
-                  {#if isFenced(message.content)}
-                    <Markdown source={message.content} />
-                  {:else}
+                {@const shape = shapeOf(message.content)}
+                <div class="bubble" class:has-code={shape === 'code'} class:mixed={shape === 'mixed'}>
+                  {#if shape === 'text'}
                     {message.content}
+                  {:else}
+                    <Markdown source={message.content} />
                   {/if}
                 </div>
               {:else}
@@ -204,10 +239,10 @@
         <button
           class="icon toggle"
           class:on={codeMode}
-          onclick={() => (codeMode = !codeMode)}
+          onclick={codeAction}
           aria-pressed={codeMode}
-          aria-label="C++ code mode"
-          title="C++ code mode — monospace, Tab indents, sent as a code block"
+          aria-label="Code block"
+          title="Code block — wraps the selection, or switches the whole message to C++ (Ctrl/Cmd+E)"
         >
           <svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4m6-8 4 4-4 4" /></svg>
         </button>
@@ -421,6 +456,19 @@
     width: 100%;
     background: transparent;
     padding: 0;
+  }
+
+  /* Prose with a block inside it: still a message you sent, but the accent fill would
+     fight the highlighted code sitting on top of it. */
+  .bubble.mixed {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .bubble.mixed :global(.prose > *:last-child) {
+    margin-bottom: 0;
   }
 
   .composer textarea {

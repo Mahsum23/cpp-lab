@@ -18,7 +18,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-compose.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { looksLikeCode, asCodeBlock, isFenced, indentAt, INDENT } = await import(file);
+const { looksLikeCode, asCodeBlock, isFenced, hasFence, shapeOf, wrapSelection, indentAt, INDENT } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -66,6 +66,40 @@ ok('a selection starting mid-line still indents from the line start', r.value ==
 
 r = indentAt('sel', 0, 3);
 ok('a single-line selection is replaced, editor-style', r.value === INDENT, JSON.stringify(r.value));
+
+console.log('\n— mixed messages: fence without typing markdown —');
+// The send path must not re-wrap a message that already contains a block, or the
+// fences nest and the whole thing renders as garbage.
+ok('hasFence sees a fence mid-message', hasFence("here's my code:\n```cpp\nint x;\n```"));
+ok('hasFence is false for plain prose', !hasFence('why does recv() return 0?'));
+ok('isFenced alone would miss it', !isFenced("here's my code:\n```cpp\nint x;\n```"));
+
+// Wrapping a selection is the whole point: prose stays prose, code gets a block.
+let w = wrapSelection('int x = 1;', 0, 10);
+ok('a selection becomes a fenced block', w.value === '```cpp\nint x = 1;\n```', JSON.stringify(w.value));
+
+w = wrapSelection('look:\nint x = 1;', 6, 16);
+ok('a mid-message selection is fenced in place', w.value === 'look:\n```cpp\nint x = 1;\n```', JSON.stringify(w.value));
+ok('prose before the block is untouched', w.value.startsWith('look:\n'));
+
+// A fence has to start its own line, so one is inserted when the cursor is mid-line.
+w = wrapSelection('look: int x;', 6, 12);
+ok('a newline is inserted so the fence starts a line', w.value === 'look: \n```cpp\nint x;\n```', JSON.stringify(w.value));
+
+// Empty selection: drop in a block and land inside it, ready to paste.
+w = wrapSelection('', 0, 0);
+ok('an empty selection inserts an empty block', w.value === '```cpp\n\n```', JSON.stringify(w.value));
+ok('the cursor lands inside the empty block', w.value.slice(0, w.start) === '```cpp\n', JSON.stringify(w.value.slice(0, w.start)));
+
+w = wrapSelection('question?', 9, 9);
+ok('inserting after prose adds a leading newline', w.value === 'question?\n```cpp\n\n```', JSON.stringify(w.value));
+
+// The transcript renders each of these differently; getting the mixed case wrong is
+// how a question ends up as an unreadable wall inside an accent-coloured bubble.
+ok('plain text is text', shapeOf('why does recv() return 0?') === 'text');
+ok('a bare block is code', shapeOf('```cpp\nint x;\n```') === 'code');
+ok('prose plus a block is mixed', shapeOf("look:\n```cpp\nint x;\n```") === 'mixed');
+ok('a block with a trailing question is still code', shapeOf('```cpp\nint x;\n```\nwhy?') === 'code');
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all compose cases pass');
 process.exit(fails ? 1 : 0);
