@@ -203,11 +203,110 @@ export function closerAt(
   end: number,
   ch: string,
 ): { value: string; start: number; end: number } | null {
-  if (start !== end) return null;
+  // Only a closer dedents. Without this the rule fires on every key typed at the start
+  // of an indented line, which quietly eats the indentation you just earned.
+  if (!'})]'.includes(ch) || start !== end) return null;
   const lineStart = value.lastIndexOf('\n', start - 1) + 1;
   const line = value.slice(lineStart, start);
   if (!/^[ \t]+$/.test(line) || !line.endsWith(INDENT)) return null;
   const pulled = line.slice(0, -INDENT.length);
   const at = lineStart + pulled.length + 1;
   return { value: value.slice(0, lineStart) + pulled + ch + value.slice(end), start: at, end: at };
+}
+
+/**
+ * The pairs the composer closes for you. Quotes are in here too: they open and close
+ * with the same character, which is what makes the type-over rule below matter.
+ */
+const PAIRS: Record<string, string> = { '{': '}', '(': ')', '[': ']', '"': '"', "'": "'" };
+const CLOSERS = new Set(Object.values(PAIRS));
+
+/** A character an auto-inserted quote would land in the middle of. */
+const WORDY = /[\w)\]}]/;
+
+/**
+ * Autoclose, type-over, and wrap-the-selection — the three things one bracket key does.
+ *
+ * Returns null for the keystrokes the browser should handle itself, which is most of
+ * them. The deliberate omissions: a pair is not inserted directly before a word, so
+ * typing `(` in front of `fd` doesn't produce `()fd`, and a quote after a word is an
+ * apostrophe or a closing quote rather than the start of a new pair.
+ */
+export function autoCloseAt(
+  value: string,
+  start: number,
+  end: number,
+  ch: string,
+): { value: string; start: number; end: number } | null {
+  const close = PAIRS[ch];
+  const selected = value.slice(start, end);
+
+  // Wrapping a selection is never ambiguous, so it happens for quotes too.
+  if (close && selected) {
+    return {
+      value: value.slice(0, start) + ch + selected + close + value.slice(end),
+      start: start + 1,
+      end: end + 1,
+    };
+  }
+  if (start !== end) return null;
+
+  // Typing the closer that is already sitting under the cursor steps over it instead
+  // of stacking a second one — the half of autoclose people notice when it's missing.
+  if (CLOSERS.has(ch) && value[start] === ch) return { value, start: start + 1, end: start + 1 };
+  if (!close) return null;
+
+  const prev = value[start - 1] ?? '';
+  const next = value[start] ?? '';
+  if ((ch === '"' || ch === "'") && WORDY.test(prev)) return null;
+  if (/\w/.test(next)) return null;
+
+  return {
+    value: value.slice(0, start) + ch + close + value.slice(end),
+    start: start + 1,
+    end: start + 1,
+  };
+}
+
+/**
+ * Backspace between an empty pair takes both halves.
+ *
+ * Without it, autoclose is a net loss: every `(` you change your mind about leaves a
+ * `)` behind for you to hunt down.
+ */
+export function unpairAt(
+  value: string,
+  start: number,
+  end: number,
+): { value: string; start: number; end: number } | null {
+  if (start !== end || start === 0) return null;
+  if (PAIRS[value[start - 1]] !== value[start]) return null;
+  return { value: value.slice(0, start - 1) + value.slice(start + 1), start: start - 1, end: start - 1 };
+}
+
+/**
+ * The body ranges of the fenced blocks in a draft.
+ *
+ * The composer highlights these and leaves the prose around them alone, so a mixed
+ * message looks the way it will read once it's sent. An unterminated block runs to the
+ * end of the text, because that's the one you're in the middle of typing.
+ */
+export function codeSpans(text: string): { from: number; to: number; lang: string }[] {
+  const spans: { from: number; to: number; lang: string }[] = [];
+  let open: { at: number; lang: string } | null = null;
+  let pos = 0;
+  for (const line of text.split('\n')) {
+    const m = /^\s*```(\w*)/.exec(line);
+    if (m) {
+      if (open) {
+        spans.push({ from: open.at, to: pos, lang: open.lang });
+        open = null;
+      } else {
+        open = { at: pos + line.length + 1, lang: m[1] || 'cpp' };
+      }
+    }
+    pos += line.length + 1;
+  }
+  if (open && open.at <= text.length) spans.push({ from: open.at, to: text.length, lang: open.lang });
+  return spans;
 }

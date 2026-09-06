@@ -5,91 +5,15 @@
   import Markdown from '../components/Markdown.svelte';
   import Button from '../components/Button.svelte';
   import { PROVIDERS } from '../lib/mentor';
-  import {
-    asCodeBlock, closerAt, hasFence, inFence, indentAt, looksLikeCode, newlineAt, shapeOf,
-    wrapSelection,
-  } from '../lib/compose';
+  import CodeArea from '../components/CodeArea.svelte';
+  import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
 
   const provider = $derived(PROVIDERS[app.mentorProvider]);
 
   let draft = $state('');
-  let box = $state<HTMLTextAreaElement | null>(null);
+  let area = $state<ReturnType<typeof CodeArea> | null>(null);
   let confirmClear = $state(false);
   let codeMode = $state(false);
-
-  // Paste is the moment that matters: a pasted function should not silently arrive as
-  // a paragraph with its indentation reflowed away.
-  function onPaste(e: ClipboardEvent) {
-    const text = e.clipboardData?.getData('text') ?? '';
-    if (text && looksLikeCode(text)) codeMode = true;
-  }
-
-  /**
-   * Apply an edit the browser wouldn't have made, and put the cursor back.
-   *
-   * Synchronously, on the element itself, rather than assigning `draft` and fixing the
-   * selection a frame later: anyone typing at speed gets their next keystroke in
-   * before that frame runs, and it lands wherever the cursor used to be. The binding
-   * is then told the same string, so Svelte has nothing left to write back.
-   */
-  function apply(r: { value: string; start: number; end: number }) {
-    if (box) {
-      box.value = r.value;
-      box.setSelectionRange(r.start, r.end);
-    }
-    draft = r.value;
-    grow();
-  }
-
-  /**
-   * Editor keys, live wherever the cursor is actually in code — the whole field in
-   * code mode, or the code half of a mixed message.
-   */
-  function onEdit(e: KeyboardEvent) {
-    if (!box || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-    const { value, selectionStart: from, selectionEnd: to } = box;
-    if (!codeMode && !inFence(value, from)) return;
-
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      return apply(indentAt(value, from, to));
-    }
-    // Enter is a newline here (Ctrl/Cmd+Enter sends), so it is ours to indent.
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      return apply(newlineAt(value, from, to));
-    }
-    if (e.key === '}' || e.key === ')' || e.key === ']') {
-      const r = closerAt(value, from, to, e.key);
-      if (!r) return;
-      e.preventDefault();
-      apply(r);
-    }
-  }
-
-  /**
-   * The `</>` button, contextual — so a mixed message doesn't need hand-typed markdown.
-   *
-   * With a selection, it fences exactly that, which is the shape most questions
-   * actually take: a line of prose, the code, then "why does it fail?". With the
-   * cursor in a draft it drops an empty block in and lands inside it, ready to paste.
-   * With nothing typed at all the whole message is going to be code, so it flips the
-   * field itself into code mode instead.
-   */
-  function codeAction() {
-    if (!box) {
-      codeMode = !codeMode;
-      return;
-    }
-    const { selectionStart: from, selectionEnd: to, value } = box;
-    if (from === to && !value.trim()) {
-      codeMode = !codeMode;
-      box.focus();
-      return;
-    }
-    apply(wrapSelection(value, from, to));
-    box.focus();
-  }
 
   // The thread follows the lesson he's on, so yesterday's questions don't clutter
   // today's. Falls back to the last authored day once the week is finished.
@@ -109,12 +33,6 @@
     requestAnimationFrame(() => scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
   });
 
-  function grow() {
-    if (!box) return;
-    box.style.height = 'auto';
-    box.style.height = `${Math.min(box.scrollHeight, 148)}px`;
-  }
-
   async function send(text = draft) {
     const raw = text.trim();
     if (!raw) return;
@@ -123,28 +41,14 @@
     const content = codeMode && !hasFence(raw) ? asCodeBlock(raw) : raw;
     draft = '';
     codeMode = false;
-    if (box) box.style.height = 'auto';
+    area?.grow();
     await chat.send(content);
   }
 
   function prefill(text: string) {
     draft = text;
-    box?.focus();
-    requestAnimationFrame(grow);
-  }
-
-  function onKey(e: KeyboardEvent) {
-    onEdit(e);
-    // Ctrl/Cmd+E does what the button does, for anyone typing on a real keyboard.
-    if (e.key.toLowerCase() === 'e' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      codeAction();
-    }
-    // Enter is a newline on a phone keyboard. Desktop gets the shortcut it expects.
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      void send();
-    }
+    area?.focus();
+    area?.grow();
   }
 
   const suggestions = $derived(
@@ -259,25 +163,17 @@
 {#if app.mentorReady}
   <div class="composer">
     <div class="inner">
-      <textarea
-        bind:this={box}
+      <CodeArea
+        bind:this={area}
         bind:value={draft}
-        oninput={grow}
-        onkeydown={onKey}
-        onpaste={onPaste}
-        rows="1"
+        bind:codeMode
         placeholder={codeMode ? 'Paste or type C++…' : 'Ask the mentor…'}
-        aria-label="Message"
-        class:code={codeMode}
-        autocomplete="off"
-        autocapitalize="none"
-        spellcheck={!codeMode && !hasFence(draft)}
-        {...{ autocorrect: 'off' }}
-      ></textarea>
+        onsubmit={() => void send()}
+      />
       <button
         class="icon toggle"
         class:on={codeMode}
-        onclick={codeAction}
+        onclick={() => area?.codeAction()}
         aria-pressed={codeMode}
         aria-label="Code block"
         title="Code block — wraps the selection, or switches the whole message to C++ (Ctrl/Cmd+E)"
@@ -432,13 +328,6 @@
     margin-bottom: 0;
   }
 
-  textarea.code {
-    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-    font-size: 13.5px;
-    line-height: 1.5;
-    white-space: pre;
-    overflow-x: auto;
-  }
 
   .icon.toggle {
     background: var(--surface-2);
@@ -517,25 +406,7 @@
     margin: 0 auto;
   }
 
-  textarea {
-    flex: 1;
-    resize: none;
-    padding: 10px 14px;
-    border-radius: 19px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    color: var(--text);
-    /* 16px exactly: anything smaller and iOS zooms the viewport on focus. */
-    font-size: 16px;
-    line-height: 1.4;
-    font-family: inherit;
-    max-height: 148px;
-  }
 
-  textarea:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
 
   .icon {
     flex: none;
