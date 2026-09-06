@@ -324,6 +324,27 @@ class AppStore {
   }
 
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * True while a pull/merge/push cycle is actually in flight.
+   *
+   * This used to be `cloud.status === 'syncing'`, which is *display* state the caller
+   * is free to set — and connectCloud set it to 'syncing' immediately before calling
+   * syncNow(), so the sync it was waiting on returned instantly having done nothing.
+   * Adopting an existing gist therefore never pulled. Re-entrancy is a property of
+   * this object, not of what the UI is currently showing.
+   */
+  private syncing = false;
+
+  /**
+   * Has this device merged the remote copy at least once?
+   *
+   * A device that just adopted someone else's gist starts at false: its local progress
+   * is a blank slate, and pushing that over a populated gist destroys the other
+   * device's history. Cleared only by a successful sync. A device that *created* the
+   * gist is authoritative from the start, so it defaults to true.
+   */
+  private reconciled = true;
   /** Set while we're writing our own merge result back, so the save it triggers
    *  doesn't schedule a push that re-enters the sync we're already inside. */
   private applyingRemote = false;
@@ -347,6 +368,10 @@ class AppStore {
     this.pushTimer = null;
     const { githubToken, gistId } = this.secrets;
     if (!githubToken || !gistId) return;
+    // Never blind-push over a gist this device hasn't read yet — that is how a fresh
+    // laptop erases a phone's history and then reports "Synced just now". Reconcile
+    // first; syncNow pushes the merged result itself.
+    if (!this.reconciled) return void this.syncNow();
     try {
       await cloud.push(githubToken, gistId, $state.snapshot(this.progress));
       this.cloud = {
@@ -370,8 +395,9 @@ class AppStore {
    */
   async syncNow(): Promise<void> {
     const { githubToken, gistId } = this.secrets;
-    if (!githubToken || !gistId || this.cloud.status === 'syncing') return;
+    if (!githubToken || !gistId || this.syncing) return;
 
+    this.syncing = true;
     this.cloud = { ...this.cloud, status: 'syncing', error: null };
     try {
       const remote = await cloud.pull(githubToken, gistId);
@@ -387,6 +413,9 @@ class AppStore {
         }
       }
       await cloud.push(githubToken, gistId, $state.snapshot(this.progress));
+      // Only now is it safe for this device to push on its own: it has seen what the
+      // remote holds and merged it in.
+      this.reconciled = true;
       this.cloud = {
         status: 'ok',
         lastSyncAt: new Date().toISOString(),
@@ -396,6 +425,8 @@ class AppStore {
     } catch (err) {
       this.applyingRemote = false;
       this.cloud = { ...this.cloud, status: 'error', error: errorText(err) };
+    } finally {
+      this.syncing = false;
     }
   }
 
@@ -405,6 +436,9 @@ class AppStore {
     this.cloud = { ...this.cloud, status: 'syncing', error: null };
     try {
       const existing = await cloud.findGist(token);
+      // Set before the gist id exists, so a push scheduled mid-connect can't race in
+      // ahead of the first pull.
+      this.reconciled = !existing;
       const gistId = existing ?? (await cloud.createGist(token, $state.snapshot(this.progress)));
       this.secrets = { ...this.secrets, githubToken: token, gistId };
       await store.saveSecrets($state.snapshot(this.secrets));
