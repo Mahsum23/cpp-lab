@@ -151,3 +151,63 @@ export function indentAt(
   const cursor = start + INDENT.length;
   return { value: next, start: cursor, end: cursor };
 }
+
+/**
+ * Is the cursor inside a fenced block?
+ *
+ * Autoindent and Tab are wanted while writing the code half of a mixed message, not
+ * just when the whole field is in code mode. Fences alternate, so an odd number of
+ * them before the cursor means it sits inside one.
+ */
+export function inFence(value: string, pos: number): boolean {
+  const opens = value.slice(0, pos).match(/^\s*```/gm);
+  return (opens?.length ?? 0) % 2 === 1;
+}
+
+/**
+ * Enter, as an editor does it: carry the current line's indentation onto the next one.
+ *
+ * A line ending in an opener earns a further level, and if the closer is sitting right
+ * after the cursor it gets a line of its own at the outer level — the `{`-Enter that
+ * lands you in an empty body with the `}` already below you. Without this, code typed
+ * on a phone comes out flush left, which is the exact thing code mode was for.
+ */
+export function newlineAt(
+  value: string,
+  start: number,
+  end: number,
+): { value: string; start: number; end: number } {
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+  const line = value.slice(lineStart, start);
+  const indent = /^[ \t]*/.exec(line)?.[0] ?? '';
+  // Don't indent past a closing fence: the line after it is prose again.
+  const opens = /[{([]\s*$/.test(line);
+  const inner = opens ? indent + INDENT : indent;
+  const closerAhead = opens && /^[ \t]*[})\]]/.test(value.slice(end));
+
+  const insert = closerAhead ? `\n${inner}\n${indent}` : `\n${inner}`;
+  const at = start + 1 + inner.length;
+  return { value: value.slice(0, start) + insert + value.slice(end), start: at, end: at };
+}
+
+/**
+ * Typing `}` on a line that is nothing but indentation pulls it back one level.
+ *
+ * The counterpart to the rule above: without it, every block you close ends up one
+ * step too deep and has to be un-indented by hand. Returns null when the keystroke is
+ * an ordinary one the browser should handle itself.
+ */
+export function closerAt(
+  value: string,
+  start: number,
+  end: number,
+  ch: string,
+): { value: string; start: number; end: number } | null {
+  if (start !== end) return null;
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+  const line = value.slice(lineStart, start);
+  if (!/^[ \t]+$/.test(line) || !line.endsWith(INDENT)) return null;
+  const pulled = line.slice(0, -INDENT.length);
+  const at = lineStart + pulled.length + 1;
+  return { value: value.slice(0, lineStart) + pulled + ch + value.slice(end), start: at, end: at };
+}

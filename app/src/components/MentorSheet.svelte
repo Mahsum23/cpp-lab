@@ -13,7 +13,10 @@
   import { router } from '../lib/router.svelte';
   import Markdown from './Markdown.svelte';
   import Button from './Button.svelte';
-  import { asCodeBlock, hasFence, indentAt, looksLikeCode, shapeOf, wrapSelection } from '../lib/compose';
+  import {
+    asCodeBlock, closerAt, hasFence, inFence, indentAt, looksLikeCode, newlineAt, shapeOf,
+    wrapSelection,
+  } from '../lib/compose';
 
   /**
    * A tappable opener. `send: false` drops the text into the composer instead of
@@ -49,15 +52,47 @@
     if (text && looksLikeCode(text)) codeMode = true;
   }
 
-  function onTab(e: KeyboardEvent) {
-    if (e.key !== 'Tab' || !codeMode || !box) return;
-    e.preventDefault();
-    const r = indentAt(box.value, box.selectionStart, box.selectionEnd);
+  /**
+   * Apply an edit the browser wouldn't have made, and put the cursor back.
+   *
+   * Synchronously, on the element itself, rather than assigning `draft` and fixing the
+   * selection a frame later: anyone typing at speed gets their next keystroke in
+   * before that frame runs, and it lands wherever the cursor used to be. The binding
+   * is then told the same string, so Svelte has nothing left to write back.
+   */
+  function apply(r: { value: string; start: number; end: number }) {
+    if (box) {
+      box.value = r.value;
+      box.setSelectionRange(r.start, r.end);
+    }
     draft = r.value;
-    requestAnimationFrame(() => {
-      box?.setSelectionRange(r.start, r.end);
-      grow();
-    });
+    grow();
+  }
+
+  /**
+   * Editor keys, live wherever the cursor is actually in code — the whole field in
+   * code mode, or the code half of a mixed message.
+   */
+  function onEdit(e: KeyboardEvent) {
+    if (!box || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+    const { value, selectionStart: from, selectionEnd: to } = box;
+    if (!codeMode && !inFence(value, from)) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      return apply(indentAt(value, from, to));
+    }
+    // Enter is a newline here (Ctrl/Cmd+Enter sends), so it is ours to indent.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      return apply(newlineAt(value, from, to));
+    }
+    if (e.key === '}' || e.key === ')' || e.key === ']') {
+      const r = closerAt(value, from, to, e.key);
+      if (!r) return;
+      e.preventDefault();
+      apply(r);
+    }
   }
 
   /**
@@ -80,13 +115,8 @@
       box.focus();
       return;
     }
-    const r = wrapSelection(value, from, to);
-    draft = r.value;
-    requestAnimationFrame(() => {
-      box?.focus();
-      box?.setSelectionRange(r.start, r.end);
-      grow();
-    });
+    apply(wrapSelection(value, from, to));
+    box.focus();
   }
 
 
@@ -130,7 +160,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    onTab(e);
+    onEdit(e);
     // Ctrl/Cmd+E does what the button does, for anyone typing on a real keyboard.
     if (e.key.toLowerCase() === 'e' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -232,8 +262,8 @@
           aria-label="Message"
           class:code={codeMode}
           autocomplete="off"
-          autocapitalize="off"
-          spellcheck={!codeMode}
+          autocapitalize="none"
+          spellcheck={!codeMode && !hasFence(draft)}
           {...{ autocorrect: 'off' }}
         ></textarea>
         <button

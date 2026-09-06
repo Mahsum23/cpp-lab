@@ -18,7 +18,8 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-compose.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { looksLikeCode, asCodeBlock, isFenced, hasFence, shapeOf, wrapSelection, indentAt, INDENT } = await import(file);
+const { looksLikeCode, asCodeBlock, isFenced, hasFence, shapeOf, wrapSelection, indentAt,
+        inFence, newlineAt, closerAt, INDENT } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -100,6 +101,39 @@ ok('plain text is text', shapeOf('why does recv() return 0?') === 'text');
 ok('a bare block is code', shapeOf('```cpp\nint x;\n```') === 'code');
 ok('prose plus a block is mixed', shapeOf("look:\n```cpp\nint x;\n```") === 'mixed');
 ok('a block with a trailing question is still code', shapeOf('```cpp\nint x;\n```\nwhy?') === 'code');
+
+console.log('\n— autoindent —');
+// Inside a mixed message the code half still wants editor behaviour, so the cursor's
+// position relative to the fences decides, not just the whole-message toggle.
+ok('the cursor after an opening fence is inside it', inFence('a:\n```cpp\nint x;', 12));
+ok('the cursor before any fence is outside', !inFence('a:\n```cpp\nint x;', 2));
+ok('the cursor after a closed block is outside', inFence('```cpp\nx;\n```\nwhy?', 18) === false);
+
+let n = newlineAt('    int x = 1;', 14, 14);
+ok('enter carries the indentation down', n.value === '    int x = 1;\n    ', JSON.stringify(n.value));
+ok('the cursor lands after the new indent', n.start === n.value.length);
+
+n = newlineAt('int main() {', 12, 12);
+ok('a line ending in a brace earns a level', n.value === 'int main() {\n    ', JSON.stringify(n.value));
+
+n = newlineAt('    if (n) {', 12, 12);
+ok('the extra level is relative, not absolute', n.value === '    if (n) {\n        ', JSON.stringify(n.value));
+
+// The `{`-Enter that leaves you in an empty body with the closer already below.
+n = newlineAt('int main() {}', 12, 12);
+ok('a closer ahead gets its own line', n.value === 'int main() {\n    \n}', JSON.stringify(n.value));
+ok('the cursor stays in the empty body', n.start === 17, String(n.start));
+
+n = newlineAt('why does this fail?', 19, 19);
+ok('unindented prose stays unindented', n.value === 'why does this fail?\n', JSON.stringify(n.value));
+
+let c = closerAt('int main() {\n    \n', 17, 17, '}');
+ok('a closer on a blank line pulls back a level', c && c.value === 'int main() {\n}\n', JSON.stringify(c?.value));
+ok('the cursor follows the closer', c && c.start === 14, String(c?.start));
+
+ok('a closer after code is left to the browser', closerAt('int x = f(a);', 13, 13, '}') === null);
+ok('a closer at column zero has nothing to pull', closerAt('x;\n', 3, 3, '}') === null);
+ok('a closer inside a selection is left alone', closerAt('        ', 4, 8, '}') === null);
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all compose cases pass');
 process.exit(fails ? 1 : 0);
