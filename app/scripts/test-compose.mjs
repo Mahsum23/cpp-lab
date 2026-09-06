@@ -19,7 +19,7 @@ const out = await build({
 const file = join(tmpdir(), 'cpp-lab-compose.mjs');
 writeFileSync(file, out.outputFiles[0].text);
 const { looksLikeCode, asCodeBlock, isFenced, hasFence, shapeOf, wrapSelection, indentAt,
-        inFence, newlineAt, closerAt, INDENT } = await import(file);
+        inFence, newlineAt, closerAt, autoCloseAt, unpairAt, codeSpans, INDENT } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -134,6 +134,55 @@ ok('the cursor follows the closer', c && c.start === 14, String(c?.start));
 ok('a closer after code is left to the browser', closerAt('int x = f(a);', 13, 13, '}') === null);
 ok('a closer at column zero has nothing to pull', closerAt('x;\n', 3, 3, '}') === null);
 ok('a closer inside a selection is left alone', closerAt('        ', 4, 8, '}') === null);
+// Every key is offered to this rule, so it has to recognise the ones that aren't
+// closers: an ordinary letter at the start of an indented line must keep its indent.
+ok('an ordinary letter does not dedent', closerAt('int main() {\n    ', 17, 17, 'i') === null);
+ok('a space does not dedent', closerAt('int main() {\n    ', 17, 17, ' ') === null);
+ok('a real closer still dedents', closerAt('int main() {\n    ', 17, 17, '}')?.value === 'int main() {\n}');
+
+console.log('\n— brackets —');
+let a = autoCloseAt('', 0, 0, '(');
+ok('an opener brings its closer', a && a.value === '()' && a.start === 1, JSON.stringify(a));
+
+a = autoCloseAt('socket', 6, 6, '(');
+ok('a pair opens after a word', a && a.value === 'socket()', JSON.stringify(a?.value));
+
+// Typing the closer that is already there should step over it, not stack a second one.
+a = autoCloseAt('socket()', 7, 7, ')');
+ok('the closer under the cursor is stepped over', a && a.value === 'socket()' && a.start === 8, JSON.stringify(a));
+
+ok('a pair does not open in front of a word', autoCloseAt('fd', 0, 0, '(') === null);
+ok('an apostrophe after a word is not a pair', autoCloseAt("don", 3, 3, "'") === null);
+a = autoCloseAt('', 0, 0, '"');
+ok('a quote with nothing behind it does pair', a && a.value === '""', JSON.stringify(a?.value));
+
+// Wrapping a selection is the one case where even a quote is unambiguous.
+a = autoCloseAt('int x', 0, 5, '(');
+ok('a selection is wrapped', a && a.value === '(int x)', JSON.stringify(a?.value));
+ok('the selection survives the wrap', a && a.start === 1 && a.end === 6, JSON.stringify(a));
+
+ok('an ordinary key is left to the browser', autoCloseAt('x', 1, 1, ';') === null);
+
+let u = unpairAt('()', 1, 1);
+ok('backspace inside an empty pair takes both', u && u.value === '' && u.start === 0, JSON.stringify(u));
+ok('backspace elsewhere is the browser\'s job', unpairAt('(x)', 2, 2) === null);
+ok('backspace between mismatched halves is left alone', unpairAt('(]', 1, 1) === null);
+
+console.log('\n— which parts of a draft are code —');
+let sp = codeSpans('why?\n```cpp\nint x;\n```\nthanks');
+ok('one block is found', sp.length === 1, JSON.stringify(sp));
+ok('the span covers the body only', sp[0] && 'why?\n```cpp\nint x;\n```\nthanks'.slice(sp[0].from, sp[0].to) === 'int x;\n', JSON.stringify(sp[0]));
+ok('the language is picked up', sp[0]?.lang === 'cpp');
+
+sp = codeSpans('```bash\nss -ltn\n```');
+ok('a bash block keeps its language', sp[0]?.lang === 'bash', JSON.stringify(sp));
+
+// The block you are in the middle of typing has no closing fence yet.
+sp = codeSpans('look:\n```cpp\nint x;');
+ok('an unterminated block runs to the end', sp.length === 1 && 'look:\n```cpp\nint x;'.slice(sp[0].from, sp[0].to) === 'int x;', JSON.stringify(sp));
+
+ok('prose alone has no spans', codeSpans('why does recv() return 0?').length === 0);
+ok('two blocks are both found', codeSpans('```\na\n```\nand\n```\nb\n```').length === 2);
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all compose cases pass');
 process.exit(fails ? 1 : 0);

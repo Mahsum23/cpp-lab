@@ -70,6 +70,18 @@ marked.use({
   },
 });
 
+/**
+ * Highlight a bare run of code, for the places that aren't markdown.
+ *
+ * The composer paints its own draft through this so what you're typing looks like what
+ * it will look like once it's sent. Reuses the instance above rather than importing
+ * highlight.js a second time — the language registrations are what cost the bytes.
+ */
+export function highlight(code: string, lang = 'cpp'): string {
+  const language = hljs.getLanguage(lang) ? lang : 'cpp';
+  return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+}
+
 export function render(md: string | null | undefined): string {
   if (!md) return '';
   return marked.parse(md, { async: false }) as string;
