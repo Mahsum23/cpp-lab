@@ -13,6 +13,7 @@
   import { router } from '../lib/router.svelte';
   import Markdown from './Markdown.svelte';
   import Button from './Button.svelte';
+  import { asCodeBlock, indentAt, isFenced, looksLikeCode } from '../lib/compose';
 
   /**
    * A tappable opener. `send: false` drops the text into the composer instead of
@@ -39,6 +40,27 @@
   let box = $state<HTMLTextAreaElement | null>(null);
   let scroller = $state<HTMLElement | null>(null);
 
+  let codeMode = $state(false);
+
+  // Paste is the moment that matters: a pasted function should not silently arrive as
+  // a paragraph with its indentation reflowed away.
+  function onPaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData('text') ?? '';
+    if (text && looksLikeCode(text)) codeMode = true;
+  }
+
+  function onTab(e: KeyboardEvent) {
+    if (e.key !== 'Tab' || !codeMode || !box) return;
+    e.preventDefault();
+    const r = indentAt(box.value, box.selectionStart, box.selectionEnd);
+    draft = r.value;
+    requestAnimationFrame(() => {
+      box?.setSelectionRange(r.start, r.end);
+      grow();
+    });
+  }
+
+
   $effect(() => {
     if (!open) return;
     chat.context = { week, day };
@@ -61,9 +83,13 @@
   }
 
   async function send(text = draft) {
-    const content = text.trim();
-    if (!content || chat.streaming) return;
+    const raw = text.trim();
+    if (!raw || chat.streaming) return;
+    // Fence it on the way out, so the model is told it's source and the transcript
+    // renders it highlighted rather than reflowed.
+    const content = codeMode && !isFenced(raw) ? asCodeBlock(raw) : raw;
     draft = '';
+    codeMode = false;
     if (box) box.style.height = 'auto';
     await chat.send(content);
   }
@@ -75,6 +101,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    onTab(e);
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void send();
@@ -129,7 +156,13 @@
           {#each chat.messages as message, i}
             <li class={message.role}>
               {#if message.role === 'user'}
-                <div class="bubble">{message.content}</div>
+                <div class="bubble" class:has-code={isFenced(message.content)}>
+                  {#if isFenced(message.content)}
+                    <Markdown source={message.content} />
+                  {:else}
+                    {message.content}
+                  {/if}
+                </div>
               {:else}
                 <Markdown source={message.content} />
                 {#if chat.streaming && i === chat.messages.length - 1}
@@ -158,10 +191,26 @@
           bind:value={draft}
           oninput={grow}
           onkeydown={onKey}
+          onpaste={onPaste}
           rows="1"
-          placeholder="Ask about this…"
+          placeholder={codeMode ? 'Paste or type C++…' : 'Ask about this…'}
           aria-label="Message"
+          class:code={codeMode}
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck={!codeMode}
+          {...{ autocorrect: 'off' }}
         ></textarea>
+        <button
+          class="icon toggle"
+          class:on={codeMode}
+          onclick={() => (codeMode = !codeMode)}
+          aria-pressed={codeMode}
+          aria-label="C++ code mode"
+          title="C++ code mode — monospace, Tab indents, sent as a code block"
+        >
+          <svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4m6-8 4 4-4 4" /></svg>
+        </button>
         {#if chat.streaming}
           <button class="icon stop" onclick={() => chat.stop()} aria-label="Stop">
             <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
@@ -345,6 +394,33 @@
     gap: 8px;
     padding: 10px 12px 12px;
     border-top: 1px solid var(--border);
+  }
+
+  .composer textarea.code {
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 13.5px;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .icon.toggle {
+    background: var(--surface-2);
+    color: var(--text-faint);
+    border: 1px solid var(--border);
+  }
+
+  .icon.toggle.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .bubble.has-code {
+    max-width: 100%;
+    width: 100%;
+    background: transparent;
+    padding: 0;
   }
 
   .composer textarea {

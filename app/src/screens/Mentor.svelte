@@ -5,12 +5,32 @@
   import Markdown from '../components/Markdown.svelte';
   import Button from '../components/Button.svelte';
   import { PROVIDERS } from '../lib/mentor';
+  import { asCodeBlock, indentAt, isFenced, looksLikeCode } from '../lib/compose';
 
   const provider = $derived(PROVIDERS[app.mentorProvider]);
 
   let draft = $state('');
   let box = $state<HTMLTextAreaElement | null>(null);
   let confirmClear = $state(false);
+  let codeMode = $state(false);
+
+  // Paste is the moment that matters: a pasted function should not silently arrive as
+  // a paragraph with its indentation reflowed away.
+  function onPaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData('text') ?? '';
+    if (text && looksLikeCode(text)) codeMode = true;
+  }
+
+  function onTab(e: KeyboardEvent) {
+    if (e.key !== 'Tab' || !codeMode || !box) return;
+    e.preventDefault();
+    const r = indentAt(box.value, box.selectionStart, box.selectionEnd);
+    draft = r.value;
+    requestAnimationFrame(() => {
+      box?.setSelectionRange(r.start, r.end);
+      grow();
+    });
+  }
 
   // The thread follows the lesson he's on, so yesterday's questions don't clutter
   // today's. Falls back to the last authored day once the week is finished.
@@ -37,9 +57,13 @@
   }
 
   async function send(text = draft) {
-    const content = text.trim();
-    if (!content) return;
+    const raw = text.trim();
+    if (!raw) return;
+    // Fence it on the way out, so the model is told it's source and the transcript
+    // renders it highlighted rather than reflowed.
+    const content = codeMode && !isFenced(raw) ? asCodeBlock(raw) : raw;
     draft = '';
+    codeMode = false;
     if (box) box.style.height = 'auto';
     await chat.send(content);
   }
@@ -51,6 +75,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    onTab(e);
     // Enter is a newline on a phone keyboard. Desktop gets the shortcut it expects.
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -139,7 +164,13 @@
     {#each chat.messages as message, i}
       <li class={message.role}>
         {#if message.role === 'user'}
-          <div class="bubble">{message.content}</div>
+          <div class="bubble" class:has-code={isFenced(message.content)}>
+            {#if isFenced(message.content)}
+              <Markdown source={message.content} />
+            {:else}
+              {message.content}
+            {/if}
+          </div>
         {:else}
           <Markdown source={message.content} />
           {#if chat.streaming && i === chat.messages.length - 1}
@@ -168,10 +199,26 @@
         bind:value={draft}
         oninput={grow}
         onkeydown={onKey}
+        onpaste={onPaste}
         rows="1"
-        placeholder="Ask the mentor…"
+        placeholder={codeMode ? 'Paste or type C++…' : 'Ask the mentor…'}
         aria-label="Message"
+        class:code={codeMode}
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck={!codeMode}
+        {...{ autocorrect: 'off' }}
       ></textarea>
+      <button
+        class="icon toggle"
+        class:on={codeMode}
+        onclick={() => (codeMode = !codeMode)}
+        aria-pressed={codeMode}
+        aria-label="C++ code mode"
+        title="C++ code mode — monospace, Tab indents, sent as a code block"
+      >
+        <svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4m6-8 4 4-4 4" /></svg>
+      </button>
       {#if chat.streaming}
         <button class="icon stop" onclick={() => chat.stop()} aria-label="Stop">
           <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
@@ -297,6 +344,34 @@
   .thread li.user {
     justify-self: end;
     max-width: 88%;
+  }
+
+  .bubble.has-code {
+    max-width: 100%;
+    width: 100%;
+    background: transparent;
+    color: var(--text);
+    padding: 0;
+  }
+
+  textarea.code {
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 13.5px;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .icon.toggle {
+    background: var(--surface-2);
+    color: var(--text-faint);
+    border: 1px solid var(--border);
+  }
+
+  .icon.toggle.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .bubble {

@@ -220,3 +220,51 @@ tried:" auto-sent is useless, so `MentorSheet` now takes starters as
 cursor after it instead of firing. Marked with a ✎ so the difference is visible before
 you tap. None of the three ask for the implementation — the mentor refuses that anyway,
 and a starter that invited it would teach the wrong habit.
+
+**Sync was broken on any device adopting an existing gist (2026-09-04).** Paste a token
+on a second device and it reported "Synced just now" while showing none of the other
+device's progress. Three linked faults:
+
+1. `syncNow()`'s re-entrancy guard read `cloud.status === 'syncing'` — *display* state
+   the caller sets. `connectCloud()` set status to 'syncing' and then called
+   `syncNow()`, which saw its own caller's flag and returned instantly having done
+   nothing. **Adopting an existing gist never pulled.** A/B confirmed in a browser: the
+   old code made exactly one GitHub call (`GET /gists?per_page=100`) and never fetched
+   the gist; the fix makes list → pull → push and carries the merged day through.
+2. Status then stayed 'syncing' forever in the adopted branch (only the *created*
+   branch set 'ok'), so every later `syncNow()` hit the same guard. Sync stayed dead
+   until a reload, which is why it appeared to fix itself.
+3. Worst: `pushNow()` had no such guard, so a device that had never pulled would PATCH
+   its blank progress over a populated gist and then report success — data loss
+   presented as "Synced just now".
+
+Guard is now a private `syncing` flag (re-entrancy is a property of the object, not of
+what the UI is showing), and a `reconciled` flag blocks pushing until this device has
+merged the remote at least once. A device that creates the gist is authoritative from
+the start; one that adopts is not.
+
+Worth noting why this shipped: `test-merge.mjs` covers the pure merge function
+thoroughly, and nothing at all covered the orchestration around it.
+
+**Code mode in the mentor composer (2026-09-04).** Pasting C++ for review used to arrive
+as a paragraph: proportional font, indentation reflowed away, and the phone keyboard
+capitalising `int` and "correcting" `->` on the way in.
+
+Both composers (Mentor tab and the in-lesson sheet) now carry `autocomplete`,
+`autocapitalize` and `autocorrect` off unconditionally — those actively corrupt source —
+and a `</>` toggle for code mode. In code mode the field is monospace with `white-space:
+pre`, Tab indents four spaces instead of leaving the field (multi-line selections indent
+every line), spellcheck is off, and the message is fenced as ```cpp on the way out. The
+fence does double duty: the model is told it's source rather than guessing, and the
+transcript renders it through the existing highlighter instead of reflowing it.
+
+Code mode auto-enables on a paste that looks like source, since that's the actual moment
+of use. The heuristic is deliberately conservative — a single line is never code, so
+"why does recv() return 0?" stays a question. Its first version missed flush-left C++
+whose only signal is lines ending in `;` (exactly what the Day 2 task produces), caught
+by a test rather than in use.
+
+Logic lives in `lib/compose.ts` rather than inside the components, because there are two
+composers and because logic that only exists in a `.svelte` file is logic nothing can
+unit-test — which is the same seam the sync bugs sat in. `test-compose.mjs` covers it and
+is wired into `npm test`.
