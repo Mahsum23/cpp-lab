@@ -245,3 +245,26 @@ the start; one that adopts is not.
 
 Worth noting why this shipped: `test-merge.mjs` covers the pure merge function
 thoroughly, and nothing at all covered the orchestration around it.
+
+**Code mode in the mentor composer (2026-09-04).** Pasting C++ for review used to arrive
+as a paragraph: proportional font, indentation reflowed away, and the phone keyboard
+capitalising `int` and "correcting" `->` on the way in.
+
+Both composers (Mentor tab and the in-lesson sheet) now carry `autocomplete`,
+`autocapitalize` and `autocorrect` off unconditionally — those actively corrupt source —
+and a `</>` toggle for code mode. In code mode the field is monospace with `white-space:
+pre`, Tab indents four spaces instead of leaving the field (multi-line selections indent
+every line), spellcheck is off, and the message is fenced as ```cpp on the way out. The
+fence does double duty: the model is told it's source rather than guessing, and the
+transcript renders it through the existing highlighter instead of reflowing it.
+
+Code mode auto-enables on a paste that looks like source, since that's the actual moment
+of use. The heuristic is deliberately conservative — a single line is never code, so
+"why does recv() return 0?" stays a question. Its first version missed flush-left C++
+whose only signal is lines ending in `;` (exactly what the Day 2 task produces), caught
+by a test rather than in use.
+
+Logic lives in `lib/compose.ts` rather than inside the components, because there are two
+composers and because logic that only exists in a `.svelte` file is logic nothing can
+unit-test — which is the same seam the sync bugs sat in. `test-compose.mjs` covers it and
+is wired into `npm test`.
