@@ -5,7 +5,7 @@ The third column is the valuable one. Be honest in it.
 
 | Milestone | Started | Done | Review | Teach-back | Notes |
 |---|---|---|---|---|---|
-| 01-raw-sockets | 2026-09-01 | | | | Day 1/8 in progress (see log) |
+| 01-raw-sockets | 2026-09-01 | | | | Day 2/8 in progress (see log) |
 
 ## Log
 
@@ -268,3 +268,27 @@ Logic lives in `lib/compose.ts` rather than inside the components, because there
 composers and because logic that only exists in a `.svelte` file is logic nothing can
 unit-test — which is the same seam the sync bugs sat in. `test-compose.mjs` covers it and
 is wired into `npm test`.
+
+**Day 2 — addresses and byte order (2026-09-06/07):**
+- Task attempted: `src/main.cpp` (commit `8172890`) extends Day 1 with a `sockaddr_in`
+  for port 9000/`INADDR_ANY`, prints `sin_port` raw vs. `ntohs()`, dumps the struct
+  byte-by-byte in hex, and detects host endianness at runtime with the 1-byte trick.
+  Compiles clean under `-Wall -Wextra`; ran it — byte dump correctly shows the port at
+  offset 2–3 as `23 28` (big-endian 9000), matching the raw/`ntohs()` printout.
+- Day 1's two pending review fixes are both applied: `close(fd)` added, and the
+  failure branch now `return 1;`s instead of falling off `main()` as success.
+- **Code review — pending fixes (not yet applied):**
+  1. `uint16_t`/`uint8_t` used with no `#include <cstdint>` — compiles only because
+     `<netinet/in.h>`/`<arpa/inet.h>` happen to pull it in transitively. Confirmed by
+     removing them in isolation: it stops compiling. Include what you use.
+  2. `addr.sin_addr.s_addr = INADDR_ANY;` set directly rather than through `htonl()` —
+     harmless since `INADDR_ANY` is `0`, but the task specifically asked for the
+     conversion as habit-building for the next literal address that isn't 0.
+  - Minor style, non-blocking: `is_little_endian` mixes a C-style cast with the
+    `reinterpret_cast` used one function below it; returns `int` used as a `bool`;
+    a couple of redundant leading `struct` keywords (C habit, not needed in C++).
+- Open question put to him rather than answered: which two byte offsets hold the
+  port, and why does `0x23` land before `0x28` in memory — needs his answer before
+  Day 3.
+- Next session: apply the two fixes above, answer the byte-order question, then
+  Day 3 — bind and listen.
