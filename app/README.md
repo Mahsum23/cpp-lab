@@ -71,7 +71,29 @@ tier is actually free** — rate-limited rather than metered, no card, no credit
 1. [aistudio.google.com/apikey](https://aistudio.google.com/apikey), sign in with a
    Google account.
 2. **Create API key** — accept whatever project it offers, or let it make one.
-3. Copy it (starts with `AIza`), paste into Settings → Save key.
+3. Copy it (newer keys start with `AQ.`, older ones with `AIza`), paste into
+   Settings → Save key.
+
+**Why not just "Sign in with Google"?** It's the obvious question and the answer is
+no, for three separate reasons, any one of which is fatal:
+
+- The free Gemini Developer API (`generativelanguage.googleapis.com`) authenticates
+  `generateContent` with an API key. OAuth on that host exists, but its scopes cover
+  tuned models and semantic retrieval — not ordinary generation.
+- The endpoint that *does* take OAuth access tokens for generation is Vertex AI, which
+  needs a Google Cloud project with billing enabled. That's strictly more setup than
+  pasting a key, and it isn't free.
+- Google OAuth requires a client ID with **pre-registered redirect URIs**. This app is
+  static and self-hosted, so everyone's copy lives at a different origin — each person
+  would have to register their own OAuth client and redirect URI, which is more work
+  than creating an API key, not less. A shared client ID can't work, and there's no
+  backend to hold a secret or proxy the calls.
+
+The design that would give you a real "sign in with Google" button is a hosted service:
+one operator runs a backend (Firebase AI Logic is purpose-built for this — it keeps the
+key server-side), users sign in, and **the operator pays for everyone's tokens**. That's
+a different product with a bill attached, not a change to this one. Bring-your-own-key
+is what keeps this app free, serverless, and yours.
 
 Saving fetches the model list straight from Google, which doubles as the cheapest
 possible check that the key works. Pick a **Flash** model: on the free tier the limit

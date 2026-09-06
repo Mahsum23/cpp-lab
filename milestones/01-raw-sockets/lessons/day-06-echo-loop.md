@@ -178,6 +178,33 @@ $ head -c 4000 /dev/urandom | base64 | tr -d '\n' | nc 127.0.0.1 9000
 Count how many `recv()` calls it takes. One `send()` on the client became many reads on
 the server, and the sizes are whatever the network felt like.
 
+**See the backpressure that causes short writes.** A short write needs a peer that has
+stopped reading, which you can arrange: connect a client whose output is blocked, so it
+never drains what your server echoes back.
+
+```console
+$ nc 127.0.0.1 9000 < /dev/zero | (sleep 60; cat)     # connects, sends, but reads nothing for a minute
+```
+
+Now your server is echoing into a socket nobody is draining. Watch both sides:
+
+```console
+$ ss -tan | grep 9000
+```
+
+The server's `Send-Q` climbs into the megabytes and the client's `Recv-Q` fills behind
+it — that's TCP flow control refusing to let your server outrun a peer that isn't
+reading. (A real capture of exactly this: the server's send queue sat at `0x2F0625`,
+about 3 MB, while the frozen client held half a megabyte it hadn't read.)
+
+Be warned about what you'll *see* at the boundary, though: on a **blocking** socket,
+once the send buffer is full `send()` normally just blocks rather than returning a
+partial count, so the short write you're defending against can be genuinely hard to
+provoke this way. It shows up reliably on non-blocking sockets, and occasionally on
+blocking ones when a very large single `send()` is partially satisfiable or a signal
+interrupts it. Write the loop anyway — milestone 02 makes every socket non-blocking, at
+which point partial writes stop being a curiosity and become the normal case.
+
 - File: `src/main.cpp`
 - Compile: `g++ -std=c++20 -Wall -Wextra -o day6 src/main.cpp`
 - You'll need `<netinet/tcp.h>` if you experiment with `TCP_NODELAY`, `<csignal>` for

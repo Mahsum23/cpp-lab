@@ -163,3 +163,60 @@ strerror, fcntl, bind, listen, setsockopt, accept, accept4, inet_ntop, recv, sen
 signal, connect, inet_pton, shutdown. Verified the lot compiles clean under
 `-Wall -Wextra` rather than trusting it by eye, which also confirmed inet_pton's
 return-value trap (1 on success, so a `< 0` check silently accepts malformed input).
+
+**Day 8 thickened, experiments added to 5-7, and the OAuth question answered
+(2026-09-03).** Day 8's strace listing was fabricated and wrong: it showed `close(4)`
+under `-e trace=network`, but `close` isn't a network syscall so that filter never
+prints it. Replaced with a real capture, which also shows `recv`/`send` appearing as
+`recvfrom`/`sendto` (the plain names are library wrappers passing NULL for the address
+args). Added `strace -T`, where a real run shows `accept(3, NULL, NULL) = 4 <1.997963>`
+against `recvfrom` at 28 microseconds — Day 4's "blocking is a sleep, not a spin" as a
+measurement. Added `strace -c` and a `/proc/net/tcp` decoding table.
+
+The best find was an experiment that carries Days 5 and 6 at once: send 200,000 bytes to
+a server that accepts and never reads. The server's rx_queue holds 0x1E800 (124,928) and
+the client's tx_queue holds 0x12540 (75,072) — which sum to exactly 200,000. Every byte
+is in one kernel queue or the other and none of it has reached application code. Day 5
+gets the receive half, Day 6 the backpressure half, Day 8 the arithmetic.
+
+Day 6's backpressure experiment was corrected after running it: with the peer frozen the
+server's send queue reached ~3 MB, but no short write appeared, because a **blocking**
+socket's `send()` blocks rather than returning partial. The lesson now says so instead of
+promising a short write that won't show up.
+
+**Google login for Gemini: no, and worth writing down why.** Three independent blockers.
+generateContent on the free Gemini Developer API authenticates by API key; OAuth on that
+host is scoped to tuned models and semantic retrieval. The endpoint that does take OAuth
+for generation is Vertex AI, which needs a billed Cloud project. And Google OAuth needs
+pre-registered redirect URIs, so a static self-hosted app would make every user register
+their own OAuth client — more work than an API key, not less. A real "sign in with
+Google" needs a hosted backend (Firebase AI Logic is built for it) where the operator
+pays everyone's token bill. Documented in app/README.md. What *was* possible: pasted
+keys are now normalised, since a phone paste arrives with newlines, smart quotes or a
+`GEMINI_API_KEY=` prefix, all of which 400 and read as "my key is wrong".
+
+**Mentor reachable from the theory screen (2026-09-04).** Asking a question used to mean
+leaving the lesson for the Mentor tab and losing your place mid-paragraph. There's now a
+floating "Ask" pill on the Theory step that opens a bottom sheet with the mentor in it.
+
+The design decision worth recording: the sheet drives the *same* `chat` store and the
+same per-day thread key the Mentor tab uses, rather than owning its own conversation. A
+question asked while reading is the same thread you find later under Mentor — no second
+transcript that quietly disagrees with the first. Verified end to end in a real browser:
+saved a key through the Settings UI, tapped a starter on Day 1, watched the reply stream
+into the sheet, then opened the Mentor tab and found the same exchange there.
+
+The sheet is capped at 70vh rather than filling the screen, because the question is
+usually about the paragraph you were just reading and you want to be able to refer back
+to it.
+
+**Mentor on the task screen too (2026-09-04).** Same sheet, same per-day thread — a
+question asked mid-attempt is the same conversation as one asked while reading the
+theory, verified by asking from the Task step and finding it in the Theory step's sheet.
+
+The starters needed a new mode to be worth anything here. "I'm stuck. Here's what I
+tried:" auto-sent is useless, so `MentorSheet` now takes starters as
+`{ text, send }` and a `send: false` one drops the text into the composer with the
+cursor after it instead of firing. Marked with a ✎ so the difference is visible before
+you tap. None of the three ask for the implementation — the mentor refuses that anyway,
+and a starter that invited it would teach the wrong habit.

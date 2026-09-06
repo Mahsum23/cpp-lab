@@ -164,6 +164,31 @@ and what `strerror(errno)` says.
 the server print the client's port. It's different every run — that's the kernel's
 implicit bind picking from the ephemeral range.
 
+**See the four-tuple do its job.** Start the server, then open *two* clients at once
+(the second will wait, which is fine — it's still connected). In a third terminal:
+
+```console
+$ ss -tan | grep 9000
+```
+
+You should see one `LISTEN` row and two `ESTAB` rows whose local address is identical —
+same IP, same port 9000 — and whose remote ports differ. That's Day 4's claim made
+concrete: the server's port isn't consumed or divided, and the only thing telling the
+two conversations apart is the remote half of the tuple.
+
+**Find out who ends up in TIME_WAIT.** Day 3 said it's whoever closes first, and now you
+own both ends, so you can settle it. Exit the client with Ctrl-D so *it* closes first,
+then immediately:
+
+```console
+$ ss -tan state time-wait | grep 9000
+```
+
+The lingering socket's local port is the client's ephemeral one, not 9000 — the client
+paid the wait. Now make the server close first instead (drop the connection right after
+the first echo) and repeat: this time port 9000 is the one sitting in `TIME_WAIT`, which
+is exactly the situation that made Day 3's restart fail.
+
 - Files: `src/server.cpp`, `src/client.cpp`
 - Compile: `g++ -std=c++20 -Wall -Wextra -o server src/server.cpp && g++ -std=c++20 -Wall -Wextra -o client src/client.cpp`
 
