@@ -13,7 +13,10 @@
   import { router } from '../lib/router.svelte';
   import Markdown from './Markdown.svelte';
   import Button from './Button.svelte';
-  import { asCodeBlock, indentAt, isFenced, looksLikeCode } from '../lib/compose';
+  import {
+    asCodeBlock, closerAt, hasFence, inFence, indentAt, looksLikeCode, newlineAt, shapeOf,
+    wrapSelection,
+  } from '../lib/compose';
 
   /**
    * A tappable opener. `send: false` drops the text into the composer instead of
@@ -49,15 +52,71 @@
     if (text && looksLikeCode(text)) codeMode = true;
   }
 
-  function onTab(e: KeyboardEvent) {
-    if (e.key !== 'Tab' || !codeMode || !box) return;
-    e.preventDefault();
-    const r = indentAt(box.value, box.selectionStart, box.selectionEnd);
+  /**
+   * Apply an edit the browser wouldn't have made, and put the cursor back.
+   *
+   * Synchronously, on the element itself, rather than assigning `draft` and fixing the
+   * selection a frame later: anyone typing at speed gets their next keystroke in
+   * before that frame runs, and it lands wherever the cursor used to be. The binding
+   * is then told the same string, so Svelte has nothing left to write back.
+   */
+  function apply(r: { value: string; start: number; end: number }) {
+    if (box) {
+      box.value = r.value;
+      box.setSelectionRange(r.start, r.end);
+    }
     draft = r.value;
-    requestAnimationFrame(() => {
-      box?.setSelectionRange(r.start, r.end);
-      grow();
-    });
+    grow();
+  }
+
+  /**
+   * Editor keys, live wherever the cursor is actually in code — the whole field in
+   * code mode, or the code half of a mixed message.
+   */
+  function onEdit(e: KeyboardEvent) {
+    if (!box || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+    const { value, selectionStart: from, selectionEnd: to } = box;
+    if (!codeMode && !inFence(value, from)) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      return apply(indentAt(value, from, to));
+    }
+    // Enter is a newline here (Ctrl/Cmd+Enter sends), so it is ours to indent.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      return apply(newlineAt(value, from, to));
+    }
+    if (e.key === '}' || e.key === ')' || e.key === ']') {
+      const r = closerAt(value, from, to, e.key);
+      if (!r) return;
+      e.preventDefault();
+      apply(r);
+    }
+  }
+
+  /**
+   * The `</>` button, contextual — so a mixed message doesn't need hand-typed markdown.
+   *
+   * With a selection, it fences exactly that, which is the shape most questions
+   * actually take: a line of prose, the code, then "why does it fail?". With the
+   * cursor in a draft it drops an empty block in and lands inside it, ready to paste.
+   * With nothing typed at all the whole message is going to be code, so it flips the
+   * field itself into code mode instead.
+   */
+  function codeAction() {
+    if (!box) {
+      codeMode = !codeMode;
+      return;
+    }
+    const { selectionStart: from, selectionEnd: to, value } = box;
+    if (from === to && !value.trim()) {
+      codeMode = !codeMode;
+      box.focus();
+      return;
+    }
+    apply(wrapSelection(value, from, to));
+    box.focus();
   }
 
 
@@ -87,7 +146,7 @@
     if (!raw || chat.streaming) return;
     // Fence it on the way out, so the model is told it's source and the transcript
     // renders it highlighted rather than reflowed.
-    const content = codeMode && !isFenced(raw) ? asCodeBlock(raw) : raw;
+    const content = codeMode && !hasFence(raw) ? asCodeBlock(raw) : raw;
     draft = '';
     codeMode = false;
     if (box) box.style.height = 'auto';
@@ -101,7 +160,12 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    onTab(e);
+    onEdit(e);
+    // Ctrl/Cmd+E does what the button does, for anyone typing on a real keyboard.
+    if (e.key.toLowerCase() === 'e' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      codeAction();
+    }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void send();
@@ -156,11 +220,12 @@
           {#each chat.messages as message, i}
             <li class={message.role}>
               {#if message.role === 'user'}
-                <div class="bubble" class:has-code={isFenced(message.content)}>
-                  {#if isFenced(message.content)}
-                    <Markdown source={message.content} />
-                  {:else}
+                {@const shape = shapeOf(message.content)}
+                <div class="bubble" class:has-code={shape === 'code'} class:mixed={shape === 'mixed'}>
+                  {#if shape === 'text'}
                     {message.content}
+                  {:else}
+                    <Markdown source={message.content} />
                   {/if}
                 </div>
               {:else}
@@ -197,17 +262,17 @@
           aria-label="Message"
           class:code={codeMode}
           autocomplete="off"
-          autocapitalize="off"
-          spellcheck={!codeMode}
+          autocapitalize="none"
+          spellcheck={!codeMode && !hasFence(draft)}
           {...{ autocorrect: 'off' }}
         ></textarea>
         <button
           class="icon toggle"
           class:on={codeMode}
-          onclick={() => (codeMode = !codeMode)}
+          onclick={codeAction}
           aria-pressed={codeMode}
-          aria-label="C++ code mode"
-          title="C++ code mode — monospace, Tab indents, sent as a code block"
+          aria-label="Code block"
+          title="Code block — wraps the selection, or switches the whole message to C++ (Ctrl/Cmd+E)"
         >
           <svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4m6-8 4 4-4 4" /></svg>
         </button>
@@ -421,6 +486,19 @@
     width: 100%;
     background: transparent;
     padding: 0;
+  }
+
+  /* Prose with a block inside it: still a message you sent, but the accent fill would
+     fight the highlighted code sitting on top of it. */
+  .bubble.mixed {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .bubble.mixed :global(.prose > *:last-child) {
+    margin-bottom: 0;
   }
 
   .composer textarea {

@@ -70,6 +70,59 @@ export function asCodeBlock(text: string, lang = 'cpp'): string {
 export const isFenced = (text: string): boolean => FENCE.test(text.trim());
 
 /**
+ * Does a fence appear *anywhere*, not just at the start?
+ *
+ * The send path needs this rather than isFenced: a mixed message ("here's my code:"
+ * followed by a block) doesn't start with a fence, and wrapping the whole thing again
+ * would nest one fence inside another and render as garbage.
+ */
+export const hasFence = (text: string): boolean => /^\s*```/m.test(text);
+
+/**
+ * How a sent message should be rendered in the transcript.
+ *
+ * `code` is a message that is nothing but a block, and looks best without a bubble
+ * around it at all. `mixed` is the common case this composer exists to make easy —
+ * a question with the source quoted inside it — which still wants a bubble, just a
+ * quieter one that a code block can sit in.
+ */
+export const shapeOf = (text: string): 'text' | 'code' | 'mixed' =>
+  isFenced(text) ? 'code' : hasFence(text) ? 'mixed' : 'text';
+
+/**
+ * Insert a fenced block at the cursor, or wrap whatever is selected.
+ *
+ * This is what stops a mixed message from requiring hand-typed markdown: write the
+ * prose, hit the button, and the code lands in a block. Returns where the cursor
+ * should end up — inside the empty block when there was nothing selected, since that
+ * is where the next keystroke or paste belongs.
+ */
+export function wrapSelection(
+  value: string,
+  start: number,
+  end: number,
+  lang = 'cpp',
+): { value: string; start: number; end: number } {
+  const selected = value.slice(start, end);
+  // Fences only work at the start of a line, so make sure one precedes them.
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const lead = before && !before.endsWith('\n') ? '\n' : '';
+  const tail = after && !after.startsWith('\n') ? '\n' : '';
+
+  if (selected.trim()) {
+    const block = `${lead}\`\`\`${lang}\n${selected.replace(/\s+$/, '')}\n\`\`\`${tail}`;
+    const at = start + block.length - tail.length;
+    return { value: before + block + after, start: at, end: at };
+  }
+
+  const block = `${lead}\`\`\`${lang}\n\n\`\`\`${tail}`;
+  // Land on the blank line between the fences.
+  const at = start + lead.length + lang.length + 4;
+  return { value: before + block + after, start: at, end: at };
+}
+
+/**
  * Tab inside a textarea, as an editor would do it rather than as a browser does.
  *
  * Returns the new value and where the cursor should land. With a selection spanning
@@ -97,4 +150,64 @@ export function indentAt(
   const next = value.slice(0, start) + INDENT + value.slice(end);
   const cursor = start + INDENT.length;
   return { value: next, start: cursor, end: cursor };
+}
+
+/**
+ * Is the cursor inside a fenced block?
+ *
+ * Autoindent and Tab are wanted while writing the code half of a mixed message, not
+ * just when the whole field is in code mode. Fences alternate, so an odd number of
+ * them before the cursor means it sits inside one.
+ */
+export function inFence(value: string, pos: number): boolean {
+  const opens = value.slice(0, pos).match(/^\s*```/gm);
+  return (opens?.length ?? 0) % 2 === 1;
+}
+
+/**
+ * Enter, as an editor does it: carry the current line's indentation onto the next one.
+ *
+ * A line ending in an opener earns a further level, and if the closer is sitting right
+ * after the cursor it gets a line of its own at the outer level — the `{`-Enter that
+ * lands you in an empty body with the `}` already below you. Without this, code typed
+ * on a phone comes out flush left, which is the exact thing code mode was for.
+ */
+export function newlineAt(
+  value: string,
+  start: number,
+  end: number,
+): { value: string; start: number; end: number } {
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+  const line = value.slice(lineStart, start);
+  const indent = /^[ \t]*/.exec(line)?.[0] ?? '';
+  // Don't indent past a closing fence: the line after it is prose again.
+  const opens = /[{([]\s*$/.test(line);
+  const inner = opens ? indent + INDENT : indent;
+  const closerAhead = opens && /^[ \t]*[})\]]/.test(value.slice(end));
+
+  const insert = closerAhead ? `\n${inner}\n${indent}` : `\n${inner}`;
+  const at = start + 1 + inner.length;
+  return { value: value.slice(0, start) + insert + value.slice(end), start: at, end: at };
+}
+
+/**
+ * Typing `}` on a line that is nothing but indentation pulls it back one level.
+ *
+ * The counterpart to the rule above: without it, every block you close ends up one
+ * step too deep and has to be un-indented by hand. Returns null when the keystroke is
+ * an ordinary one the browser should handle itself.
+ */
+export function closerAt(
+  value: string,
+  start: number,
+  end: number,
+  ch: string,
+): { value: string; start: number; end: number } | null {
+  if (start !== end) return null;
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+  const line = value.slice(lineStart, start);
+  if (!/^[ \t]+$/.test(line) || !line.endsWith(INDENT)) return null;
+  const pulled = line.slice(0, -INDENT.length);
+  const at = lineStart + pulled.length + 1;
+  return { value: value.slice(0, lineStart) + pulled + ch + value.slice(end), start: at, end: at };
 }
