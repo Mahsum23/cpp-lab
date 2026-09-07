@@ -5,8 +5,12 @@
 
   let loading = $state<string | null>(null);
 
+  // Track-scoped, like everything else on the path: offering to download the other
+  // subject's week from inside this one's map is just noise.
   const pending = $derived(
-    (app.curriculum?.weeks ?? []).filter((ref) => app.sync.newWeeks.includes(ref.id)),
+    (app.curriculum?.weeks ?? []).filter(
+      (ref) => app.sync.newWeeks.includes(ref.id) && (ref.track ?? 'cpp') === app.track,
+    ),
   );
 
   async function load(weekId: string) {
@@ -27,7 +31,7 @@
   <h1>The path</h1>
   <p class="sub">Tap a finished day to re-read it or re-drill the quiz.</p>
 
-  {#each app.weeks as week}
+  {#each app.trackWeeks as week}
     <section>
       <header>
         <h2>{week.title}</h2>
@@ -97,7 +101,7 @@
     </div>
   {/each}
 
-  {#if !app.weeks.length && app.ready}
+  {#if !app.trackWeeks.length && app.ready}
     <p class="empty">{app.sync.message ?? 'Nothing loaded yet.'}</p>
   {/if}
 

@@ -390,3 +390,30 @@ Two bugs in the switch itself, found in a browser: switching to a track whose we
 never been downloaded showed "Week clear" (the auto-download rule was "first week
 overall" rather than "first week of this track"), and Today's header fell back to
 `weeks[0]` regardless of track.
+
+**Track separation bugs (2026-09-07).** Adding SQL shipped with a bad one: both weeks
+declared their days as `day-01`, `day-02`, …, and `Progress.days` is a flat map keyed by
+day id alone. So SQL Day 1 *was* C++ Day 1 — same completion, same quiz answers, same
+notes, same review cards, same mentor thread. Finishing one finished the other.
+
+Fixed by prefixing the SQL ids (`sql-day-01`) rather than renamespacing the C++ ones,
+which would have orphaned real progress. The actual fix is the guard: `build-content.mjs`
+now fails the build on a duplicate day id across weeks, because this has no partial
+version — it silently merges two learners' days in every direction at once.
+
+Note for anyone who used the SQL track before this: answers given there were written into
+the C++ Day 1/2 records (quiz keys are `q1`..`q5` on both), so those C++ days may show
+verdicts that aren't yours. Re-drilling them from the map is the clean way out.
+
+Two more found while sweeping for the same class of problem:
+- The week map listed every week regardless of track, and offered to download the other
+  subject's weeks from inside this one's path.
+- `completedToday` was global, so finishing a C++ day made the SQL tab say "Done today,
+  see you tomorrow" on a track that had never been opened. Now track-scoped — unlike the
+  streak, which stays global on purpose: it's one daily habit, and a day of either
+  subject keeps it alive.
+
+Checked and found fine: the streak can't double-count two days finished on one date
+(`completeDay` guards on `lastActiveDate === date`), and the C++-specific badges not
+firing on SQL is correct rather than broken. One copy fix — the generic seven-day streak
+badge said "the C++ is downstream of it" on both tracks.

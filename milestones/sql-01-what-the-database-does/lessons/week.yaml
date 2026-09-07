@@ -1,6 +1,11 @@
 # Week manifest for the SQL track. Same shape as the C++ weeks; `track` is what puts it
 # on the other side of the switcher.
 #
+# Day ids are prefixed because they must be unique across *every* week in the repo, not
+# just within one: progress, review cards and mentor chat threads are all flat maps
+# keyed by day id, so two weeks both calling a day "day-01" merges them into a single
+# record. build-content.mjs fails the build if that ever happens again.
+#
 # Teasers are hooks, not tables of contents. "pages, page_size, page_count" says nothing
 # the title doesn't; "why one row costs 4KB" makes someone open it.
 id: week-sql-01
@@ -13,7 +18,7 @@ intro: >
   so the whole track fits on whatever machine you happen to have open.
 
 days:
-  - id: day-01
+  - id: sql-day-01
     day: 1
     title: A table is a file of pages
     estMinutes: 25
@@ -23,7 +28,7 @@ days:
       single narrow row from a large table — what does the engine actually read, and
       what would have to be true for it to read less?
 
-  - id: day-02
+  - id: sql-day-02
     day: 2
     title: An index is a sorted copy
     estMinutes: 30
@@ -33,7 +38,7 @@ days:
       `WHERE lower(email) = ?` can't use an index on `email`, and why the fix is an index
       on the expression rather than on the column.
 
-  - id: day-03
+  - id: sql-day-03
     day: 3
     title: NULL is not a value
     estMinutes: 25

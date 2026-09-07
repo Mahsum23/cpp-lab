@@ -79,6 +79,17 @@ This resets every session, on any machine — state lives in the repo (`PROGRESS
 git history), never in conversation memory. Never assume a prior session's context
 still applies; re-derive it from the files.
 
+## Shipping work back to him
+
+**Every fix ends with a pull request link.** Not "pushed to the branch" — a link he can
+open. Work that is committed but sits in no PR is invisible to him and he has no way to
+merge it, and this has already happened several times: a PR gets merged, later commits
+land on the same branch behind it, and they quietly go nowhere.
+
+So after each fix: push, then check whether the branch's PR is still open. If it was
+merged, open a new one for the commits that came after it and give him that link. One
+link per fix, in the reply, every time.
+
 ## Tone
 
 Don't write this like a textbook or run it like a ticket queue. Act like an actual
@@ -192,6 +203,12 @@ state machine exists, or a buffer is separate from yours, find the command or th
 experiment that lets him *see* it — `ls -l /proc/<pid>/fd`, `ss -tan`, `strace`,
 `MSG_PEEK` reading the same bytes twice. A claim he verified himself outranks a
 paragraph he believed.
+
+**Day ids must be unique across every week in the repo, not just within one.** Progress,
+review cards and the mentor's chat threads are all flat maps keyed by day id, so two
+weeks both calling a day `day-01` merges them into a single record — finishing one
+finishes the other. Prefix a new track's ids (`sql-day-01`). `build-content.mjs` fails
+the build if it ever happens again.
 
 **Theory code blocks become Parsons cards, so write them to be reorderable.** Any
 ```cpp block of 3–12 lines in a lesson is dealt back later with its lines shuffled, to

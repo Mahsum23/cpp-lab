@@ -313,6 +313,29 @@ for (const milestone of milestones) {
   console.log(`  ${week.id}  ${week.title.padEnd(24)} ${available}/${week.days.length} days written`);
 }
 
+// Day ids are the key of the progress record, the review deck and the mentor's chat
+// threads — all of which are flat maps keyed by day id alone. Two weeks sharing one id
+// therefore share a learner's progress, silently and in every direction at once. This
+// is a hard failure rather than a warning because there is no partial version of it:
+// the SQL and C++ tracks both shipping `day-01` made finishing one finish the other.
+const seenDayIds = new Map();
+for (const ref of weekRefs) {
+  const week = JSON.parse(readFileSync(join(outDir, 'weeks', `${ref.id}.json`), 'utf8'));
+  for (const day of week.days) {
+    const owner = seenDayIds.get(day.id);
+    if (owner) {
+      console.error(
+        `\nFATAL: day id "${day.id}" is used by both ${owner} and ${ref.id}.\n` +
+          '       Day ids must be unique across every week — progress, review cards and\n' +
+          '       chat threads are all keyed by them, so a collision merges two days into\n' +
+          '       one record. Prefix the newer track\'s ids (e.g. "sql-day-01").\n',
+      );
+      process.exit(1);
+    }
+    seenDayIds.set(day.id, ref.id);
+  }
+}
+
 const curriculum = {
   schemaVersion: SCHEMA_VERSION,
   title: 'cpp-lab',
