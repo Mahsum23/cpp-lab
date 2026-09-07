@@ -577,6 +577,62 @@ out of the sync gist. No new infrastructure — Actions and the gist already exi
 it needs VAPID keys as repo secrets, and on iOS only reaches a PWA added to the Home
 Screen.
 
+## 8.7 Practice on demand, and Parsons cards (built 2026-09-07)
+
+The deck answered "what have I forgotten". It had no answer for "I have a free hour,
+the next day is locked, and I don't want to burn tomorrow's lesson to fill the time" —
+it dead-ended on *Deck's clear*. Two additions, both picked off the evidence rather
+than off intuition.
+
+**Parsons cards.** A real code block from that day's own theory, shuffled; you tap the
+lines back into order. The evidence for this is unusually good: across randomised
+comparisons, solving Parsons problems produced learning gains equal to writing the
+equivalent code while taking significantly less time, with no significant difference in
+retention a week later, and the adaptive variants came out ahead of code-writing
+outright (Ericson et al.). What makes it the right fit *here* is mechanical rather than
+pedagogical: it needs no compiler and no typing, so it is the only form of genuine code
+practice that survives a phone on a train — which is exactly the situation that was
+going to waste.
+
+Blocks come from the lesson markdown the app already ships, so these cards work with no
+key and no signal. Blocks are filtered to 3–12 lines (two lines is not a puzzle, twelve
+is a scrolling exercise) and any block with a repeated line is dropped, because that has
+more than one correct order and marking one of them wrong would be a lie. Fences are
+paired by scanning line by line: the first version used one regex, which cheerfully
+paired a *closing* fence with the next *opening* one and dealt a card made of three
+sentences and a heading.
+
+*Not yet done:* distractor lines, which is the variant most of the efficiency evidence
+actually tested, and indentation as a second dimension.
+
+**Practice on demand.** *Deck's clear* now offers to keep going, and Today offers it
+whenever the deck is non-empty rather than only when something is due. Practice deals
+from the whole deck, ignoring due dates.
+
+The scheduling rule that makes this safe: **answering early can hurt your schedule but
+not flatter it.** A correct answer on a card that wasn't due records the attempt and
+leaves the interval alone; a miss still pulls the card all the way back. You chose the
+card and it was still fresh, so getting it right is weak evidence — but failing it is
+strong evidence whenever it happens. Without that asymmetry, an idle evening of
+cramming would push everything months out and quietly hollow the deck.
+
+### Why these, and what the app already had
+
+| Finding | Where it lives |
+|---|---|
+| Retrieval practice and distributed practice are the two highest-utility techniques reviewed (Dunlosky et al. 2013) | the deck itself |
+| Spacing, interleaving and retrieval are "desirable difficulties" — they feel worse and work better (Bjork) | jittered intervals, shuffled dealing |
+| Parsons problems: equal learning to code-writing, less time (Ericson et al.) | Parsons cards |
+| Problem-solving *before* instruction beats instruction-first for conceptual understanding and transfer, over 166 comparisons (Sinha & Kapur 2021) | not yet built — see below |
+| Predict-before-run (PRIMM) grounds code comprehension | partly, via forged predict-the-output challenges |
+| Faded worked examples: learners learn most about the steps that were faded (Renkl) | not yet built |
+
+**The productive-failure idea worth building next.** The meta-analysis is about
+attempting a problem *before* being taught the method. The app currently forbids
+exactly that: tomorrow's task is locked behind tomorrow's theory. Letting someone
+attempt the *task* of a locked day without unlocking its *theory* is both what the
+evidence supports and what was actually asked for — the struggle without the spoiler.
+
 ## 9. Offline & local storage
 
 - **Content cache:** Cache API / IndexedDB — loaded weeks fully offline.

@@ -193,6 +193,13 @@ experiment that lets him *see* it — `ls -l /proc/<pid>/fd`, `ss -tan`, `strace
 `MSG_PEEK` reading the same bytes twice. A claim he verified himself outranks a
 paragraph he believed.
 
+**Theory code blocks become Parsons cards, so write them to be reorderable.** Any
+```cpp block of 3–12 lines in a lesson is dealt back later with its lines shuffled, to
+be tapped back into order (`DESIGN.md` §8.7). Two consequences when writing theory: a
+block whose lines could legitimately run in more than one order makes a card with no
+right answer, and a block with a repeated line is silently dropped. Snippets that
+demonstrate a *sequence* — open, check, use, close — are the ones worth writing.
+
 **Quiz questions and `teachBack` prompts are also review cards, so write them to
 survive being asked cold.** Every finished day feeds a spaced-repetition deck (`app/`,
 see `DESIGN.md` §8.6) that deals its questions back weeks later, out of order, with no

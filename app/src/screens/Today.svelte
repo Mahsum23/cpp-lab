@@ -127,14 +127,18 @@
   <!-- The gap this feature exists for: theory and quiz are done, the task needs a
        machine that isn't in your pocket, and the phone would otherwise have nothing
        to offer for the rest of the day. -->
-  {#if app.ready && !app.ambush && (app.taskParked || app.dueNow.length)}
-    <button class="strip" class:parked={app.taskParked} onclick={() => router.go('/review')}>
+  {#if app.ready && !app.ambush && (app.taskParked || app.deck.length)}
+    <button
+      class="strip"
+      class:parked={app.taskParked || app.dueNow.length > 0}
+      onclick={() => router.go(app.dueNow.length ? '/review' : '/review/practice')}
+    >
       <span class="lines">
         <strong>
-          {#if app.taskParked}Task's waiting on a compiler{:else if app.dueNow.length === 1}1 card due{:else}{app.dueNow.length} cards due{/if}
+          {#if app.taskParked}Task's waiting on a compiler{:else if app.dueNow.length === 1}1 card due{:else if app.dueNow.length}{app.dueNow.length} cards due{:else}Nothing due — practise anyway{/if}
         </strong>
         <em>
-          {#if app.taskParked && app.dueNow.length}Review {app.dueNow.length} from earlier days while you wait{:else if app.taskParked}Review something from an earlier day while you wait{:else}From days you finished a while ago{/if}
+          {#if app.taskParked && app.dueNow.length}Review {app.dueNow.length} from earlier days while you wait{:else if app.taskParked}Review something from an earlier day while you wait{:else if app.dueNow.length}From days you finished a while ago{:else}Answering early can't push a card further out{/if}
         </em>
       </span>
       <svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>

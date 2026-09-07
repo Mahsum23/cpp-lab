@@ -62,9 +62,21 @@ function jitter(days: number, rng: Rng): number {
  * A miss is expensive on purpose: back to a one-day interval and the ease drops, so a
  * card you keep failing keeps coming back until it stops being one you fail.
  */
-export function grade(card: ReviewCard, result: Grade, now: Date = new Date(), rng: Rng = Math.random): ReviewCard {
+export function grade(
+  card: ReviewCard,
+  result: Grade,
+  now: Date = new Date(),
+  rng: Rng = Math.random,
+  opts: { early?: boolean } = {},
+): ReviewCard {
   const seen = card.seen + 1;
   const lastAt = now.toISOString();
+
+  // Practising a card that wasn't due yet can hurt your schedule but not flatter it.
+  // Getting it right when you asked for it early is weak evidence — you chose the card
+  // and it was still fresh — so it records the attempt and leaves the interval alone.
+  // Failing it is strong evidence either way, and still pulls the card back.
+  if (opts.early && result === 'good') return { ...card, seen, lastAt };
 
   if (result === 'again') {
     return {
@@ -95,7 +107,7 @@ export function grade(card: ReviewCard, result: Grade, now: Date = new Date(), r
 
 // --- what cards exist -----------------------------------------------------
 
-export type CardKind = 'quiz' | 'explain' | 'forge';
+export type CardKind = 'quiz' | 'explain' | 'forge' | 'parsons';
 
 export interface CardRef {
   id: string;
@@ -105,13 +117,15 @@ export interface CardRef {
   questionId?: string;
 }
 
+const KINDS = new Set<string>(['quiz', 'explain', 'forge', 'parsons']);
+
 export const cardId = (kind: CardKind, dayId: string, questionId?: string) =>
   questionId ? `${kind}:${dayId}:${questionId}` : `${kind}:${dayId}`;
 
 export function parseCardId(id: string): CardRef | null {
   const [kind, dayId, questionId] = id.split(':');
-  if (!dayId || (kind !== 'quiz' && kind !== 'explain' && kind !== 'forge')) return null;
-  return { id, kind, dayId, ...(questionId ? { questionId } : {}) };
+  if (!dayId || !KINDS.has(kind)) return null;
+  return { id, kind: kind as CardKind, dayId, ...(questionId ? { questionId } : {}) };
 }
 
 /**
@@ -137,7 +151,59 @@ export function cardsFor(day: Day, progress: DayProgress | undefined): CardRef[]
   if (progress.theoryDone && day.theoryMarkdown) {
     cards.push({ id: cardId('forge', day.id), kind: 'forge', dayId: day.id });
   }
+  // One per code block the lesson actually contains, indexed by position so the id is
+  // stable as long as the block is.
+  codeBlocksFor(day).forEach((_, i) => {
+    cards.push({ id: cardId('parsons', day.id, String(i)), kind: 'parsons', dayId: day.id, questionId: String(i) });
+  });
   return cards;
+}
+
+/**
+ * The fenced code blocks in a day's theory, as line arrays.
+ *
+ * These are what the Parsons cards are built from, and they come from content the app
+ * already has — so a card that asks you to reconstruct a program needs no model, no
+ * network, and no compiler. That is the whole reason this card kind exists: it is the
+ * only form of real code practice that survives being on a train with a phone.
+ *
+ * Blocks are filtered to a size worth reordering. Two lines is not a puzzle, and
+ * anything past a dozen is a scrolling exercise on a phone rather than a recall one.
+ */
+export function codeBlocksFor(day: Day, min = 3, max = 12): string[][] {
+  const md = day.theoryMarkdown;
+  if (!md) return [];
+
+  const blocks: string[][] = [];
+  // Scanned line by line rather than matched with one regex. A regex that treats
+  // ``` as both an opener and a closer will happily pair a *closing* fence with the
+  // next *opening* one and hand you the prose in between, which is how the first
+  // version of this dealt a card made of three sentences and a heading.
+  let open: { lang: string; lines: string[] } | null = null;
+  for (const line of md.split('\n')) {
+    const fence = /^[ \t]*```(\w*)/.exec(line);
+    if (fence) {
+      if (open) {
+        const lines = open.lines.filter((l) => l.trim());
+        // Repeated lines mean more than one correct order exists, and marking one of
+        // them wrong would be a lie.
+        if (
+          (open.lang === 'cpp' || open.lang === 'c') &&
+          lines.length >= min &&
+          lines.length <= max &&
+          new Set(lines).size === lines.length
+        ) {
+          blocks.push(lines);
+        }
+        open = null;
+      } else {
+        open = { lang: fence[1].toLowerCase(), lines: [] };
+      }
+      continue;
+    }
+    open?.lines.push(line);
+  }
+  return blocks;
 }
 
 // --- selection ------------------------------------------------------------

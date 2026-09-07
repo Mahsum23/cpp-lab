@@ -26,7 +26,8 @@ const bundle = async (entry, name) => {
 const R = await bundle('../src/lib/review.ts', 'cpp-lab-review.mjs');
 const M = await bundle('../src/lib/merge.ts', 'cpp-lab-merge-review.mjs');
 const { today } = await bundle('../src/lib/date.ts', 'cpp-lab-date.mjs');
-const { grade, newCard, cardsFor, pickNext, dueCards, shouldAmbush, parseCardId, cardId, START_EASE } = R;
+const { grade, newCard, cardsFor, pickNext, dueCards, shouldAmbush, parseCardId, cardId,
+        codeBlocksFor, START_EASE } = R;
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -156,6 +157,61 @@ ok('a stale tally is not added in', m.doneToday === 2, String(m.doneToday));
 
 m = M.mergeReview({ cards: { only: card({}) }, lastAmbush: null, doneToday: 0, countedOn: null }, remote);
 ok('a card only one device has is kept', Boolean(m.cards.only) && Boolean(m.cards.x));
+
+console.log('\n— practice you asked for early —');
+// Cramming must not be able to inflate a schedule: you chose the card and it was still
+// fresh, so getting it right is weak evidence and the interval stays put.
+const rested = { interval: 30, ease: 2.4, streak: 4, due: '2026-12-01', seen: 4, lapses: 0, lastAt: null };
+let e = grade(rested, 'good', NOW, mid, { early: true });
+ok('an early hit leaves the schedule alone', e.due === rested.due && e.interval === 30, JSON.stringify(e));
+ok('but the attempt is still recorded', e.seen === 5 && e.lastAt !== null);
+ok('and the streak is not padded', e.streak === 4, String(e.streak));
+
+// Failing is strong evidence whenever it happens, so it still costs.
+e = grade(rested, 'again', NOW, mid, { early: true });
+ok('an early miss still pulls the card back', e.due === today(at(1)) && e.interval === 1, JSON.stringify(e));
+ok('an early miss still costs ease', e.ease < rested.ease);
+ok('a normal hit is unaffected by the flag being absent', grade(rested, 'good', NOW, mid).due !== rested.due);
+
+console.log('\n— code blocks become Parsons cards —');
+const theory = [
+  '# Day', '', 'Some prose.', '', '```cpp',
+  'int fd = socket(AF_INET, SOCK_STREAM, 0);',
+  'if (fd < 0) return 1;',
+  'close(fd);',
+  '```', '',
+  'More prose, then one too short to bother with:', '',
+  '```cpp', 'int x = 1;', '```', '',
+  '```bash', 'ss -ltn', 'echo done', 'true', '```',
+].join('\n');
+const withCode = { ...day, theoryMarkdown: theory };
+let blocks = codeBlocksFor(withCode);
+ok('a real block is found', blocks.length === 1, JSON.stringify(blocks));
+ok('its lines are in source order', blocks[0][0].includes('socket(') && blocks[0][2].includes('close('), JSON.stringify(blocks[0]));
+ok('a one-line block is skipped', !blocks.some((b) => b.length < 3));
+ok('a non-C++ fence is skipped', !blocks.some((b) => b.join().includes('ss -ltn')));
+ok('no theory means no blocks', codeBlocksFor({ ...day, theoryMarkdown: null }).length === 0);
+
+// The bug that shipped a card made of three sentences and a heading: a closing fence
+// paired with the next opening one, capturing the prose between two blocks.
+const twoBlocks = [
+  '```cpp', 'int a = 1;', 'int b = 2;', 'int c = 3;', '```',
+  '', 'Prose between them.', 'More prose that is not code at all.', '### A heading', '',
+  '```cpp', 'x();', 'y();', 'z();', '```',
+].join('\n');
+const pair = codeBlocksFor({ ...day, theoryMarkdown: twoBlocks });
+ok('both real blocks are found', pair.length === 2, JSON.stringify(pair));
+ok('the prose between them is not one of them',
+  !pair.some((bk) => bk.some((l) => l.includes('Prose') || l.startsWith('###'))), JSON.stringify(pair));
+
+// Duplicate lines would have more than one correct order, so marking one wrong lies.
+const dupes = ['```cpp', 'a();', 'b();', 'a();', '```'].join('\n');
+ok('a block with repeated lines is rejected', codeBlocksFor({ ...day, theoryMarkdown: dupes }).length === 0);
+
+let pcards = cardsFor(withCode, answered);
+ok('each block earns a card', pcards.filter((x) => x.kind === 'parsons').length === 1, JSON.stringify(pcards.map((x) => x.id)));
+ok('the block index rides along', pcards.find((x) => x.kind === 'parsons').questionId === '0');
+ok('a parsons id round-trips', parseCardId('parsons:day-01:0').kind === 'parsons');
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all review cases pass');
 process.exit(fails ? 1 : 0);
