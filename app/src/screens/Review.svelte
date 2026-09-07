@@ -17,6 +17,7 @@
   import Button from '../components/Button.svelte';
   import Markdown from '../components/Markdown.svelte';
   import CodeArea from '../components/CodeArea.svelte';
+  import MentorSheet from '../components/MentorSheet.svelte';
   import { pickNext, type CardRef } from '../lib/review';
   import { today } from '../lib/date';
   import {
@@ -33,6 +34,7 @@
 
   // Quiz card.
   let picked = $state<number | null>(null);
+  let asking = $state(false);
 
   // Graded cards.
   let challenge = $state('');
@@ -63,8 +65,33 @@
   const remaining = $derived(app.dueNow.filter((c) => !seen.has(c.id)).length);
   const answered = $derived(picked !== null || verdict !== null);
 
+  /**
+   * Openers for the sheet, shaped by the card you just answered.
+   *
+   * The wrong-answer case names the option you actually picked, because "why is B
+   * right" is a much less useful question than "where does my reasoning break".
+   */
+  const suggestions = $derived.by(() => {
+    if (!context) return [];
+    const missed = picked !== null ? !question?.options[picked]?.correct : verdict === 'gaps';
+    if (card?.kind === 'quiz' && picked !== null && missed) {
+      return [
+        { text: `I answered "${question?.options[picked]?.text ?? ''}" — where does that reasoning break?` },
+        { text: 'Explain the right answer from first principles' },
+        { text: 'Show me this one in code' },
+      ];
+    }
+    if (missed) return [{ text: 'Explain what I missed, properly' }, { text: 'Show me this one in code' }];
+    return [
+      { text: 'Why is that the answer?' },
+      { text: 'When would this actually bite in real code?' },
+      { text: `What else from day ${context.day.day} should I be able to recall?` },
+    ];
+  });
+
   function reset() {
     picked = null;
+    asking = false;
     challenge = '';
     answer = '';
     codeMode = false;
@@ -290,7 +317,55 @@
   {/if}
 </div>
 
+<!-- Deliberately only once the card is answered. Before that the mentor is simply the
+     answer key, and a card you looked up has measured nothing. Afterwards it's the most
+     useful moment in the whole deck: you have just found out you were wrong. -->
+{#if answered && context && app.mentorReady}
+  <button class="ask" onclick={() => (asking = true)} aria-label="Ask the mentor about this card">
+    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3 1-5.5A8 8 0 1 1 21 12z" /></svg>
+    <span>Ask</span>
+  </button>
+{/if}
+
+{#if context}
+  <MentorSheet
+    week={context.week}
+    day={context.day}
+    open={asking}
+    onclose={() => (asking = false)}
+    {suggestions}
+  />
+{/if}
+
 <style>
+  /* Clears the tab bar: unlike the session screens, this one keeps it. */
+  .ask {
+    position: fixed;
+    right: 16px;
+    bottom: calc(var(--tab-h) + var(--safe-b) + 16px);
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 15px 10px 13px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink, #fff);
+    font-size: 14.5px;
+    font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  }
+
+  .ask svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .screen {
     padding-bottom: calc(var(--tab-h) + var(--safe-b) + 24px);
   }
@@ -487,5 +562,7 @@
     align-items: center;
     gap: 12px;
     margin-top: 4px;
+    /* Room for the floating Ask pill, which sits over this corner. */
+    padding-bottom: 56px;
   }
 </style>

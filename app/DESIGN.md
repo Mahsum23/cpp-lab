@@ -564,6 +564,14 @@ but the task is parked waiting for a compiler you do not have on you, the phone 
 review instead of nothing. It never gates a new day; a review system you cannot walk
 away from is one you start avoiding.
 
+**The mentor is reachable from a card, but only after you answer it.** Before that it
+is simply the answer key, and a card you looked up has measured nothing. Afterwards is
+the most useful moment in the deck — you have just found out you were wrong — so the
+sheet opens scoped to *that card's* day rather than the current one, and its openers
+quote the option you actually picked back at you: "where does that reasoning break" is
+a better question than "why is B right". The thread it lands in is that day's, so the
+conversation is there under Mentor later.
+
 *Still to build:* real push, sent by a scheduled GitHub Action reading the subscription
 out of the sync gist. No new infrastructure — Actions and the gist already exist — but
 it needs VAPID keys as repo secrets, and on iOS only reaches a PWA added to the Home
