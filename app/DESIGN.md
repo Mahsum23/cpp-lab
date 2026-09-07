@@ -522,6 +522,53 @@ The JSON export in §3.5 stays. It's the copy that doesn't depend on GitHub.
 
 ---
 
+## 8.6 The review deck (built 2026-09-07)
+
+A day you finished is treated as finished forever, and memory does not honour that
+assumption. Day 1 rots while you are on Day 6 and nothing ever asks about it again.
+
+**Cards are derived, not authored.** Every finished day already carries the material:
+five quiz questions with an explanation on every option, a `teachBack` prompt, and the
+theory itself. So the deck is built from content plus progress at read time rather than
+stored — a lesson that gains a question gains a card, and a card whose id no longer
+exists simply stops being dealt. Three kinds:
+
+| Kind | Source | Needs the mentor |
+|---|---|---|
+| `quiz` | a question you already answered, replayed from the bank | no — works offline |
+| `explain` | the day's `teachBack`, graded like the session's fourth step | yes |
+| `forge` | a challenge written fresh from that day's theory | yes |
+
+The forged ones are the point: a question you have provably never seen, so it cannot be
+answered from recognition. When there is no key or no signal the deck falls back to the
+quiz cards, which is why those stay in it at all.
+
+**Scheduling is SM-2 with the schedule deliberately blurred.** 1 day, 3 days, then
+multiply by ease; a miss drops straight back to one day and costs ease. Every interval
+is then scattered by up to 20%. Without that, a day's five cards come due on the same
+morning forever — you would answer five questions about Day 2 in a row, recognise the
+batch rather than the material, and get nothing on the days between. The jitter frays
+batches apart within a couple of cycles.
+
+**Randomness on top of the schedule.** Due cards are dealt shuffled rather than
+oldest-first; 15% of the time a card that is *not* due is spliced in anyway; and on a
+day when nothing is due at all there is a 20% chance of being asked something regardless.
+The schedule decides what you owe, not what you can be asked.
+
+**Delivery: the app ambushes you.** Once a day at most, opening the app leads with a
+card instead of the lesson. There is no scheduled local notification because there is
+no such thing for a PWA — Notification Triggers is a Chromium experiment that never
+shipped — and no push, because push needs something running to send it. The second
+surface is the gap this feature was actually asked for: when theory and quiz are done
+but the task is parked waiting for a compiler you do not have on you, the phone offers
+review instead of nothing. It never gates a new day; a review system you cannot walk
+away from is one you start avoiding.
+
+*Still to build:* real push, sent by a scheduled GitHub Action reading the subscription
+out of the sync gist. No new infrastructure — Actions and the gist already exist — but
+it needs VAPID keys as repo secrets, and on iOS only reaches a PWA added to the Home
+Screen.
+
 ## 9. Offline & local storage
 
 - **Content cache:** Cache API / IndexedDB — loaded weeks fully offline.

@@ -1,5 +1,5 @@
 import type { Curriculum, Week } from './types';
-import { SCHEMA_VERSION } from './types';
+import { CONTENT_SCHEMA_VERSION } from './types';
 
 const base = import.meta.env.BASE_URL;
 
@@ -8,9 +8,9 @@ export async function fetchCurriculum(): Promise<Curriculum> {
   const res = await fetch(`${base}content/curriculum.json`, { cache: 'no-cache' });
   if (!res.ok) throw new Error(`curriculum: HTTP ${res.status}`);
   const c = (await res.json()) as Curriculum;
-  if (c.schemaVersion > SCHEMA_VERSION) {
+  if (c.schemaVersion > CONTENT_SCHEMA_VERSION) {
     throw new SchemaTooNewError(
-      `Content is schemaVersion ${c.schemaVersion}, this app understands ${SCHEMA_VERSION}.`,
+      `Content is schemaVersion ${c.schemaVersion}, this app understands ${CONTENT_SCHEMA_VERSION}.`,
     );
   }
   return c;

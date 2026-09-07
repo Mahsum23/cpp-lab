@@ -193,6 +193,14 @@ experiment that lets him *see* it — `ls -l /proc/<pid>/fd`, `ss -tan`, `strace
 `MSG_PEEK` reading the same bytes twice. A claim he verified himself outranks a
 paragraph he believed.
 
+**Quiz questions and `teachBack` prompts are also review cards, so write them to
+survive being asked cold.** Every finished day feeds a spaced-repetition deck (`app/`,
+see `DESIGN.md` §8.6) that deals its questions back weeks later, out of order, with no
+theory on screen. A question that only makes sense immediately after reading the lesson
+— "as we saw above", "which of these did the theory call X" — is broken the second time
+it is asked. Write each one so it stands alone with the day's title as its only context.
+The same goes for `teachBack`: it gets asked again months later, cold.
+
 **Teasers in `week.yaml` are hooks, not tables of contents.** "struct sockaddr_in,
 htons, INADDR_ANY" repeats the title back at him. "Why this struct carries eight bytes
 of deliberate padding" makes him open it.

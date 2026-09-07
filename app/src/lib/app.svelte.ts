@@ -10,6 +10,9 @@ import {
   type TaskState,
   type Week,
 } from './types';
+import {
+  cardsFor, dueCards, grade, newCard, shouldAmbush, type CardRef, type Grade,
+} from './review';
 import * as store from './storage';
 import * as cloud from './cloud';
 import { listModels, normalizeKey, PROVIDERS, type ModelChoice } from './mentor';
@@ -55,6 +58,72 @@ class AppStore {
   installable = $state(false);
 
   // --- derived ------------------------------------------------------------
+
+  // --- review deck --------------------------------------------------------
+
+  /**
+   * Every card the days you've finished have earned.
+   *
+   * Rebuilt from content plus progress rather than stored, so it stays right when a
+   * lesson gains a question or a week is edited: the schedule is stored per card id,
+   * and a card whose id no longer exists simply stops being dealt.
+   */
+  get deck(): CardRef[] {
+    return this.availableDays.flatMap(({ week, day }) =>
+      cardsFor(day, this.progress.days[day.id] ? this.dayProgress(day.id, week.id) : undefined),
+    );
+  }
+
+  get dueNow(): CardRef[] {
+    return dueCards(this.deck, this.progress.review, today());
+  }
+
+  /** Cleared today, reset when the date rolls over rather than at any particular hour. */
+  get clearedToday(): number {
+    const r = this.progress.review;
+    return r.countedOn === today() ? r.doneToday : 0;
+  }
+
+  /**
+   * True when the day's lesson is parked waiting for a machine you don't have on you.
+   *
+   * This is the gap the deck exists to fill: theory read, quiz done, task still open
+   * because the task needs a compiler. The phone has nothing else to offer here.
+   */
+  get taskParked(): boolean {
+    const cur = this.current;
+    if (!cur) return false;
+    const p = this.dayProgress(cur.day.id, cur.week.id);
+    return p.theoryDone && Boolean(p.quiz.completedAt) && p.task !== 'done';
+  }
+
+  /** Decided once per launch, so a re-render can't re-roll it. */
+  ambush = $state(false);
+
+  private rollAmbush() {
+    this.ambush = shouldAmbush(this.progress.review, this.deck, today());
+  }
+
+  /** Mark the interruption as spent for the day. */
+  async noteAmbush() {
+    this.ambush = false;
+    this.progress.review.lastAmbush = today();
+    await this.persist();
+  }
+
+  async gradeCard(id: string, result: Grade) {
+    const review = this.progress.review;
+    const card = review.cards[id] ?? newCard();
+    review.cards[id] = grade(card, result);
+
+    const on = today();
+    if (review.countedOn !== on) {
+      review.countedOn = on;
+      review.doneToday = 0;
+    }
+    review.doneToday += 1;
+    await this.persist();
+  }
 
   get availableDays(): { week: Week; day: Day }[] {
     return this.weeks.flatMap((week) =>
@@ -139,6 +208,7 @@ class AppStore {
     // at on the Settings screen, which asks for it when it opens.
     this.mentorModels = PROVIDERS[this.mentorProvider].models;
     this.ready = true;
+    this.rollAmbush();
     if (this.cloudConnected) this.cloud = { ...this.cloud, status: 'idle' };
     void store.requestPersistence();
     // Sequenced, not raced: refresh() writes loadedWeeks when it downloads a week,

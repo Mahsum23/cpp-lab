@@ -292,3 +292,36 @@ is wired into `npm test`.
   Day 3.
 - Next session: apply the two fixes above, answer the byte-order question, then
   Day 3 — bind and listen.
+
+**The review deck (2026-09-07).** The complaint it answers: theory and quiz get done on
+the phone, the task waits for a laptop that isn't there, and meanwhile the earlier days
+quietly fade. Nothing in the app ever asked about a day again once it was finished.
+
+Every finished day now leaves cards behind — its quiz questions (replayed from the bank,
+so they work with no key and no signal), its `teachBack` prompt, and a challenge the
+model writes fresh from that day's theory. The forged ones are the point: a question
+provably never seen, so it can't be answered from recognition.
+
+Scheduling is SM-2 with the intervals deliberately scattered by up to 20%. Without the
+jitter a day's five cards come due on the same morning forever, which teaches you to
+recognise a batch rather than recall the material. On top of the schedule: due cards are
+dealt shuffled, a not-yet-due card is spliced in 15% of the time, and on a day when
+nothing is due there's a 20% chance of being asked anyway — the schedule decides what
+you owe, not what you can be asked.
+
+Delivery is an ambush when the app opens, once a day at most, above the lesson rather
+than under it. Deliberately *not* a notification: there is no scheduled local
+notification for a PWA (Notification Triggers never shipped) and push needs something
+running to send it. The second surface is the actual gap — when the task is parked
+waiting for a compiler, the phone offers review instead of nothing. It never gates a new
+day.
+
+`review.ts` is pure and takes its randomness as an argument, because a scheduler you
+can't run twice with the same result is a scheduler you can't test; `test-review.mjs`
+covers the ladder, the miss path, jitter bounds, deck derivation, selection, the ambush
+and the two-device merge. Verified in a browser against a seeded finished day: 7 cards
+built, all three kinds dealt in mixed order, schedules persisted, and the three Today
+states (ambush / parked / silent) each behave.
+
+Still to build: real push, from a scheduled Action reading the subscription out of the
+sync gist.

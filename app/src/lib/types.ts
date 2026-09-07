@@ -1,6 +1,17 @@
 // The contract with content built by app/scripts/build-content.mjs.
 
-export const SCHEMA_VERSION = 1;
+/**
+ * The content format this app can parse — kept in step with build-content.mjs.
+ *
+ * Deliberately separate from the progress version below. They were one constant until
+ * the review deck bumped the progress record, which silently raised the ceiling on
+ * *content* too and would have had the app accept a lesson format it has never been
+ * taught to read. Two schemas that change for unrelated reasons need two numbers.
+ */
+export const CONTENT_SCHEMA_VERSION = 1;
+
+/** The shape of a stored/synced progress record. Bump when that shape changes. */
+export const SCHEMA_VERSION = 2;
 
 export interface QuizOption {
   text: string;
@@ -145,6 +156,40 @@ export function emptySecrets(): Secrets {
   return { githubToken: null, gistId: null, geminiKey: null, anthropicKey: null };
 }
 
+/**
+ * One card's schedule. See review.ts for how these move.
+ *
+ * `interval` and `due` are kept separately rather than one derived from the other,
+ * because the interval is scattered when it's set and recomputing it later from the
+ * due date would quietly un-scatter it.
+ */
+export interface ReviewCard {
+  /** Days until the next showing, before jitter is applied to it. */
+  interval: number;
+  /** SM-2 style multiplier, moved by how the card keeps going. */
+  ease: number;
+  /** Consecutive correct recalls. A miss resets it to zero. */
+  streak: number;
+  /** Local calendar date, YYYY-MM-DD, when it comes back. */
+  due: string;
+  seen: number;
+  lapses: number;
+  lastAt: string | null;
+}
+
+export interface ReviewState {
+  /** cardId -> schedule. A card with no entry has never been asked, and is due. */
+  cards: Record<string, ReviewCard>;
+  /**
+   * Local date of the last time opening the app led with a review rather than the
+   * lesson. Caps the interruption at once a day.
+   */
+  lastAmbush: string | null;
+  /** Cards cleared on `countedOn`, so the screen can say when you're done for now. */
+  doneToday: number;
+  countedOn: string | null;
+}
+
 export interface Progress {
   schemaVersion: number;
   days: Record<string, DayProgress>;
@@ -152,7 +197,12 @@ export interface Progress {
   xp: number;
   badges: Record<string, string>;
   settings: Settings;
+  review: ReviewState;
   loadedWeeks: Record<string, { contentHash: string; loadedAt: string }>;
+}
+
+export function emptyReview(): ReviewState {
+  return { cards: {}, lastAmbush: null, doneToday: 0, countedOn: null };
 }
 
 export function emptyDayProgress(weekId: string): DayProgress {
@@ -182,6 +232,7 @@ export function defaultProgress(): Progress {
       mentorProvider: 'gemini',
       mentorModel: 'gemini-flash-latest',
     },
+    review: emptyReview(),
     loadedWeeks: {},
   };
 }

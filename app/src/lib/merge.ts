@@ -10,7 +10,10 @@
  * The one field that can't be merged that way is the streak, which is history the
  * records no longer contain — see mergeStreak.
  */
-import { emptyDayProgress, type DayProgress, type Progress, type StreakState, type TaskState } from './types';
+import {
+  emptyDayProgress, emptyReview,
+  type DayProgress, type Progress, type ReviewCard, type ReviewState, type StreakState, type TaskState,
+} from './types';
 import { deriveXp } from './xp';
 
 const TASK_RANK: Record<TaskState, number> = { todo: 0, attempted: 1, done: 2 };
@@ -86,6 +89,45 @@ export function mergeStreak(local: StreakState, remote: StreakState): StreakStat
   };
 }
 
+/**
+ * Two devices, one deck.
+ *
+ * A card's schedule is a fact about the last time it was answered, so the record that
+ * answered it most recently wins the whole card. Taking the further-out due date
+ * instead would let a correct answer on the phone bury a miss on the laptop an hour
+ * later — which is precisely the card the deck most needs to keep asking.
+ *
+ * The counters take the max rather than the sum: both records may already contain the
+ * same history, and inventing lapses nobody had is worse than under-counting.
+ */
+export function mergeReview(local: ReviewState, remote: ReviewState): ReviewState {
+  const cards: Record<string, ReviewCard> = {};
+  for (const id of new Set([...Object.keys(local.cards), ...Object.keys(remote.cards)])) {
+    const l = local.cards[id];
+    const r = remote.cards[id];
+    if (!l || !r) {
+      cards[id] = (l ?? r)!;
+      continue;
+    }
+    const lead = (l.lastAt ?? '') >= (r.lastAt ?? '') ? l : r;
+    cards[id] = { ...lead, seen: Math.max(l.seen, r.seen), lapses: Math.max(l.lapses, r.lapses) };
+  }
+
+  const ambush = (local.lastAmbush ?? '') >= (remote.lastAmbush ?? '') ? local.lastAmbush : remote.lastAmbush;
+  const counted = (local.countedOn ?? '') >= (remote.countedOn ?? '') ? local : remote;
+  return {
+    cards,
+    lastAmbush: ambush,
+    // Same day on both devices means the two tallies are of different cards; adding
+    // them is what "cleared today" actually means to the person doing the clearing.
+    doneToday:
+      local.countedOn && local.countedOn === remote.countedOn
+        ? local.doneToday + remote.doneToday
+        : counted.doneToday,
+    countedOn: counted.countedOn,
+  };
+}
+
 export function mergeProgress(local: Progress, remote: Progress): Progress {
   const days: Record<string, DayProgress> = {};
   for (const id of new Set([...Object.keys(local.days), ...Object.keys(remote.days)])) {
@@ -109,6 +151,7 @@ export function mergeProgress(local: Progress, remote: Progress): Progress {
     // Theme and pace are how *this* device is set up. Syncing them means turning on
     // dark mode at night on the phone flips the laptop too, which nobody asked for.
     settings: local.settings,
+    review: mergeReview(local.review ?? emptyReview(), remote.review ?? emptyReview()),
     // Strictly local: this records what's in *this* device's IndexedDB. Accepting the
     // remote's list would convince a fresh install it already has the content, and
     // the app would then never download it.

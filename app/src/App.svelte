@@ -7,6 +7,7 @@
   import Stats from './screens/Stats.svelte';
   import Settings from './screens/Settings.svelte';
   import Mentor from './screens/Mentor.svelte';
+  import Review from './screens/Review.svelte';
   import Session from './screens/Session.svelte';
   import { update } from './lib/update.svelte';
 
@@ -55,6 +56,8 @@
     <Stats />
   {:else if route.name === 'mentor'}
     <Mentor />
+  {:else if route.name === 'review'}
+    <Review />
   {:else if route.name === 'settings'}
     <Settings />
   {:else}

@@ -170,6 +170,10 @@ function migrate(p: Progress): Progress {
     schemaVersion: SCHEMA_VERSION,
     streak: { ...base.streak, ...p.streak },
     settings: migrateSettings(base.settings, p.settings),
+    // Records written before the review deck existed simply have no cards; the deck
+    // rebuilds itself from the days they did finish, so nothing is lost by starting
+    // it empty.
+    review: { ...base.review, ...p.review, cards: { ...p.review?.cards } },
     badges: { ...p.badges },
     loadedWeeks: { ...p.loadedWeeks },
     days: {},
