@@ -325,3 +325,35 @@ states (ambush / parked / silent) each behave.
 
 Still to build: real push, from a scheduled Action reading the subscription out of the
 sync gist.
+
+**Practice on demand + Parsons cards (2026-09-07).** The deck answered "what have I
+forgotten" but dead-ended on *Deck's clear*, which is useless when the complaint is "I
+have free time, the next day is locked, and I don't want to burn tomorrow's lesson".
+Went to the literature rather than guessing; the two things built are the two with the
+best evidence-to-fit ratio.
+
+**Parsons cards** — a real code block from that day's theory, shuffled, tapped back into
+order. Ericson et al.'s randomised comparisons found solving Parsons problems produced
+learning equal to writing the equivalent code in significantly less time, with no
+retention difference a week later. The reason it fits *here* is mechanical: no compiler,
+no typing, so it's the only real code practice that works on a phone. Blocks come from
+lesson markdown the app already ships, so these work offline with no key.
+
+**Practice on demand** — with the rule that answering early can hurt your schedule but
+not flatter it. A correct answer on a card that wasn't due records the attempt and
+leaves the interval alone; a miss still pulls it all the way back. Without that
+asymmetry an idle evening would push everything months out and hollow the deck.
+
+Two bugs, both caught by the browser rather than the unit tests:
+1. `codeBlocksFor` used one regex, which paired a *closing* fence with the next
+   *opening* one — so the first Parsons card it ever dealt was three sentences and a
+   `###` heading. Now scans line by line, pairing fences properly.
+2. Grid items default to `min-width: auto`, so a long code line pushed the whole row
+   past the card edge instead of scrolling inside it.
+
+Next, and the one with the strongest evidence still unbuilt: **productive failure**.
+Sinha & Kapur's meta-analysis (53 studies, 166 comparisons, 12k+ participants) finds
+problem-solving *before* instruction beats instruction-first for conceptual
+understanding and transfer. The app currently forbids exactly that — tomorrow's task is
+locked behind tomorrow's theory. Letting the task of a locked day be attempted without
+unlocking its theory is both what the evidence supports and what was asked for.

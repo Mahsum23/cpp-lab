@@ -57,7 +57,7 @@
   {:else if route.name === 'mentor'}
     <Mentor />
   {:else if route.name === 'review'}
-    <Review />
+    <Review practice={route.practice} />
   {:else if route.name === 'settings'}
     <Settings />
   {:else}

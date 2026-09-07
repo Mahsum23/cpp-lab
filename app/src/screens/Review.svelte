@@ -12,13 +12,15 @@
    * Nothing here is a gate. You can walk away mid-card and the ones you cleared stay
    * cleared, because a review system you can't quit is one you start avoiding.
    */
+  import { untrack } from 'svelte';
   import { app } from '../lib/app.svelte';
   import { router } from '../lib/router.svelte';
   import Button from '../components/Button.svelte';
   import Markdown from '../components/Markdown.svelte';
+  import { highlight } from '../lib/markdown';
   import CodeArea from '../components/CodeArea.svelte';
   import MentorSheet from '../components/MentorSheet.svelte';
-  import { pickNext, type CardRef } from '../lib/review';
+  import { codeBlocksFor, isDue, pickNext, type CardRef } from '../lib/review';
   import { today } from '../lib/date';
   import {
     collect, forgePrompt, parseVerdict, reviewGraderPrompt, streamReply, stripVerdict,
@@ -35,6 +37,25 @@
   // Quiz card.
   let picked = $state<number | null>(null);
   let asking = $state(false);
+
+  /**
+   * Practice you asked for, rather than practice you owed.
+   *
+   * Deals from the whole deck regardless of what's due. A correct answer here can't
+   * push a card further out — see the `early` rule in review.ts — so cramming can
+   * sharpen the schedule but never flatter it.
+   */
+  let { practice: startInPractice = false }: { practice?: boolean } = $props();
+  // Seed only. After that it's a local toggle: arriving via /review/practice starts you
+  // in practice, but finishing the due cards and tapping "Keep practising" must be able
+  // to flip it on without the URL disagreeing.
+  let practice = $state(untrack(() => startInPractice));
+
+  // Parsons card: reorder the shuffled lines of a real block from the lesson.
+  let bank = $state<string[]>([]);
+  let built = $state<string[]>([]);
+  let solution = $state<string[]>([]);
+  let checked = $state(false);
 
   // Graded cards.
   let challenge = $state('');
@@ -60,10 +81,12 @@
 
   /** Graded cards need the mentor; without a key the deck falls back to quiz cards. */
   const graded = $derived(card?.kind === 'explain' || card?.kind === 'forge');
-  const answerable = $derived(app.deck.filter((c) => c.kind === 'quiz' || app.mentorReady));
+  const answerable = $derived(
+    app.deck.filter((c) => c.kind === 'quiz' || c.kind === 'parsons' || app.mentorReady),
+  );
 
   const remaining = $derived(app.dueNow.filter((c) => !seen.has(c.id)).length);
-  const answered = $derived(picked !== null || verdict !== null);
+  const answered = $derived(picked !== null || verdict !== null || checked);
 
   /**
    * Openers for the sheet, shaped by the card you just answered.
@@ -92,6 +115,10 @@
   function reset() {
     picked = null;
     asking = false;
+    bank = [];
+    built = [];
+    solution = [];
+    checked = false;
     challenge = '';
     answer = '';
     codeMode = false;
@@ -102,9 +129,50 @@
 
   async function deal() {
     reset();
-    const next = pickNext(answerable, app.progress.review, today(), Math.random, seen);
+    // In practice mode nothing is "due", so every card is fair game; `seen` still
+    // stops the same one coming round twice in a sitting.
+    const on = practice ? '9999-12-31' : today();
+    const next = pickNext(answerable, app.progress.review, on, Math.random, seen);
     card = next;
     if (next?.kind === 'forge') await forge();
+    if (next?.kind === 'parsons') setupParsons(next);
+  }
+
+  /** Shuffle a block's lines. A shuffle that changes nothing isn't a puzzle. */
+  function setupParsons(ref: CardRef) {
+    const day = findDay(ref.dayId);
+    const block = day ? codeBlocksFor(day)[Number(ref.questionId ?? 0)] : undefined;
+    if (!block) return;
+    solution = block;
+    built = [];
+    let shuffled = block;
+    for (let i = 0; i < 8 && shuffled.join('\n') === block.join('\n'); i++) {
+      shuffled = [...block].sort(() => Math.random() - 0.5);
+    }
+    bank = shuffled;
+  }
+
+  const findDay = (dayId: string): Day | undefined =>
+    app.weeks.flatMap((w) => w.days).find((d) => d.id === dayId);
+
+  function take(i: number) {
+    if (checked) return;
+    built = [...built, bank[i]];
+    bank = bank.filter((_, j) => j !== i);
+  }
+
+  function drop(i: number) {
+    if (checked) return;
+    bank = [...bank, built[i]];
+    built = built.filter((_, j) => j !== i);
+  }
+
+  const parsonsRight = $derived(built.join('\n') === solution.join('\n'));
+
+  async function checkParsons() {
+    if (checked || built.length !== solution.length) return;
+    checked = true;
+    await settle(parsonsRight ? 'good' : 'again');
   }
 
   /** Ask the model for a challenge it has just invented from the day's material. */
@@ -180,8 +248,11 @@
 
   async function settle(result: 'good' | 'again') {
     if (!card) return;
+    // "Early" is a property of the card, not of the mode: a practice run can still
+    // turn up something that was genuinely due, and that one counts in full.
+    const early = !isDue(app.progress.review.cards[card.id], today());
     seen = new Set([...seen, card.id]);
-    await app.gradeCard(card.id, result);
+    await app.gradeCard(card.id, result, early);
   }
 
   /** Grade an ungradeable card as a miss rather than letting it silently vanish. */
@@ -208,7 +279,7 @@
     <div>
       <p class="lbl">Review</p>
       <p class="ctx">
-        {#if remaining > 0}{remaining} due{:else}Nothing due — this one's a bonus{/if}
+        {#if practice}Practice{:else if remaining > 0}{remaining} due{:else}Nothing due — this one's a bonus{/if}
         {#if app.clearedToday}· {app.clearedToday} cleared today{/if}
       </p>
     </div>
@@ -230,7 +301,16 @@
         Everything due has been answered. The rest is resting — cards come back on a
         widening interval, and sooner if you missed them.
       </p>
-      <Button size="sm" onclick={() => router.go('/today')}>Back to today</Button>
+      <p class="fine">
+        You can keep going anyway. Answering early won't push a card further out, so
+        extra practice can only sharpen the schedule, never flatter it.
+      </p>
+      <div class="pair">
+        <Button size="sm" onclick={() => { practice = true; seen = new Set(); void deal(); }}>
+          Keep practising
+        </Button>
+        <Button variant="ghost" size="sm" onclick={() => router.go('/today')}>Back to today</Button>
+      </div>
     </div>
   {:else}
     <p class="from">
@@ -238,6 +318,7 @@
       <span class="kind">
         {#if card.kind === 'quiz'}from the quiz
         {:else if card.kind === 'explain'}explain it
+        {:else if card.kind === 'parsons'}rebuild it
         {:else}fresh challenge{/if}
       </span>
     </p>
@@ -265,6 +346,44 @@
             {/if}
           {/each}
         </div>
+      </div>
+    {:else if card.kind === 'parsons'}
+      <div class="card">
+        <h2 class="q">Put this back in order</h2>
+        <p class="sub">Tap the lines in the order they ran. Tap one you've placed to take it back.</p>
+
+        <ol class="built" class:right={checked && parsonsRight} class:wrong={checked && !parsonsRight}>
+          {#each built as line, i}
+            <li>
+              <button onclick={() => drop(i)} disabled={checked}>
+                <code
+                  class:bad={checked && solution[i] !== line}
+                >{@html highlight(line, 'cpp')}</code>
+              </button>
+            </li>
+          {:else}
+            <li class="ghost">Nothing placed yet</li>
+          {/each}
+        </ol>
+
+        {#if bank.length}
+          <div class="bank">
+            {#each bank as line, i}
+              <button onclick={() => take(i)} disabled={checked}>
+                <code>{@html highlight(line, 'cpp')}</code>
+              </button>
+            {/each}
+          </div>
+        {/if}
+
+        {#if checked && !parsonsRight}
+          <p class="sub">The order it actually runs in:</p>
+          <ol class="built shown">
+            {#each solution as line}
+              <li><code>{@html highlight(line, 'cpp')}</code></li>
+            {/each}
+          </ol>
+        {/if}
       </div>
     {:else if graded}
       <div class="card">
@@ -307,6 +426,11 @@
       {#if answered}
         <Button onclick={() => void deal()}>Next card</Button>
         <Button variant="ghost" size="sm" onclick={() => router.go('/today')}>Done for now</Button>
+      {:else if card.kind === 'parsons'}
+        <Button onclick={() => void checkParsons()} disabled={built.length !== solution.length}>
+          Check
+        </Button>
+        <Button variant="ghost" size="sm" onclick={() => void skip()}>Skip</Button>
       {:else if graded && prompt}
         <Button onclick={() => void submit()} disabled={!answer.trim() || streaming}>
           {streaming ? 'Marking…' : 'Submit'}
@@ -338,6 +462,106 @@
 {/if}
 
 <style>
+  .fine {
+    font-size: 13px !important;
+    color: var(--text-faint) !important;
+  }
+
+  .pair {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sub {
+    font-size: 13.5px;
+    color: var(--text-faint);
+    line-height: 1.5;
+    margin: 10px 0 12px;
+  }
+
+  /* Two stacks: the program you're building, and the shuffled lines left to place.
+     Tapping rather than dragging — dragging a code line on a phone fights the scroll. */
+  .built,
+  .bank {
+    list-style: none;
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .built {
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 8px;
+    min-height: 54px;
+  }
+
+  .built.right {
+    border-style: solid;
+    border-color: var(--ok);
+  }
+
+  .built.wrong {
+    border-style: solid;
+    border-color: var(--bad);
+  }
+
+  .built.shown {
+    border-style: solid;
+    margin-top: 4px;
+  }
+
+  .bank {
+    margin-top: 12px;
+  }
+
+  .built li.ghost {
+    font-size: 13px;
+    color: var(--text-faint);
+    padding: 6px 4px;
+  }
+
+  /* Grid items default to min-width:auto, so a long line pushes the whole row past
+     the card instead of scrolling inside it. */
+  .built li,
+  .bank button,
+  .built button {
+    min-width: 0;
+  }
+
+  .built button,
+  .bank button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 8px 10px;
+  }
+
+  .bank button {
+    background: var(--bg-elev, var(--surface-2));
+  }
+
+  .built code,
+  .bank code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+    display: block;
+    color: var(--text);
+  }
+
+  /* Only the lines that are actually in the wrong slot get marked. */
+  .built code.bad {
+    color: var(--bad);
+  }
+
   /* Clears the tab bar: unlike the session screens, this one keeps it. */
   .ask {
     position: fixed;

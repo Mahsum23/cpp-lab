@@ -111,10 +111,13 @@ class AppStore {
     await this.persist();
   }
 
-  async gradeCard(id: string, result: Grade) {
+  /**
+   * @param early Answered outside its schedule, in a practice run you asked for.
+   */
+  async gradeCard(id: string, result: Grade, early = false) {
     const review = this.progress.review;
     const card = review.cards[id] ?? newCard();
-    review.cards[id] = grade(card, result);
+    review.cards[id] = grade(card, result, new Date(), Math.random, { early });
 
     const on = today();
     if (review.countedOn !== on) {
