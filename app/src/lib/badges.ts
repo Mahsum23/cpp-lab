@@ -16,6 +16,10 @@ export interface BadgeContext {
 
 const dayDone = (p: Progress, id: string) => Boolean(p.days[id]?.completedAt);
 
+// Some of these are milestone badges and name their subject on purpose — "First Socket"
+// belongs to the C++ track and a SQL learner will never earn it, which is correct. The
+// generic ones (streaks, clean sweep, notes, teach-back) must stay subject-neutral in
+// their copy, since they're earned on whichever track you happen to be studying.
 export const BADGES: Badge[] = [
   {
     id: 'first-socket',
@@ -49,7 +53,7 @@ export const BADGES: Badge[] = [
   {
     id: 'streak-7',
     name: 'Seven Straight',
-    blurb: 'A week without missing. Consistency is the whole trick; the C++ is downstream of it.',
+    blurb: 'A week without missing. Consistency is the whole trick; the material is downstream of it.',
     glyph: '🔥',
     test: ({ progress }) => progress.streak.longest >= 7,
   },

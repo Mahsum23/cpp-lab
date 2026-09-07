@@ -7,7 +7,7 @@
   "intro": "If you write SQL that works but have never looked at what the engine does with it, this is the layer underneath. Everything here runs in sqlite3 — one binary, no server — so the whole track fits on whatever machine you happen to have open.",
   "days": [
     {
-      "id": "day-01",
+      "id": "sql-day-01",
       "day": 1,
       "title": "A table is a file of pages",
       "estMinutes": 25,
@@ -22,14 +22,14 @@
           "prompt": "A table has 200 rows packed into 6 pages. You run a query that returns exactly one row, found by scanning. What is the smallest amount of data the engine could have read from disk?",
           "options": [
             {
-              "text": "It depends entirely on the row's width",
-              "correct": false,
-              "why": "Row width changes how many rows fit in a page, and a very wide value can spill onto overflow pages — but the floor is still one page, whatever the row weighs."
-            },
-            {
               "text": "One page — 4KB by default",
               "correct": true,
               "why": "The page is the unit of I/O. Even a single-byte column in a single row costs one whole page, because a page is the smallest thing the engine can ask the filesystem for."
+            },
+            {
+              "text": "Just the bytes of that row",
+              "correct": false,
+              "why": "Nothing in the stack can read a partial page. The row's bytes come along inside the page that holds them; you never pay per row."
             },
             {
               "text": "All 6 pages, since a scan reads the whole table",
@@ -37,9 +37,9 @@
               "why": "A scan *may* read every page, but it can stop the moment it has what it needs. The question asks for the smallest possible, and that's the page the row is on."
             },
             {
-              "text": "Just the bytes of that row",
+              "text": "It depends entirely on the row's width",
               "correct": false,
-              "why": "Nothing in the stack can read a partial page. The row's bytes come along inside the page that holds them; you never pay per row."
+              "why": "Row width changes how many rows fit in a page, and a very wide value can spill onto overflow pages — but the floor is still one page, whatever the row weighs."
             }
           ]
         },
@@ -48,9 +48,9 @@
           "prompt": "Why is reading the tenth column of a row more expensive than reading the first, in a row-store engine?",
           "options": [
             {
-              "text": "Columns are stored end to end with no fixed offsets, so reaching the tenth means walking past the first nine",
-              "correct": true,
-              "why": "The row header gives each value's type and length, not its address. Finding column ten is a walk, not a jump — which is why the cost scales with bytes skipped rather than columns requested."
+              "text": "Later columns are stored on separate overflow pages",
+              "correct": false,
+              "why": "Overflow pages exist, but they're for values too large for a page — a long TEXT or BLOB. Ordinary columns all live in the same row, whatever their position."
             },
             {
               "text": "It isn't — column access is constant time either way",
@@ -63,9 +63,9 @@
               "why": "It parses the header once. The cost is the walk through the values, not repeated parsing."
             },
             {
-              "text": "Later columns are stored on separate overflow pages",
-              "correct": false,
-              "why": "Overflow pages exist, but they're for values too large for a page — a long TEXT or BLOB. Ordinary columns all live in the same row, whatever their position."
+              "text": "Columns are stored end to end with no fixed offsets, so reaching the tenth means walking past the first nine",
+              "correct": true,
+              "why": "The row header gives each value's type and length, not its address. Finding column ten is a walk, not a jump — which is why the cost scales with bytes skipped rather than columns requested."
             }
           ]
         },
@@ -73,11 +73,6 @@
           "id": "q3",
           "prompt": "You declare `id INT PRIMARY KEY` in SQLite instead of `id INTEGER PRIMARY KEY`. What actually changes?",
           "options": [
-            {
-              "text": "Nothing — `INT` and `INTEGER` are synonyms everywhere in SQLite",
-              "correct": false,
-              "why": "They're synonyms for type affinity, which is why this is so easy to miss. For the rowid alias specifically, only the literal word `INTEGER` counts."
-            },
             {
               "text": "`INT` limits the column to 32 bits",
               "correct": false,
@@ -87,6 +82,11 @@
               "text": "`INTEGER PRIMARY KEY` makes your column the rowid itself; `INT PRIMARY KEY` leaves the rowid alone and adds a separate index",
               "correct": true,
               "why": "Exactly that spelling is load-bearing. One gives you a column that *is* the table's B-tree key; the other gives you a hidden rowid plus an index you pay for on every write."
+            },
+            {
+              "text": "Nothing — `INT` and `INTEGER` are synonyms everywhere in SQLite",
+              "correct": false,
+              "why": "They're synonyms for type affinity, which is why this is so easy to miss. For the rowid alias specifically, only the literal word `INTEGER` counts."
             },
             {
               "text": "`INT PRIMARY KEY` is rejected as a syntax error",
@@ -100,16 +100,6 @@
           "prompt": "A colleague says \"the rows come back in the order I inserted them, I checked.\" What is wrong with relying on that?",
           "options": [
             {
-              "text": "Without `ORDER BY` the engine may return rows in any order, and adding an index later can silently change it",
-              "correct": true,
-              "why": "Order with no `ORDER BY` is an accident of the plan the optimiser picked today. A new index gives it a cheaper path, the order changes, and nothing was \"broken\" — the query never asked for an order."
-            },
-            {
-              "text": "Insertion order is never preserved, so the observation must be wrong",
-              "correct": false,
-              "why": "The observation is usually right, which is what makes it dangerous. A rowid table scanned in key order really does come back in insertion order — until the plan changes."
-            },
-            {
               "text": "It's fine as long as nobody deletes rows",
               "correct": false,
               "why": "Deletes free slots that later inserts can reuse, so they're one way to see it break — but a new index or a different plan will do it without a single delete."
@@ -118,6 +108,16 @@
               "text": "It only holds if the table has a primary key",
               "correct": false,
               "why": "It has nothing to do with declaring a key. Any table can be read by any plan the optimiser prefers."
+            },
+            {
+              "text": "Insertion order is never preserved, so the observation must be wrong",
+              "correct": false,
+              "why": "The observation is usually right, which is what makes it dangerous. A rowid table scanned in key order really does come back in insertion order — until the plan changes."
+            },
+            {
+              "text": "Without `ORDER BY` the engine may return rows in any order, and adding an index later can silently change it",
+              "correct": true,
+              "why": "Order with no `ORDER BY` is an accident of the plan the optimiser picked today. A new index gives it a cheaper path, the order changes, and nothing was \"broken\" — the query never asked for an order."
             }
           ]
         },
@@ -131,6 +131,11 @@
               "why": "\"One place\" means one *row*. The query wants one column across all rows, which in a row store is the maximally scattered access pattern."
             },
             {
+              "text": "A row store keeps a row's columns together; a column store keeps a column's values together — so the column store reads only `price`",
+              "correct": true,
+              "why": "The aggregate touches one column of the table. A row store must walk every row's bytes to reach it; a column store reads that column's values contiguously and skips the rest of the table entirely."
+            },
+            {
               "text": "They're the same on disk and differ only in the query planner",
               "correct": false,
               "why": "The layout is the whole difference, and it's why they ship as separate products rather than as a planner flag."
@@ -139,11 +144,6 @@
               "text": "A column store keeps the same layout but adds an index per column, so it suits the query",
               "correct": false,
               "why": "It isn't an index — it's a different physical arrangement of the data itself. There's no row to index into."
-            },
-            {
-              "text": "A row store keeps a row's columns together; a column store keeps a column's values together — so the column store reads only `price`",
-              "correct": true,
-              "why": "The aggregate touches one column of the table. A row store must walk every row's bytes to reach it; a column store reads that column's values contiguously and skips the rest of the table entirely."
             }
           ]
         }
@@ -164,7 +164,7 @@
       }
     },
     {
-      "id": "day-02",
+      "id": "sql-day-02",
       "day": 2,
       "title": "An index is a sorted copy",
       "estMinutes": 30,
@@ -179,11 +179,6 @@
           "prompt": "You add an index to speed up a slow report. Name two costs you have just taken on.",
           "options": [
             {
-              "text": "The table has to be locked while the index exists",
-              "correct": false,
-              "why": "Building an index takes a lock briefly, but having one doesn't. If it did, nobody would use indexes."
-            },
-            {
               "text": "Every write to the table now maintains a second tree, and the database grows",
               "correct": true,
               "why": "An index is a real sorted copy of real data. Inserts and updates of the indexed column write both trees, and the copy occupies real pages — sometimes more than the table itself."
@@ -192,6 +187,11 @@
               "text": "Existing queries must be rewritten to reference the index by name",
               "correct": false,
               "why": "The optimiser picks indexes; queries name tables and columns. Being able to add an index without touching query text is most of the point."
+            },
+            {
+              "text": "The table has to be locked while the index exists",
+              "correct": false,
+              "why": "Building an index takes a lock briefly, but having one doesn't. If it did, nobody would use indexes."
             },
             {
               "text": "Reads of other columns get slower",
@@ -205,14 +205,14 @@
           "prompt": "A query filtering on an indexed column shows `SCAN` in its plan. Give two different reasons that can happen even though the index exists and the column is right.",
           "options": [
             {
+              "text": "The table is too small, so the optimiser refuses to use any index",
+              "correct": false,
+              "why": "A tempting answer, because on a tiny table a scan genuinely can be cheaper and the optimiser may choose it. But that's the optimiser being right, not the index being unusable — and it isn't one of the two structural reasons."
+            },
+            {
               "text": "The column is wrapped in a function, or the query's collation doesn't match the index's",
               "correct": true,
               "why": "Both break the same rule: an index answers questions about the exact value in the exact order it was sorted. `lower(col)` is a different value; a case-insensitive `LIKE` against a case-sensitive index is a different order."
-            },
-            {
-              "text": "SELECT * always forces a scan",
-              "correct": false,
-              "why": "`SELECT *` prevents an index being *covering*, so the engine must fetch rows after the index lookup. It doesn't stop the lookup happening."
             },
             {
               "text": "The index is too new for the optimiser to have noticed it",
@@ -220,9 +220,9 @@
               "why": "Indexes are visible to the planner as soon as they're created. Stale *statistics* can cause bad estimates, but that's a different failure and it doesn't hide the index."
             },
             {
-              "text": "The table is too small, so the optimiser refuses to use any index",
+              "text": "SELECT * always forces a scan",
               "correct": false,
-              "why": "A tempting answer, because on a tiny table a scan genuinely can be cheaper and the optimiser may choose it. But that's the optimiser being right, not the index being unusable — and it isn't one of the two structural reasons."
+              "why": "`SELECT *` prevents an index being *covering*, so the engine must fetch rows after the index lookup. It doesn't stop the lookup happening."
             }
           ]
         },
@@ -231,9 +231,9 @@
           "prompt": "What does `COVERING` mean in a query plan, and what work does it save?",
           "options": [
             {
-              "text": "The index covers every row in the table, so no rows can be missed",
-              "correct": false,
-              "why": "Ordinary indexes always contain every row (partial indexes aside). \"Covering\" is about columns, not rows."
+              "text": "The index holds every column the query needs, so the engine answers from the index and never reads the table",
+              "correct": true,
+              "why": "It eliminates the second hop — index entry to actual row — which on a large table is a random page read per matching row, and usually dominates the cost."
             },
             {
               "text": "The engine has locked the rows the index points at",
@@ -246,9 +246,9 @@
               "why": "Caching is real and helps, but it's not what the word means and it isn't what the plan is reporting."
             },
             {
-              "text": "The index holds every column the query needs, so the engine answers from the index and never reads the table",
-              "correct": true,
-              "why": "It eliminates the second hop — index entry to actual row — which on a large table is a random page read per matching row, and usually dominates the cost."
+              "text": "The index covers every row in the table, so no rows can be missed",
+              "correct": false,
+              "why": "Ordinary indexes always contain every row (partial indexes aside). \"Covering\" is about columns, not rows."
             }
           ]
         },
@@ -256,6 +256,11 @@
           "id": "q4",
           "prompt": "Your table has an index on `email`. Which of these can use it — `WHERE email = ?`, `WHERE lower(email) = ?`, `WHERE email LIKE 'a%'`?",
           "options": [
+            {
+              "text": "The first and second; `LIKE` can never use an index",
+              "correct": false,
+              "why": "Backwards on both counts. `lower(email)` needs an expression index, while a *prefix* `LIKE` is genuinely index-friendly given the right collation. A leading `%` is the one that can't be helped."
+            },
             {
               "text": "Only the first; the other two can never use an index",
               "correct": false,
@@ -265,11 +270,6 @@
               "text": "All three, since all three filter on the indexed column",
               "correct": false,
               "why": "Naming the column isn't enough — the index stores one specific value in one specific order, and two of these ask about something else."
-            },
-            {
-              "text": "The first and second; `LIKE` can never use an index",
-              "correct": false,
-              "why": "Backwards on both counts. `lower(email)` needs an expression index, while a *prefix* `LIKE` is genuinely index-friendly given the right collation. A leading `%` is the one that can't be helped."
             },
             {
               "text": "The first straight away; the second not at all; the third only if the index's collation matches how LIKE compares",
@@ -288,6 +288,11 @@
               "why": "This query needs every row. The saving is the ordering, not any filtering."
             },
             {
+              "text": "It doesn't — returning every row means a scan, so the index is unused",
+              "correct": false,
+              "why": "A full read still has to produce the requested order somehow. Doing it by reading a pre-sorted structure beats sorting the whole table."
+            },
+            {
               "text": "Sorting happens in memory either way, so it's the same cost",
               "correct": false,
               "why": "Only if it fits. A sort too big for the buffer spills to disk, which is exactly the cost the ordered index avoids."
@@ -296,11 +301,6 @@
               "text": "The index is already stored in that order, so there is nothing to sort",
               "correct": true,
               "why": "Sorted order is the index's entire nature. Reading it in order yields rows in order, turning a sort into a walk — no temporary file, no sort buffer."
-            },
-            {
-              "text": "It doesn't — returning every row means a scan, so the index is unused",
-              "correct": false,
-              "why": "A full read still has to produce the requested order somehow. Doing it by reading a pre-sorted structure beats sorting the whole table."
             }
           ]
         }
@@ -321,7 +321,7 @@
       }
     },
     {
-      "id": "day-03",
+      "id": "sql-day-03",
       "day": 3,
       "title": "NULL is not a value",
       "estMinutes": 25,
@@ -336,11 +336,6 @@
           "prompt": "`SELECT NULL = NULL` — what comes back, and why isn't it either true or false?",
           "options": [
             {
-              "text": "An error — nulls can't be compared with `=`",
-              "correct": false,
-              "why": "It's perfectly legal SQL and runs silently. The silence is what makes null bugs hard to find."
-            },
-            {
               "text": "`1`, because a null is equal to itself like any other value",
               "correct": false,
               "why": "That's the intuition the design deliberately rejects. `NULL` marks an absent value, and two absences aren't evidence of sameness. `IS NULL` is the operator that returns 1 here."
@@ -354,6 +349,11 @@
               "text": "`NULL`, because comparing two unknowns can't produce a verdict",
               "correct": true,
               "why": "SQL has three truth values. \"Is the value I don't know equal to the other value I don't know?\" has no honest answer, so the comparison yields unknown rather than inventing one."
+            },
+            {
+              "text": "An error — nulls can't be compared with `=`",
+              "correct": false,
+              "why": "It's perfectly legal SQL and runs silently. The silence is what makes null bugs hard to find."
             }
           ]
         },
@@ -367,6 +367,11 @@
               "why": "The null is accepted quite happily. The emptiness comes from three-valued logic, not from a rejection."
             },
             {
+              "text": "It expands to `x <> 1 AND x <> 2 AND x <> NULL`, and that last term is unknown, so the whole condition is never true",
+              "correct": true,
+              "why": "`true AND unknown` is unknown, and `WHERE` keeps only rows where the condition is true. One null in the list is enough to make the answer unknown for every row."
+            },
+            {
               "text": "The optimiser can't build a plan, so it returns nothing",
               "correct": false,
               "why": "The plan is fine and the query runs normally. The result is the honest consequence of the logic, not a planner failure."
@@ -375,11 +380,6 @@
               "text": "It returns no rows only when `x` is itself null",
               "correct": false,
               "why": "It returns nothing for every `x`, null or not — including values obviously not in the list, which is what makes it so hard to spot."
-            },
-            {
-              "text": "It expands to `x <> 1 AND x <> 2 AND x <> NULL`, and that last term is unknown, so the whole condition is never true",
-              "correct": true,
-              "why": "`true AND unknown` is unknown, and `WHERE` keeps only rows where the condition is true. One null in the list is enough to make the answer unknown for every row."
             }
           ]
         },
@@ -388,9 +388,9 @@
           "prompt": "A table has 100 rows; 30 have a null `duration`. What do `count(*)`, `count(duration)` and `avg(duration)` report, and which silently misleads?",
           "options": [
             {
-              "text": "100, 70, and the mean of the 70 non-null values — the average, because it quietly excludes the missing ones",
-              "correct": true,
-              "why": "`avg` divides by the count of non-null values, not by the number of rows. If nulls are your timeouts, the average improves as the service gets worse."
+              "text": "All three report 70, since nulls aren't really rows",
+              "correct": false,
+              "why": "`count(*)` counts rows and doesn't look at values at all, so it reports 100. The gap between it and `count(col)` is the tell."
             },
             {
               "text": "100, 70, and null, since any null in the input poisons the aggregate",
@@ -398,14 +398,14 @@
               "why": "That's true of arithmetic on nulls (`1 + NULL` is null) but not of aggregates. Aggregates skip nulls and return a real number — which is precisely why the problem is invisible."
             },
             {
+              "text": "100, 70, and the mean of the 70 non-null values — the average, because it quietly excludes the missing ones",
+              "correct": true,
+              "why": "`avg` divides by the count of non-null values, not by the number of rows. If nulls are your timeouts, the average improves as the service gets worse."
+            },
+            {
               "text": "100, 100 and the mean over all 100 rows, treating nulls as zero",
               "correct": false,
               "why": "Nothing in SQL treats a null as zero. Both `count(col)` and `avg` skip them entirely."
-            },
-            {
-              "text": "All three report 70, since nulls aren't really rows",
-              "correct": false,
-              "why": "`count(*)` counts rows and doesn't look at values at all, so it reports 100. The gap between it and `count(col)` is the tell."
             }
           ]
         },
@@ -413,11 +413,6 @@
           "id": "q4",
           "prompt": "Name the two places where SQL treats two nulls as the same thing, despite `NULL = NULL` being unknown.",
           "options": [
-            {
-              "text": "`JOIN ... ON` and `UNIQUE` constraints",
-              "correct": false,
-              "why": "Both go the other way: a join on null columns matches nothing, and `UNIQUE` permits many nulls precisely because it can't call them equal."
-            },
             {
               "text": "`COUNT` and `SUM`",
               "correct": false,
@@ -427,6 +422,11 @@
               "text": "`GROUP BY` puts them in one group, and `DISTINCT` collapses them to one row",
               "correct": true,
               "why": "Both are about identity rather than comparison, so they have to make a choice — and they choose to treat nulls as one thing. The same null that won't equal itself in a `WHERE` groups with itself a clause later."
+            },
+            {
+              "text": "`JOIN ... ON` and `UNIQUE` constraints",
+              "correct": false,
+              "why": "Both go the other way: a join on null columns matches nothing, and `UNIQUE` permits many nulls precisely because it can't call them equal."
             },
             {
               "text": "`ORDER BY` and `WHERE`",

@@ -193,6 +193,12 @@ experiment that lets him *see* it — `ls -l /proc/<pid>/fd`, `ss -tan`, `strace
 `MSG_PEEK` reading the same bytes twice. A claim he verified himself outranks a
 paragraph he believed.
 
+**Day ids must be unique across every week in the repo, not just within one.** Progress,
+review cards and the mentor's chat threads are all flat maps keyed by day id, so two
+weeks both calling a day `day-01` merges them into a single record — finishing one
+finishes the other. Prefix a new track's ids (`sql-day-01`). `build-content.mjs` fails
+the build if it ever happens again.
+
 **Theory code blocks become Parsons cards, so write them to be reorderable.** Any
 ```cpp block of 3–12 lines in a lesson is dealt back later with its lines shuffled, to
 be tapped back into order (`DESIGN.md` §8.7). Two consequences when writing theory: a

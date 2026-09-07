@@ -190,11 +190,20 @@ class AppStore {
     return atRisk(this.progress.streak, today());
   }
 
+  /**
+   * Finished a day *of the subject you're looking at* today.
+   *
+   * Scoped to the track, unlike the streak: the streak is one daily habit and a day of
+   * either subject keeps it alive, but the Today screen is showing one subject, and
+   * telling someone "done today, see you tomorrow" on a track they haven't opened is
+   * just wrong.
+   */
   get completedToday(): boolean {
     const t = today();
-    return Object.values(this.progress.days).some(
-      (d) => d.completedAt && localDateOf(d.completedAt) === t,
-    );
+    return this.availableDays.some(({ day }) => {
+      const at = this.progress.days[day.id]?.completedAt;
+      return at && localDateOf(at) === t;
+    });
   }
 
   get daysDone(): number {
