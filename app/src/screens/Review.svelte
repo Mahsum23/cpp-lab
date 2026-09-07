@@ -26,7 +26,7 @@
     collect, forgePrompt, parseVerdict, reviewGraderPrompt, streamReply, stripVerdict,
     examinerPrompt, ModelGoneError, type ChatMessage,
   } from '../lib/mentor';
-  import type { Day, QuizQuestion, Week } from '../lib/types';
+  import { TRACKS, type Day, type QuizQuestion, type Track, type Week } from '../lib/types';
 
   /** Cards dealt this sitting, so the same one can't come round twice in a row. */
   let seen = $state<Set<string>>(new Set());
@@ -73,6 +73,9 @@
     }
     return null;
   });
+
+  /** The language of the week this card came from, not of the track you're on now. */
+  const lang = $derived(TRACKS[(context?.week.track ?? 'cpp') as Track].lang);
 
   const question = $derived.by((): QuizQuestion | null => {
     if (card?.kind !== 'quiz' || !context) return null;
@@ -141,7 +144,7 @@
   /** Shuffle a block's lines. A shuffle that changes nothing isn't a puzzle. */
   function setupParsons(ref: CardRef) {
     const day = findDay(ref.dayId);
-    const block = day ? codeBlocksFor(day)[Number(ref.questionId ?? 0)] : undefined;
+    const block = day ? codeBlocksFor(day, lang)[Number(ref.questionId ?? 0)] : undefined;
     if (!block) return;
     solution = block;
     built = [];
@@ -358,7 +361,7 @@
               <button onclick={() => drop(i)} disabled={checked}>
                 <code
                   class:bad={checked && solution[i] !== line}
-                >{@html highlight(line, 'cpp')}</code>
+                >{@html highlight(line, lang)}</code>
               </button>
             </li>
           {:else}
@@ -370,7 +373,7 @@
           <div class="bank">
             {#each bank as line, i}
               <button onclick={() => take(i)} disabled={checked}>
-                <code>{@html highlight(line, 'cpp')}</code>
+                <code>{@html highlight(line, lang)}</code>
               </button>
             {/each}
           </div>
@@ -380,7 +383,7 @@
           <p class="sub">The order it actually runs in:</p>
           <ol class="built shown">
             {#each solution as line}
-              <li><code>{@html highlight(line, 'cpp')}</code></li>
+              <li><code>{@html highlight(line, lang)}</code></li>
             {/each}
           </ol>
         {/if}

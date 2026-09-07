@@ -136,7 +136,7 @@ export function parseCardId(id: string): CardRef | null {
  * with extra steps. The teach-back and forged cards additionally want the theory read,
  * since both are about explaining material rather than recognising an option.
  */
-export function cardsFor(day: Day, progress: DayProgress | undefined): CardRef[] {
+export function cardsFor(day: Day, progress: DayProgress | undefined, lang = 'cpp'): CardRef[] {
   if (!progress) return [];
   const cards: CardRef[] = [];
 
@@ -153,7 +153,7 @@ export function cardsFor(day: Day, progress: DayProgress | undefined): CardRef[]
   }
   // One per code block the lesson actually contains, indexed by position so the id is
   // stable as long as the block is.
-  codeBlocksFor(day).forEach((_, i) => {
+  codeBlocksFor(day, lang).forEach((_, i) => {
     cards.push({ id: cardId('parsons', day.id, String(i)), kind: 'parsons', dayId: day.id, questionId: String(i) });
   });
   return cards;
@@ -170,7 +170,13 @@ export function cardsFor(day: Day, progress: DayProgress | undefined): CardRef[]
  * Blocks are filtered to a size worth reordering. Two lines is not a puzzle, and
  * anything past a dozen is a scrolling exercise on a phone rather than a recall one.
  */
-export function codeBlocksFor(day: Day, min = 3, max = 12): string[][] {
+/** Fence tags that count as "this week's language". */
+const LANG_ALIASES: Record<string, Set<string>> = {
+  cpp: new Set(['cpp', 'c']),
+  sql: new Set(['sql']),
+};
+
+export function codeBlocksFor(day: Day, lang = 'cpp', min = 3, max = 12): string[][] {
   const md = day.theoryMarkdown;
   if (!md) return [];
 
@@ -188,7 +194,7 @@ export function codeBlocksFor(day: Day, min = 3, max = 12): string[][] {
         // Repeated lines mean more than one correct order exists, and marking one of
         // them wrong would be a lie.
         if (
-          (open.lang === 'cpp' || open.lang === 'c') &&
+          LANG_ALIASES[lang]?.has(open.lang) &&
           lines.length >= min &&
           lines.length <= max &&
           new Set(lines).size === lines.length

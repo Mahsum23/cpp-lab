@@ -7,6 +7,7 @@
   import { PROVIDERS } from '../lib/mentor';
   import CodeArea from '../components/CodeArea.svelte';
   import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
+  import { TRACKS, type Track } from '../lib/types';
 
   const provider = $derived(PROVIDERS[app.mentorProvider]);
 
@@ -19,6 +20,7 @@
   // today's. Falls back to the last authored day once the week is finished.
   const context = $derived(app.current ?? app.availableDays.at(-1) ?? null);
   const threadKey = $derived(context?.day.id ?? GENERAL);
+  const lang = $derived(TRACKS[(context?.week.track ?? 'cpp') as Track].lang);
 
   $effect(() => {
     chat.context = context;
@@ -38,7 +40,7 @@
     if (!raw) return;
     // Fence it on the way out, so the model is told it's source and the transcript
     // renders it highlighted rather than reflowed.
-    const content = codeMode && !hasFence(raw) ? asCodeBlock(raw) : raw;
+    const content = codeMode && !hasFence(raw) ? asCodeBlock(raw, lang) : raw;
     draft = '';
     codeMode = false;
     area?.grow();
@@ -167,7 +169,8 @@
         bind:this={area}
         bind:value={draft}
         bind:codeMode
-        placeholder={codeMode ? 'Paste or type C++…' : 'Ask the mentor…'}
+        {lang}
+        placeholder={codeMode ? `Paste or type ${TRACKS[(context?.week.track ?? 'cpp') as Track].label}…` : 'Ask the mentor…'}
         onsubmit={() => void send()}
       />
       <button

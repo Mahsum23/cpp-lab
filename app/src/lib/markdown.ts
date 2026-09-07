@@ -2,12 +2,14 @@ import { Marked } from 'marked';
 import hljs from 'highlight.js/lib/core';
 import cpp from 'highlight.js/lib/languages/cpp';
 import bash from 'highlight.js/lib/languages/bash';
+import sql from 'highlight.js/lib/languages/sql';
 import plaintext from 'highlight.js/lib/languages/plaintext';
 
 // Only the languages this curriculum actually uses. Registering all of
 // highlight.js would be ~900KB for the sake of showing off.
 hljs.registerLanguage('cpp', cpp);
 hljs.registerLanguage('c', cpp);
+hljs.registerLanguage('sql', sql);
 hljs.registerLanguage('bash', bash);
 hljs.registerLanguage('sh', bash);
 hljs.registerLanguage('plaintext', plaintext);

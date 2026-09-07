@@ -20,7 +20,7 @@
  * is what stops the mentor tab from becoming a cheat button: it will explain any
  * concept you like and will not hand over the milestone's implementation.
  */
-import type { Day, MentorProvider, Week } from './types';
+import type { Day, MentorProvider, Track, Week } from './types';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -90,14 +90,48 @@ export const PROVIDERS: Record<MentorProvider, ProviderInfo> = {
 const HISTORY_LIMIT = 20;
 const MAX_OUTPUT_TOKENS = 1600;
 
-const PERSONA = `You are the mentor for cpp-lab, a deliberate-practice C++ curriculum.
+/**
+ * What each track is, in the words the prompts need.
+ *
+ * Only the subject sentences differ between tracks — the persona, the refusal to write
+ * the task, and the examiner's contract are the same job whatever is being studied, and
+ * duplicating them per subject is how two prompts quietly drift apart.
+ */
+const SUBJECTS: Record<Track, { name: string; lang: string; audience: string; depth: string }> = {
+  cpp: {
+    name: 'C++',
+    lang: 'cpp',
+    audience:
+      'a working developer who already writes C++ comfortably and is here to learn what' +
+      ' sits underneath the abstractions they normally use — sockets, build systems,' +
+      ' testing, sanitizers. Assume competence with the language itself: they do not need' +
+      ' pointers, RAII, or templates explained from scratch.',
+    depth:
+      'Do not assume systems experience; the syscall layer, and the kernel behaviour' +
+      ' behind it, is exactly what they came here for and deserves real explanation' +
+      ' rather than Socratic hints.',
+  },
+  sql: {
+    name: 'SQL',
+    lang: 'sql',
+    audience:
+      'a working developer who writes queries that run but has never looked at what the' +
+      ' database does with them. Assume they know SELECT, JOIN and GROUP BY; what they' +
+      ' lack is the layer underneath — pages, indexes, planners, transactions.',
+    depth:
+      'Answer in terms of what the engine actually does with the bytes: which rows it' +
+      ' reads, in what order, and why the planner chose that. An answer that only' +
+      ' restates the syntax has missed the point of this track.',
+  },
+};
 
-Who you're talking to: a working developer who already writes C++ comfortably and is
-here to learn what sits underneath the abstractions they normally use — sockets, build
-systems, testing, sanitizers. Assume competence with the language itself: they do not
-need pointers, RAII, or templates explained from scratch. Do not assume systems
-experience; the syscall layer, and the kernel behaviour behind it, is exactly what they
-came here for and deserves real explanation rather than Socratic hints.
+export const subjectOf = (track: Track | undefined) => SUBJECTS[track ?? 'cpp'] ?? SUBJECTS.cpp;
+
+const persona = (track: Track | undefined) => {
+  const s = subjectOf(track);
+  return `You are the mentor for cpp-lab, a deliberate-practice ${s.name} curriculum.
+
+Who you're talking to: ${s.audience} ${s.depth}
 
 If they tell you their background, calibrate to it. Until then, pitch at someone fluent
 in the language and new to the layer below it.
@@ -124,14 +158,15 @@ wraps around it.
 
 Format: you're being read on a phone. Short paragraphs, few headings, code fenced with
 its language. Be concise unless they ask you to go deep — then go deep.`;
+};
 
 export function systemPrompt(context: { week: Week; day: Day } | null): string {
   if (!context) {
-    return `${PERSONA}\n\nNo lesson is open, so you have no day context. If a question depends on where they are in the curriculum, just ask.`;
+    return `${persona(undefined)}\n\nNo lesson is open, so you have no day context. If a question depends on where they are in the curriculum, just ask.`;
   }
   const { week, day } = context;
   const parts = [
-    PERSONA,
+    persona(week.track),
     `\n---\n\nWHERE THEY ARE RIGHT NOW: ${week.title}, Day ${day.day} — "${day.title}".`,
     'Assume this is the context of the question unless they say otherwise. Do not get ahead of the curriculum: later days are listed below and their material has not been taught yet.',
   ];
@@ -162,10 +197,12 @@ export function systemPrompt(context: { week: Week; day: Day } | null): string {
  * It ends by emitting a verdict marker the UI parses and strips. Everything before the
  * marker is ordinary prose the learner reads; the marker never reaches the screen.
  */
-const EXAMINER = `You are examining a developer on material they have just studied, in
-a deliberate-practice C++ curriculum called cpp-lab. Assume they write C++ competently;
-what is being tested is whether they understood today's material, not whether they know
-the language.
+const examiner = (track: Track | undefined) => {
+  const s = subjectOf(track);
+  return `You are examining a developer on material they have just studied, in a
+deliberate-practice ${s.name} curriculum called cpp-lab. Assume they write ${s.name}
+competently; what is being tested is whether they understood today's material, not
+whether they know the language.
 
 YOUR JOB IS TO MEASURE, NOT TO TEACH. This is the whole point of the exercise, and it
 overrides your instinct to be helpful:
@@ -202,6 +239,7 @@ final line, exactly one of:
 "solid" means they could defend this to another engineer. "gaps" means something real was
 missing — say what, so they know where to go back to. Emit the marker only when you are
 finished examining; never in your opening reply, and never more than once.`;
+};
 
 /** The line the examiner ends on. Parsed by the UI, never shown to the learner. */
 const VERDICT_RE = /\[\[VERDICT:\s*(solid|gaps)\s*\]\]/gi;
@@ -225,10 +263,10 @@ export function stripVerdict(text: string): string {
  * grades against what was actually taught rather than its own idea of the topic.
  */
 export function examinerPrompt(context: { week: Week; day: Day } | null): string {
-  if (!context) return EXAMINER;
+  if (!context) return examiner(undefined);
   const { week, day } = context;
   const parts = [
-    EXAMINER,
+    examiner(week.track),
     `\n---\n\nWHAT THEY ARE BEING EXAMINED ON: ${week.title}, Day ${day.day} — "${day.title}".`,
   ];
   if (day.teachBack) {
@@ -661,8 +699,13 @@ export function streamReply(opts: {
  * ago. Kept separate from the mentor and the examiner because it is doing a third
  * thing: not explaining, not grading, but inventing a small, concrete test.
  */
-const FORGER = `You write single, short recall challenges about low-level C++ and POSIX
-systems programming, for someone revising material they studied days or weeks ago.
+const forger = (track: Track | undefined) => {
+  const s = subjectOf(track);
+  return `You write single, short recall challenges about ${
+    track === 'sql'
+      ? 'SQL and how a database engine executes it'
+      : 'low-level C++ and POSIX systems programming'
+  }, for someone revising material they studied days or weeks ago.
 
 You will be given the material from one lesson. Write ONE challenge drawn from it.
 
@@ -673,10 +716,11 @@ Rules:
   lines or fewer; "this call returns N — what happened?"; "what breaks if you remove
   this line".
 - It must be answerable from memory in under a minute, with no compiler to hand.
-- Any code goes in a \`\`\`cpp fence and stays under about eight lines.
+- Any code goes in a \`\`\`${s.lang} fence and stays under about eight lines.
 - Ask about something the material actually covered. Do not invent API behaviour.
 - Output the challenge only. No preamble, no answer, no hints, no "here is a
   challenge" — the first character is the first word of the question.`;
+};
 
 /**
  * Grades an answer to a challenge the model itself just wrote.
@@ -714,7 +758,7 @@ const materialFor = (context: { week: Week; day: Day }): string => {
 
 /** System prompt for inventing a challenge from one day's material. */
 export function forgePrompt(context: { week: Week; day: Day }): string {
-  return `${FORGER}\n\n---\n\n${materialFor(context)}`;
+  return `${forger(context.week.track)}\n\n---\n\n${materialFor(context)}`;
 }
 
 /** System prompt for grading an answer to `challenge`. */

@@ -57,7 +57,7 @@ function splitSections(md) {
  * Pull the structured bits out of a `## Task` section, leaving prose behind.
  * Conventions (see day-01 for the canonical shape):
  *   - File: `path`            → task.files[]
- *   - Compile: `command`      → task.compile
+ *   - Compile: `command`      → task.compile   (or "Run:", same field)
  *   ### Checklist            → task.checklist[] from its `- [ ]` items
  */
 function parseTask(taskMd) {
@@ -84,7 +84,9 @@ function parseTask(taskMd) {
       files.push(file[1]);
       continue;
     }
-    const cc = /^\s*-\s*Compile:\s*`([^`]+)`/i.exec(line);
+    // "Run:" is the same field under a name that isn't a lie on a track with no
+    // compiler in it.
+    const cc = /^\s*-\s*(?:Compile|Run):\s*`([^`]+)`/i.exec(line);
     if (cc) {
       compile = cc[1];
       continue;
@@ -254,6 +256,10 @@ function buildWeek(milestone) {
     id: meta.id,
     title: meta.title,
     milestone: meta.milestone ?? milestone,
+    // Which subject this week belongs to. Everything downstream — the day the app
+    // offers next, the review deck, which language a fence is highlighted as — keys
+    // off this, so a week that forgets to declare it stays with the original track.
+    track: meta.track ?? 'cpp',
     intro: meta.intro?.trim() ?? '',
     days,
   };
@@ -296,6 +302,7 @@ for (const milestone of milestones) {
     id: week.id,
     title: week.title,
     milestone: week.milestone,
+    track: week.track,
     days: week.days.length,
     availableDays: available,
     url: rel,

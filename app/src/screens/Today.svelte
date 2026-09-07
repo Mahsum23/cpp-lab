@@ -4,9 +4,15 @@
   import Button from '../components/Button.svelte';
   import ProgressRing from '../components/ProgressRing.svelte';
   import Flame from '../components/Flame.svelte';
+  import { TRACKS, type Track } from '../lib/types';
 
   const current = $derived(app.current);
-  const week = $derived(current?.week ?? app.weeks[0] ?? null);
+  // Directory names lead with the number on one track and with the subject on another
+  // ("01-raw-sockets", "sql-01-..."), so take the first number wherever it sits.
+  const milestoneNo = (m: string) => /\d+/.exec(m)?.[0] ?? m;
+  // Track-scoped: falling back to weeks[0] would show the other subject's week
+  // in the header of a track that hasn't loaded yet.
+  const week = $derived(current?.week ?? app.trackWeeks[0] ?? null);
   const wp = $derived(week ? app.weekProgress(week) : { done: 0, total: 0 });
   const segs = $derived(current ? app.segments(current.day, current.week.id) : [false, false, false]);
   const started = $derived(segs.some(Boolean));
@@ -53,6 +59,18 @@
     </button>
   {/if}
 
+  {#if app.ready && app.tracks.length > 1}
+    <!-- Only rendered when a second subject actually exists, so a single-track install
+         never carries a control with one option in it. -->
+    <div class="tracks" role="group" aria-label="Subject">
+      {#each app.tracks as t}
+        <button class:on={app.track === t} onclick={() => void app.setTrack(t)} aria-pressed={app.track === t}>
+          {TRACKS[t as Track].label}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   {#if !app.ready}
     <div class="card skeleton" aria-busy="true"></div>
   {:else if !week}
@@ -87,7 +105,7 @@
       {/if}
     </article>
   {:else if current}
-    <p class="context">{week.title} · Milestone {week.milestone.split('-')[0]}</p>
+    <p class="context">{week.title} · Milestone {milestoneNo(week.milestone)}</p>
 
     <article class="card hero">
       <div class="top">
@@ -169,6 +187,32 @@
 </div>
 
 <style>
+  /* Sits above everything: which subject you're on changes what the whole screen means. */
+  .tracks {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 16px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+
+  .tracks button {
+    flex: 1;
+    padding: 7px 12px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-faint);
+  }
+
+  .tracks button.on {
+    background: var(--bg-elev, var(--surface));
+    color: var(--text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  }
+
   /* Loud on purpose — it is the one thing on the screen that interrupts. */
   .ambush,
   .strip {

@@ -357,3 +357,36 @@ problem-solving *before* instruction beats instruction-first for conceptual
 understanding and transfer. The app currently forbids exactly that — tomorrow's task is
 locked behind tomorrow's theory. Letting the task of a locked day be attempted without
 unlocking its theory is both what the evidence supports and what was asked for.
+
+**A second track: SQL (2026-09-07).** The content pipeline turned out to already be
+generic — any `milestones/*/lessons/week.yaml` becomes a week — so adding a subject was
+almost entirely a matter of finding the five places that said "cpp" out loud.
+
+`track:` in `week.yaml` is the whole mechanism. Everything downstream keys off it: which
+day the app offers next, which cards the review deck deals, which language a fence is
+highlighted and Parsons-shuffled as, and how the mentor and examiner describe who
+they're talking to (one `SUBJECTS` table; the persona and the prime directive are the
+same job whatever the subject, and duplicating them per track is how two prompts drift).
+A segmented switcher appears on Today only when a second track actually has content.
+
+Three lessons written: a table is a file of pages; an index is a sorted copy; NULL is not
+a value. All of it runs in sqlite3 — one binary, no server — which incidentally solves
+the environment problem that keeps stalling the C++ tasks.
+
+Every claim was run before it was written down, and that caught two of my own errors:
+1. Day 1 said the page count jumps on the first insert. It doesn't — it jumps at
+   `CREATE TABLE` (schema page + table root) and then sits still for hundreds of rows.
+2. Day 2's example table had two columns, one of them `INTEGER PRIMARY KEY`. That makes
+   the index cover `SELECT *` (the rowid *is* the id), so the quoted plan said
+   `COVERING INDEX` three sections before the lesson introduces the term. Fixed by
+   giving the table a third column.
+
+Also found while writing Day 2, and now the day's "worth knowing": SQLite's `LIKE` is
+case-insensitive by default while indexes sort case-sensitively, so `LIKE 'x%'` scans
+even though a prefix match is exactly what a sorted index is for. `PRAGMA
+case_sensitive_like=ON` or `COLLATE NOCASE` on the index restores the range scan.
+
+Two bugs in the switch itself, found in a browser: switching to a track whose week had
+never been downloaded showed "Week clear" (the auto-download rule was "first week
+overall" rather than "first week of this track"), and Today's header fell back to
+`weeks[0]` regardless of track.

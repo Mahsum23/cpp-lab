@@ -1,0 +1,139 @@
+questions:
+  - id: q1
+    prompt: '`SELECT NULL = NULL` — what comes back, and why isn''t it either true or false?'
+    options:
+      - text: '`NULL`, because comparing two unknowns can''t produce a verdict'
+        correct: true
+        why: >
+          SQL has three truth values. "Is the value I don't know equal to the other value
+          I don't know?" has no honest answer, so the comparison yields unknown rather
+          than inventing one.
+      - text: '`1`, because a null is equal to itself like any other value'
+        correct: false
+        why: >
+          That's the intuition the design deliberately rejects. `NULL` marks an absent
+          value, and two absences aren't evidence of sameness. `IS NULL` is the operator
+          that returns 1 here.
+      - text: '`0`, because a null isn''t equal to anything'
+        correct: false
+        why: >
+          Close, and a common half-memory — but false would be a verdict, and the engine
+          isn't entitled to one. Unknown is not the same as false, which is exactly why
+          `NOT` can't rescue it.
+      - text: An error — nulls can't be compared with `=`
+        correct: false
+        why: >
+          It's perfectly legal SQL and runs silently. The silence is what makes null bugs
+          hard to find.
+
+  - id: q2
+    prompt: 'Why does `WHERE x NOT IN (1, 2, NULL)` return no rows regardless of what `x` is?'
+    options:
+      - text: >
+          It expands to `x <> 1 AND x <> 2 AND x <> NULL`, and that last term is unknown,
+          so the whole condition is never true
+        correct: true
+        why: >
+          `true AND unknown` is unknown, and `WHERE` keeps only rows where the condition
+          is true. One null in the list is enough to make the answer unknown for every
+          row.
+      - text: '`NOT IN` doesn''t accept null values in its list and returns empty'
+        correct: false
+        why: >
+          The null is accepted quite happily. The emptiness comes from three-valued
+          logic, not from a rejection.
+      - text: The optimiser can't build a plan, so it returns nothing
+        correct: false
+        why: >
+          The plan is fine and the query runs normally. The result is the honest
+          consequence of the logic, not a planner failure.
+      - text: It returns no rows only when `x` is itself null
+        correct: false
+        why: >
+          It returns nothing for every `x`, null or not — including values obviously not
+          in the list, which is what makes it so hard to spot.
+
+  - id: q3
+    prompt: >
+      A table has 100 rows; 30 have a null `duration`. What do `count(*)`,
+      `count(duration)` and `avg(duration)` report, and which silently misleads?
+    options:
+      - text: >
+          100, 70, and the mean of the 70 non-null values — the average, because it
+          quietly excludes the missing ones
+        correct: true
+        why: >
+          `avg` divides by the count of non-null values, not by the number of rows. If
+          nulls are your timeouts, the average improves as the service gets worse.
+      - text: 100, 100 and the mean over all 100 rows, treating nulls as zero
+        correct: false
+        why: >
+          Nothing in SQL treats a null as zero. Both `count(col)` and `avg` skip them
+          entirely.
+      - text: 100, 70, and null, since any null in the input poisons the aggregate
+        correct: false
+        why: >
+          That's true of arithmetic on nulls (`1 + NULL` is null) but not of aggregates.
+          Aggregates skip nulls and return a real number — which is precisely why the
+          problem is invisible.
+      - text: All three report 70, since nulls aren't really rows
+        correct: false
+        why: >
+          `count(*)` counts rows and doesn't look at values at all, so it reports 100.
+          The gap between it and `count(col)` is the tell.
+
+  - id: q4
+    prompt: >
+      Name the two places where SQL treats two nulls as the same thing, despite
+      `NULL = NULL` being unknown.
+    options:
+      - text: '`GROUP BY` puts them in one group, and `DISTINCT` collapses them to one row'
+        correct: true
+        why: >
+          Both are about identity rather than comparison, so they have to make a choice —
+          and they choose to treat nulls as one thing. The same null that won't equal
+          itself in a `WHERE` groups with itself a clause later.
+      - text: '`ORDER BY` and `WHERE`'
+        correct: false
+        why: >
+          `ORDER BY` gives nulls a consistent *position*, which isn't the same as calling
+          them equal, and `WHERE` is the clause where a null comparison drops the row.
+      - text: '`JOIN ... ON` and `UNIQUE` constraints'
+        correct: false
+        why: >
+          Both go the other way: a join on null columns matches nothing, and `UNIQUE`
+          permits many nulls precisely because it can't call them equal.
+      - text: '`COUNT` and `SUM`'
+        correct: false
+        why: >
+          Those skip nulls rather than grouping them. Skipping is a third behaviour
+          again — neither equal nor unequal, just absent.
+
+  - id: q5
+    prompt: >
+      You add `UNIQUE` to a nullable column to enforce "at most one active session per
+      user". What actually happens?
+    options:
+      - text: >
+          Rows with a null in that column are all allowed, because two nulls never
+          compare equal
+        correct: true
+        why: >
+          The constraint is enforced by comparison, and nulls don't compare equal, so it
+          has nothing to object to. You get unlimited rows with a null there — the
+          standard requires this, and every major engine complies.
+      - text: The second null insert is rejected, like any duplicate
+        correct: false
+        why: >
+          That's the intuition the constraint doesn't share. PostgreSQL 15 added
+          `UNIQUE NULLS NOT DISTINCT` specifically to offer this behaviour as an opt-in.
+      - text: The column is implicitly made `NOT NULL`
+        correct: false
+        why: >
+          `UNIQUE` and `NOT NULL` are independent. If you want both, you have to say
+          both.
+      - text: It works, since only one row can be active at a time anyway
+        correct: false
+        why: >
+          Nothing enforces that. The whole point is that the constraint you added does
+          not constrain the case you cared about.

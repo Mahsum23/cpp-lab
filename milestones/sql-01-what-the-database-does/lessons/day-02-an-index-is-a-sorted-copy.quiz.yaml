@@ -1,0 +1,138 @@
+questions:
+  - id: q1
+    prompt: >
+      You add an index to speed up a slow report. Name two costs you have just taken on.
+    options:
+      - text: Every write to the table now maintains a second tree, and the database grows
+        correct: true
+        why: >
+          An index is a real sorted copy of real data. Inserts and updates of the indexed
+          column write both trees, and the copy occupies real pages — sometimes more than
+          the table itself.
+      - text: Reads of other columns get slower
+        correct: false
+        why: >
+          Unindexed reads are unaffected. The optimiser simply won't use the index for
+          them; it doesn't get in the way.
+      - text: The table has to be locked while the index exists
+        correct: false
+        why: >
+          Building an index takes a lock briefly, but having one doesn't. If it did,
+          nobody would use indexes.
+      - text: Existing queries must be rewritten to reference the index by name
+        correct: false
+        why: >
+          The optimiser picks indexes; queries name tables and columns. Being able to
+          add an index without touching query text is most of the point.
+
+  - id: q2
+    prompt: >
+      A query filtering on an indexed column shows `SCAN` in its plan. Give two different
+      reasons that can happen even though the index exists and the column is right.
+    options:
+      - text: >
+          The column is wrapped in a function, or the query's collation doesn't match the
+          index's
+        correct: true
+        why: >
+          Both break the same rule: an index answers questions about the exact value in
+          the exact order it was sorted. `lower(col)` is a different value; a
+          case-insensitive `LIKE` against a case-sensitive index is a different order.
+      - text: The index is too new for the optimiser to have noticed it
+        correct: false
+        why: >
+          Indexes are visible to the planner as soon as they're created. Stale
+          *statistics* can cause bad estimates, but that's a different failure and it
+          doesn't hide the index.
+      - text: The table is too small, so the optimiser refuses to use any index
+        correct: false
+        why: >
+          A tempting answer, because on a tiny table a scan genuinely can be cheaper and
+          the optimiser may choose it. But that's the optimiser being right, not the
+          index being unusable — and it isn't one of the two structural reasons.
+      - text: SELECT * always forces a scan
+        correct: false
+        why: >
+          `SELECT *` prevents an index being *covering*, so the engine must fetch rows
+          after the index lookup. It doesn't stop the lookup happening.
+
+  - id: q3
+    prompt: What does `COVERING` mean in a query plan, and what work does it save?
+    options:
+      - text: >
+          The index holds every column the query needs, so the engine answers from the
+          index and never reads the table
+        correct: true
+        why: >
+          It eliminates the second hop — index entry to actual row — which on a large
+          table is a random page read per matching row, and usually dominates the cost.
+      - text: The index covers every row in the table, so no rows can be missed
+        correct: false
+        why: >
+          Ordinary indexes always contain every row (partial indexes aside). "Covering"
+          is about columns, not rows.
+      - text: The index is large enough to be held entirely in memory
+        correct: false
+        why: >
+          Caching is real and helps, but it's not what the word means and it isn't what
+          the plan is reporting.
+      - text: The engine has locked the rows the index points at
+        correct: false
+        why: >
+          Nothing to do with locking. A covering read touches fewer things, if anything.
+
+  - id: q4
+    prompt: >
+      Your table has an index on `email`. Which of these can use it —
+      `WHERE email = ?`, `WHERE lower(email) = ?`, `WHERE email LIKE 'a%'`?
+    options:
+      - text: >
+          The first straight away; the second not at all; the third only if the index's
+          collation matches how LIKE compares
+        correct: true
+        why: >
+          Equality on the bare column is exactly what the index is sorted for.
+          `lower(email)` is a value the index doesn't contain. The prefix match is a
+          range scan in principle, but only once the question's collation and the index's
+          agree.
+      - text: All three, since all three filter on the indexed column
+        correct: false
+        why: >
+          Naming the column isn't enough — the index stores one specific value in one
+          specific order, and two of these ask about something else.
+      - text: Only the first; the other two can never use an index
+        correct: false
+        why: >
+          Both are recoverable: an expression index handles `lower(email)`, and a
+          matching collation handles the prefix match.
+      - text: The first and second; `LIKE` can never use an index
+        correct: false
+        why: >
+          Backwards on both counts. `lower(email)` needs an expression index, while a
+          *prefix* `LIKE` is genuinely index-friendly given the right collation. A
+          leading `%` is the one that can't be helped.
+
+  - id: q5
+    prompt: >
+      Why does an index make `ORDER BY name` cheaper even for a query that returns every
+      row in the table?
+    options:
+      - text: The index is already stored in that order, so there is nothing to sort
+        correct: true
+        why: >
+          Sorted order is the index's entire nature. Reading it in order yields rows in
+          order, turning a sort into a walk — no temporary file, no sort buffer.
+      - text: The index lets the engine skip rows it doesn't need
+        correct: false
+        why: >
+          This query needs every row. The saving is the ordering, not any filtering.
+      - text: It doesn't — returning every row means a scan, so the index is unused
+        correct: false
+        why: >
+          A full read still has to produce the requested order somehow. Doing it by
+          reading a pre-sorted structure beats sorting the whole table.
+      - text: Sorting happens in memory either way, so it's the same cost
+        correct: false
+        why: >
+          Only if it fits. A sort too big for the buffer spills to disk, which is exactly
+          the cost the ordered index avoids.
