@@ -653,3 +653,78 @@ export function streamReply(opts: {
 }): AsyncGenerator<string> {
   return opts.provider === 'gemini' ? streamGemini(opts) : streamAnthropic(opts);
 }
+
+// --- review deck ----------------------------------------------------------
+
+/**
+ * Writes the surprise challenges the review deck deals from days you finished a while
+ * ago. Kept separate from the mentor and the examiner because it is doing a third
+ * thing: not explaining, not grading, but inventing a small, concrete test.
+ */
+const FORGER = `You write single, short recall challenges about low-level C++ and POSIX
+systems programming, for someone revising material they studied days or weeks ago.
+
+You will be given the material from one lesson. Write ONE challenge drawn from it.
+
+Rules:
+- Pick something specific and mechanical: a value, an ordering, a return code, a state,
+  what a call does to kernel state. Never "explain X in general".
+- Prefer these shapes, and vary between them: predict the output; spot the bug in five
+  lines or fewer; "this call returns N — what happened?"; "what breaks if you remove
+  this line".
+- It must be answerable from memory in under a minute, with no compiler to hand.
+- Any code goes in a \`\`\`cpp fence and stays under about eight lines.
+- Ask about something the material actually covered. Do not invent API behaviour.
+- Output the challenge only. No preamble, no answer, no hints, no "here is a
+  challenge" — the first character is the first word of the question.`;
+
+/**
+ * Grades an answer to a challenge the model itself just wrote.
+ *
+ * Same contract as the examiner — at most a couple of probes, then a verdict — because
+ * a review card that turns into a conversation is a review card that doesn't get done
+ * on a phone in a queue.
+ */
+const REVIEW_GRADER = `You are grading one short recall answer, in the middle of a
+spaced-repetition review. Be quick and be honest.
+
+- If the answer is right, say so in a sentence and rule immediately.
+- If it is wrong or vague, say exactly what was missed, in two sentences at most, and
+  give the right answer — this is revision, so the correction is the whole point and
+  withholding it wastes the card.
+- You may ask at most ONE clarifying question, and only if the answer is genuinely
+  ambiguous rather than merely thin. Otherwise rule straight away.
+- "I don't know" is an honest answer and rules gaps without further probing.
+
+End with exactly one marker on its own line:
+
+[[VERDICT: solid]]
+or
+[[VERDICT: gaps]]
+
+"solid" means they recalled it. "gaps" means they didn't, and it should come back
+sooner. Never emit the marker more than once.`;
+
+const materialFor = (context: { week: Week; day: Day }): string => {
+  const { week, day } = context;
+  const parts = [`Lesson: ${week.title}, Day ${day.day} — "${day.title}".`];
+  if (day.theoryMarkdown) parts.push(`\nThe material:\n\n${day.theoryMarkdown}`);
+  return parts.join('\n');
+};
+
+/** System prompt for inventing a challenge from one day's material. */
+export function forgePrompt(context: { week: Week; day: Day }): string {
+  return `${FORGER}\n\n---\n\n${materialFor(context)}`;
+}
+
+/** System prompt for grading an answer to `challenge`. */
+export function reviewGraderPrompt(context: { week: Week; day: Day }, challenge: string): string {
+  return `${REVIEW_GRADER}\n\n---\n\n${materialFor(context)}\n\nThe challenge they were asked:\n\n${challenge}`;
+}
+
+/** Run a stream to completion. The deck wants the whole challenge, not a typewriter. */
+export async function collect(stream: AsyncGenerator<string>): Promise<string> {
+  let out = '';
+  for await (const chunk of stream) out += chunk;
+  return out.trim();
+}

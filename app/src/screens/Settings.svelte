@@ -4,6 +4,7 @@
   import { relativeTime } from '../lib/date';
   import { PROVIDERS } from '../lib/mentor';
   import type { MentorProvider } from '../lib/types';
+  import { update } from '../lib/update.svelte';
 
   const providers = Object.entries(PROVIDERS) as [MentorProvider, (typeof PROVIDERS)[MentorProvider]][];
   const provider = $derived(PROVIDERS[app.mentorProvider]);
@@ -393,7 +394,8 @@
   </section>
 
   <p class="version">
-    cpp-lab · content {app.curriculum?.generatedAt?.slice(0, 10) ?? 'not loaded'}
+    cpp-lab · build {update.build} · content
+    {app.curriculum?.generatedAt?.slice(0, 10) ?? 'not loaded'}
     {#if app.sync.status === 'offline'}· offline{/if}
   </p>
 

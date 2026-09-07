@@ -5,7 +5,7 @@ The third column is the valuable one. Be honest in it.
 
 | Milestone | Started | Done | Review | Teach-back | Notes |
 |---|---|---|---|---|---|
-| 01-raw-sockets | 2026-09-01 | | | | Day 1/8 in progress (see log) |
+| 01-raw-sockets | 2026-09-01 | | | | Day 2/8 in progress (see log) |
 
 ## Log
 
@@ -268,3 +268,60 @@ Logic lives in `lib/compose.ts` rather than inside the components, because there
 composers and because logic that only exists in a `.svelte` file is logic nothing can
 unit-test — which is the same seam the sync bugs sat in. `test-compose.mjs` covers it and
 is wired into `npm test`.
+
+**Day 2 — addresses and byte order (2026-09-06/07):**
+- Task attempted: `src/main.cpp` (commit `8172890`) extends Day 1 with a `sockaddr_in`
+  for port 9000/`INADDR_ANY`, prints `sin_port` raw vs. `ntohs()`, dumps the struct
+  byte-by-byte in hex, and detects host endianness at runtime with the 1-byte trick.
+  Compiles clean under `-Wall -Wextra`; ran it — byte dump correctly shows the port at
+  offset 2–3 as `23 28` (big-endian 9000), matching the raw/`ntohs()` printout.
+- Day 1's two pending review fixes are both applied: `close(fd)` added, and the
+  failure branch now `return 1;`s instead of falling off `main()` as success.
+- **Code review — pending fixes (not yet applied):**
+  1. `uint16_t`/`uint8_t` used with no `#include <cstdint>` — compiles only because
+     `<netinet/in.h>`/`<arpa/inet.h>` happen to pull it in transitively. Confirmed by
+     removing them in isolation: it stops compiling. Include what you use.
+  2. `addr.sin_addr.s_addr = INADDR_ANY;` set directly rather than through `htonl()` —
+     harmless since `INADDR_ANY` is `0`, but the task specifically asked for the
+     conversion as habit-building for the next literal address that isn't 0.
+  - Minor style, non-blocking: `is_little_endian` mixes a C-style cast with the
+    `reinterpret_cast` used one function below it; returns `int` used as a `bool`;
+    a couple of redundant leading `struct` keywords (C habit, not needed in C++).
+- Open question put to him rather than answered: which two byte offsets hold the
+  port, and why does `0x23` land before `0x28` in memory — needs his answer before
+  Day 3.
+- Next session: apply the two fixes above, answer the byte-order question, then
+  Day 3 — bind and listen.
+
+**The review deck (2026-09-07).** The complaint it answers: theory and quiz get done on
+the phone, the task waits for a laptop that isn't there, and meanwhile the earlier days
+quietly fade. Nothing in the app ever asked about a day again once it was finished.
+
+Every finished day now leaves cards behind — its quiz questions (replayed from the bank,
+so they work with no key and no signal), its `teachBack` prompt, and a challenge the
+model writes fresh from that day's theory. The forged ones are the point: a question
+provably never seen, so it can't be answered from recognition.
+
+Scheduling is SM-2 with the intervals deliberately scattered by up to 20%. Without the
+jitter a day's five cards come due on the same morning forever, which teaches you to
+recognise a batch rather than recall the material. On top of the schedule: due cards are
+dealt shuffled, a not-yet-due card is spliced in 15% of the time, and on a day when
+nothing is due there's a 20% chance of being asked anyway — the schedule decides what
+you owe, not what you can be asked.
+
+Delivery is an ambush when the app opens, once a day at most, above the lesson rather
+than under it. Deliberately *not* a notification: there is no scheduled local
+notification for a PWA (Notification Triggers never shipped) and push needs something
+running to send it. The second surface is the actual gap — when the task is parked
+waiting for a compiler, the phone offers review instead of nothing. It never gates a new
+day.
+
+`review.ts` is pure and takes its randomness as an argument, because a scheduler you
+can't run twice with the same result is a scheduler you can't test; `test-review.mjs`
+covers the ladder, the miss path, jitter bounds, deck derivation, selection, the ambush
+and the two-device merge. Verified in a browser against a seeded finished day: 7 cards
+built, all three kinds dealt in mixed order, schedules persisted, and the three Today
+states (ambush / parked / silent) each behave.
+
+Still to build: real push, from a scheduled Action reading the subscription out of the
+sync gist.

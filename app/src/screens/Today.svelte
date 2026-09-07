@@ -34,6 +34,25 @@
     </button>
   </header>
 
+
+  <!-- Deliberately above the lesson: the deck's whole job is to catch you before you
+       move on to new material, not to wait politely underneath it. Spent for the day
+       the moment the deck is opened. -->
+  {#if app.ready && app.ambush}
+    <button class="ambush" onclick={() => router.go('/review')}>
+      <span class="glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" /></svg>
+      </span>
+      <span class="lines">
+        <strong>Before you start — one from before</strong>
+        <em>
+          {#if app.dueNow.length === 1}1 card is due{:else if app.dueNow.length}{app.dueNow.length} cards are due{:else}A surprise one, nothing's actually due{/if}
+        </em>
+      </span>
+      <svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>
+    </button>
+  {/if}
+
   {#if !app.ready}
     <div class="card skeleton" aria-busy="true"></div>
   {:else if !week}
@@ -104,6 +123,24 @@
     </article>
   {/if}
 
+
+  <!-- The gap this feature exists for: theory and quiz are done, the task needs a
+       machine that isn't in your pocket, and the phone would otherwise have nothing
+       to offer for the rest of the day. -->
+  {#if app.ready && !app.ambush && (app.taskParked || app.dueNow.length)}
+    <button class="strip" class:parked={app.taskParked} onclick={() => router.go('/review')}>
+      <span class="lines">
+        <strong>
+          {#if app.taskParked}Task's waiting on a compiler{:else if app.dueNow.length === 1}1 card due{:else}{app.dueNow.length} cards due{/if}
+        </strong>
+        <em>
+          {#if app.taskParked && app.dueNow.length}Review {app.dueNow.length} from earlier days while you wait{:else if app.taskParked}Review something from an earlier day while you wait{:else}From days you finished a while ago{/if}
+        </em>
+      </span>
+      <svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>
+    </button>
+  {/if}
+
   {#if week}
     <section class="weekbar">
       <div class="labels">
@@ -128,6 +165,72 @@
 </div>
 
 <style>
+  /* Loud on purpose — it is the one thing on the screen that interrupts. */
+  .ambush,
+  .strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    padding: 13px 14px;
+    border-radius: 15px;
+    margin-bottom: 14px;
+    border: 1px solid var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+
+  .strip {
+    border-color: var(--border);
+    background: var(--surface);
+    margin: 14px 0 0;
+  }
+
+  .strip.parked {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .ambush .glyph svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .lines {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .lines strong {
+    font-size: 14.5px;
+    font-weight: 650;
+  }
+
+  .lines em {
+    font-style: normal;
+    font-size: 13px;
+    color: var(--text-faint);
+  }
+
+  .chev {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: var(--text-faint);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   header {
     display: grid;
     grid-template-columns: 1fr auto 1fr;

@@ -6,8 +6,16 @@ import { VitePWA } from 'vite-plugin-pwa';
 // building for one; the default suits a root deploy (Vercel, Netlify, user Pages).
 const base = process.env.APP_BASE ?? '/';
 
+// Stamped into the bundle so the running app can say which build it is. Without it,
+// "is this deployed?" can only be answered by reading commit history and guessing
+// whether the device took the update.
+const buildId =
+  process.env.GITHUB_SHA?.slice(0, 7) ??
+  new Date().toISOString().slice(0, 16).replace('T', ' ');
+
 export default defineConfig({
   base,
+  define: { __BUILD_ID__: JSON.stringify(buildId) },
   build: {
     target: 'es2022',
     // Phones on cellular: keep an eye on this, don't let it creep.
