@@ -15,6 +15,7 @@
   import Button from './Button.svelte';
   import CodeArea from './CodeArea.svelte';
   import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
+  import { TRACKS, type Track } from '../lib/types';
 
   /**
    * A tappable opener. `send: false` drops the text into the composer instead of
@@ -41,6 +42,7 @@
   let area = $state<ReturnType<typeof CodeArea> | null>(null);
   let scroller = $state<HTMLElement | null>(null);
   let codeMode = $state(false);
+  const lang = $derived(TRACKS[(week.track ?? 'cpp') as Track].lang);
 
   $effect(() => {
     if (!open) return;
@@ -62,7 +64,7 @@
     if (!raw || chat.streaming) return;
     // Fence it on the way out, so the model is told it's source and the transcript
     // renders it highlighted rather than reflowed.
-    const content = codeMode && !hasFence(raw) ? asCodeBlock(raw) : raw;
+    const content = codeMode && !hasFence(raw) ? asCodeBlock(raw, lang) : raw;
     draft = '';
     codeMode = false;
     area?.grow();
@@ -158,8 +160,9 @@
           bind:this={area}
           bind:value={draft}
           bind:codeMode
+          {lang}
           maxHeight={120}
-          placeholder={codeMode ? 'Paste or type C++…' : 'Ask about this…'}
+          placeholder={codeMode ? `Paste or type ${TRACKS[(week.track ?? 'cpp') as Track].label}…` : 'Ask about this…'}
           onsubmit={() => void send()}
           onescape={onclose}
         />

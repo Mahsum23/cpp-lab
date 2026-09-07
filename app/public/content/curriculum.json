@@ -1,16 +1,28 @@
 {
   "schemaVersion": 1,
   "title": "cpp-lab",
-  "generatedAt": "2026-09-06T20:59:44.519Z",
+  "generatedAt": "2026-09-07T16:13:10.358Z",
   "weeks": [
     {
       "id": "week-01",
       "title": "Raw Sockets",
       "milestone": "01-raw-sockets",
+      "track": "cpp",
       "days": 8,
       "availableDays": 8,
       "url": "content/weeks/week-01.json",
-      "contentHash": "sha256:c41fbfc53208109f5b774dd3662c59e9",
+      "contentHash": "sha256:f7399073112a62699133c4959b7f7416",
+      "available": true
+    },
+    {
+      "id": "week-sql-01",
+      "title": "What the Database Does",
+      "milestone": "sql-01-what-the-database-does",
+      "track": "sql",
+      "days": 3,
+      "availableDays": 3,
+      "url": "content/weeks/week-sql-01.json",
+      "contentHash": "sha256:641e5efb35185067c007e92f1f82f721",
       "available": true
     }
   ]

@@ -3,6 +3,7 @@
   "id": "week-01",
   "title": "Raw Sockets",
   "milestone": "01-raw-sockets",
+  "track": "cpp",
   "intro": "If you write C++ but have never opened a socket by hand, this is the layer underneath the libraries you already use. Eight sessions, and by the last one you're assembling pieces you've already built — not writing an echo server from a blank page.",
   "days": [
     {

@@ -25,6 +25,8 @@
     ariaLabel?: string;
     /** Cap before the field scrolls internally instead of growing. */
     maxHeight?: number;
+    /** The subject's language: what code mode highlights and fences as. */
+    lang?: string;
     /** Ctrl/Cmd+Enter. */
     onsubmit?: () => void;
     onescape?: () => void;
@@ -35,6 +37,7 @@
     placeholder = 'Ask about this…',
     ariaLabel = 'Message',
     maxHeight = 148,
+    lang = 'cpp',
     onsubmit,
     onescape,
   }: Props = $props();
@@ -59,7 +62,7 @@
    */
   const painted = $derived.by(() => {
     const text = value.endsWith('\n') ? `${value} ` : value;
-    if (codeMode) return highlight(text, 'cpp');
+    if (codeMode) return highlight(text, lang);
     let out = '';
     let at = 0;
     for (const span of codeSpans(text)) {
@@ -135,7 +138,7 @@
       box.focus();
       return;
     }
-    apply(wrapSelection(text, from, to));
+    apply(wrapSelection(text, from, to, lang));
     box.focus();
   }
 

@@ -9,6 +9,9 @@ import {
   type Secrets,
   type TaskState,
   type Week,
+  isTrack,
+  TRACKS,
+  type Track,
 } from './types';
 import {
   cardsFor, dueCards, grade, newCard, shouldAmbush, type CardRef, type Grade,
@@ -70,7 +73,11 @@ class AppStore {
    */
   get deck(): CardRef[] {
     return this.availableDays.flatMap(({ week, day }) =>
-      cardsFor(day, this.progress.days[day.id] ? this.dayProgress(day.id, week.id) : undefined),
+      cardsFor(
+        day,
+        this.progress.days[day.id] ? this.dayProgress(day.id, week.id) : undefined,
+        TRACKS[(week.track ?? 'cpp') as Track].lang,
+      ),
     );
   }
 
@@ -128,8 +135,44 @@ class AppStore {
     await this.persist();
   }
 
+  // --- tracks -------------------------------------------------------------
+
+  get track(): Track {
+    return this.progress.settings.track ?? 'cpp';
+  }
+
+  /** Tracks that actually have a week behind them, so the switcher can't offer a
+   *  subject with nothing in it. The current one is always listed, even mid-download. */
+  get tracks(): Track[] {
+    const found = new Set<Track>([this.track]);
+    for (const w of this.curriculum?.weeks ?? []) if (isTrack(w.track)) found.add(w.track);
+    for (const w of this.weeks) if (isTrack(w.track)) found.add(w.track);
+    return (['cpp', 'sql'] as Track[]).filter((t) => found.has(t));
+  }
+
+  /** Weeks of the subject being studied. `weeks` stays the full set: a review card
+   *  from the other track still has to be able to find the day it came from. */
+  get trackWeeks(): Week[] {
+    return this.weeks.filter((w) => (w.track ?? 'cpp') === this.track);
+  }
+
+  async setTrack(track: Track) {
+    if (track === this.track) return;
+    this.progress.settings.track = track;
+    await this.persist();
+    // Pull the subject's first week down if this device has never held it, so the
+    // switch lands on a lesson rather than on "week clear".
+    if (!this.weeks.some((w) => (w.track ?? 'cpp') === track)) {
+      const ref = this.curriculum?.weeks.find((w) => (w.track ?? 'cpp') === track && w.available);
+      if (ref) await this.downloadWeek(ref.id);
+    }
+    // A fresh subject deserves its own roll; otherwise switching mid-day inherits
+    // whatever the last one decided about interrupting you.
+    this.rollAmbush();
+  }
+
   get availableDays(): { week: Week; day: Day }[] {
-    return this.weeks.flatMap((week) =>
+    return this.trackWeeks.flatMap((week) =>
       week.days.filter((d) => d.status === 'available').map((day) => ({ week, day })),
     );
   }
@@ -235,8 +278,11 @@ class AppStore {
         if (!ref.available) continue;
         const held = this.progress.loadedWeeks[ref.id];
         if (!held) {
-          // Week 1 arrives without ceremony; later weeks wait for a tap.
-          if (this.weeks.length === 0) await this.downloadWeek(ref.id);
+          // A track's *first* week arrives without ceremony; later ones wait for a tap.
+          // Per track, not overall: switching to a subject you've never opened should
+          // land on its Day 1, not on an empty screen telling you the week is clear.
+          const first = !this.weeks.some((w) => (w.track ?? 'cpp') === (ref.track ?? 'cpp'));
+          if (first) await this.downloadWeek(ref.id);
           else newWeeks.push(ref.id);
         } else if (held.contentHash !== ref.contentHash) {
           await this.downloadWeek(ref.id);

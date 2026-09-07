@@ -1,0 +1,154 @@
+# Answer key for day 01. Kept out of the .md on purpose — that file is the one open
+# while the lesson is being done.
+#
+# Option order here carries no information: build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      A table has 200 rows packed into 6 pages. You run a query that returns exactly one
+      row, found by scanning. What is the smallest amount of data the engine could have
+      read from disk?
+    options:
+      - text: One page — 4KB by default
+        correct: true
+        why: >
+          The page is the unit of I/O. Even a single-byte column in a single row costs
+          one whole page, because a page is the smallest thing the engine can ask the
+          filesystem for.
+      - text: Just the bytes of that row
+        correct: false
+        why: >
+          Nothing in the stack can read a partial page. The row's bytes come along
+          inside the page that holds them; you never pay per row.
+      - text: All 6 pages, since a scan reads the whole table
+        correct: false
+        why: >
+          A scan *may* read every page, but it can stop the moment it has what it needs.
+          The question asks for the smallest possible, and that's the page the row is on.
+      - text: It depends entirely on the row's width
+        correct: false
+        why: >
+          Row width changes how many rows fit in a page, and a very wide value can spill
+          onto overflow pages — but the floor is still one page, whatever the row weighs.
+
+  - id: q2
+    prompt: >
+      Why is reading the tenth column of a row more expensive than reading the first, in
+      a row-store engine?
+    options:
+      - text: >
+          Columns are stored end to end with no fixed offsets, so reaching the tenth
+          means walking past the first nine
+        correct: true
+        why: >
+          The row header gives each value's type and length, not its address. Finding
+          column ten is a walk, not a jump — which is why the cost scales with bytes
+          skipped rather than columns requested.
+      - text: Later columns are stored on separate overflow pages
+        correct: false
+        why: >
+          Overflow pages exist, but they're for values too large for a page — a long
+          TEXT or BLOB. Ordinary columns all live in the same row, whatever their
+          position.
+      - text: It isn't — column access is constant time either way
+        correct: false
+        why: >
+          That would be true if rows were fixed-width C structs with known offsets. They
+          aren't: values are variable-length, so the offsets can't be known in advance.
+      - text: The engine has to re-parse the row for each column accessed
+        correct: false
+        why: >
+          It parses the header once. The cost is the walk through the values, not
+          repeated parsing.
+
+  - id: q3
+    prompt: >
+      You declare `id INT PRIMARY KEY` in SQLite instead of `id INTEGER PRIMARY KEY`.
+      What actually changes?
+    options:
+      - text: >
+          `INTEGER PRIMARY KEY` makes your column the rowid itself; `INT PRIMARY KEY`
+          leaves the rowid alone and adds a separate index
+        correct: true
+        why: >
+          Exactly that spelling is load-bearing. One gives you a column that *is* the
+          table's B-tree key; the other gives you a hidden rowid plus an index you pay
+          for on every write.
+      - text: Nothing — `INT` and `INTEGER` are synonyms everywhere in SQLite
+        correct: false
+        why: >
+          They're synonyms for type affinity, which is why this is so easy to miss. For
+          the rowid alias specifically, only the literal word `INTEGER` counts.
+      - text: '`INT PRIMARY KEY` is rejected as a syntax error'
+        correct: false
+        why: >
+          It's perfectly valid, which is the problem — you get a working table with an
+          extra index and no warning that you meant something else.
+      - text: '`INT` limits the column to 32 bits'
+        correct: false
+        why: >
+          SQLite stores integers in as many bytes as the value needs, up to 64 bits,
+          regardless of the declared type name.
+
+  - id: q4
+    prompt: >
+      A colleague says "the rows come back in the order I inserted them, I checked."
+      What is wrong with relying on that?
+    options:
+      - text: >
+          Without `ORDER BY` the engine may return rows in any order, and adding an index
+          later can silently change it
+        correct: true
+        why: >
+          Order with no `ORDER BY` is an accident of the plan the optimiser picked today.
+          A new index gives it a cheaper path, the order changes, and nothing was
+          "broken" — the query never asked for an order.
+      - text: Insertion order is never preserved, so the observation must be wrong
+        correct: false
+        why: >
+          The observation is usually right, which is what makes it dangerous. A rowid
+          table scanned in key order really does come back in insertion order — until
+          the plan changes.
+      - text: It only holds if the table has a primary key
+        correct: false
+        why: >
+          It has nothing to do with declaring a key. Any table can be read by any plan
+          the optimiser prefers.
+      - text: It's fine as long as nobody deletes rows
+        correct: false
+        why: >
+          Deletes free slots that later inserts can reuse, so they're one way to see it
+          break — but a new index or a different plan will do it without a single delete.
+
+  - id: q5
+    prompt: >
+      What is the difference in physical layout between a row store and a column store,
+      and which suits `SELECT avg(price) FROM sales` over 50 million rows?
+    options:
+      - text: >
+          A row store keeps a row's columns together; a column store keeps a column's
+          values together — so the column store reads only `price`
+        correct: true
+        why: >
+          The aggregate touches one column of the table. A row store must walk every
+          row's bytes to reach it; a column store reads that column's values contiguously
+          and skips the rest of the table entirely.
+      - text: >
+          A column store keeps the same layout but adds an index per column, so it suits
+          the query
+        correct: false
+        why: >
+          It isn't an index — it's a different physical arrangement of the data itself.
+          There's no row to index into.
+      - text: They're the same on disk and differ only in the query planner
+        correct: false
+        why: >
+          The layout is the whole difference, and it's why they ship as separate
+          products rather than as a planner flag.
+      - text: >
+          A row store suits it better, since all the values are already in one place
+        correct: false
+        why: >
+          "One place" means one *row*. The query wants one column across all rows, which
+          in a row store is the maximally scattered access pattern.

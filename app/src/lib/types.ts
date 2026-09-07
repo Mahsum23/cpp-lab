@@ -48,11 +48,27 @@ export interface Day {
   task: DayTask | null;
 }
 
+/**
+ * A subject. Weeks belong to one, and you study one at a time.
+ *
+ * Not a cosmetic label: it decides which day the app offers next, which cards the
+ * review deck deals, and which language a code fence is highlighted and reordered as.
+ */
+export type Track = 'cpp' | 'sql';
+
+export const TRACKS: Record<Track, { label: string; lang: string; blurb: string }> = {
+  cpp: { label: 'C++', lang: 'cpp', blurb: 'Systems programming, from raw sockets up' },
+  sql: { label: 'SQL', lang: 'sql', blurb: 'What the database is actually doing' },
+};
+
+export const isTrack = (v: unknown): v is Track => v === 'cpp' || v === 'sql';
+
 export interface Week {
   schemaVersion: number;
   id: string;
   title: string;
   milestone: string;
+  track: Track;
   intro: string;
   days: Day[];
 }
@@ -61,6 +77,7 @@ export interface WeekRef {
   id: string;
   title: string;
   milestone: string;
+  track: Track;
   days: number;
   availableDays: number;
   url: string;
@@ -133,6 +150,8 @@ export interface Settings {
    * has already changed its mind on.
    */
   mentorModel: string;
+  /** The subject currently being studied. Device-local, like theme. */
+  track: Track;
 }
 
 /**
@@ -231,6 +250,7 @@ export function defaultProgress(): Progress {
       // Gemini by default: its free tier is the only one that doesn't need a card.
       mentorProvider: 'gemini',
       mentorModel: 'gemini-flash-latest',
+      track: 'cpp',
     },
     review: emptyReview(),
     loadedWeeks: {},
