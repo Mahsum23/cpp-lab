@@ -446,3 +446,22 @@ Verified in a browser against a stubbed provider, three scenarios: a single 503 
 invisibly (2 attempts, answer, no error); an overloaded model falls to the next one
 (3 attempts, then the alternate answers, no error); a total outage retries 6 times
 across 2 models and then says so.
+
+**Replies were being cut off mid-sentence, silently (2026-09-08).** Reported with a
+screenshot: an answer that ended on "…but here is how" and simply stopped. Two bugs
+stacked.
+
+1. **The finish reason was ignored the moment any text arrived.** `streamGemini` did
+   `if (sawText) return;` before looking at it, so a reply the model had abandoned —
+   `MAX_TOKENS`, `SAFETY`, anything — was indistinguishable from one it had finished.
+   The note is appended to the reply rather than thrown, because the text that did
+   arrive is worth keeping and an error would replace it with nothing.
+2. **Why it was being cut at all:** on Gemini 2.5+ thinking tokens are billed against
+   `maxOutputTokens` — they share one ceiling, contrary to how the docs read. The cap
+   was 1600, so the model could spend most of it reasoning and emit two sentences before
+   being cut off. Raised to 4096, and Flash models now get an explicit
+   `thinkingConfig.thinkingBudget` of 640 so reasoning can't eat the whole thing.
+
+The thinking budget is sent only to Flash models on purpose: other families either
+reject the field or enforce their own floor, and a 400 there would break the chat
+outright rather than merely truncate it.

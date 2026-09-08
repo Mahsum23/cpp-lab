@@ -88,7 +88,23 @@ export const PROVIDERS: Record<MentorProvider, ProviderInfo> = {
 
 /** Anything older than this is dropped from the request — a long thread is mostly cost. */
 const HISTORY_LIMIT = 20;
-const MAX_OUTPUT_TOKENS = 1600;
+/**
+ * Output budget. Generous because on Gemini 2.5+ it is *shared with thinking*: the
+ * model's reasoning tokens are billed against the same ceiling as the reply, so a
+ * modest-looking cap gets spent thinking and the visible answer is cut off mid-sentence.
+ * 1600 did exactly that.
+ */
+const MAX_OUTPUT_TOKENS = 4096;
+
+/**
+ * Room to think, but not the whole budget.
+ *
+ * Only sent to Flash models: they document a settable thinking budget, while other
+ * families either reject the field or refuse to go below their own floor, and a 400
+ * here would break the chat outright rather than merely truncate it.
+ */
+const THINKING_BUDGET = 640;
+const thinksOnRequest = (model: string) => /flash/i.test(model);
 
 /**
  * What each track is, in the words the prompts need.
@@ -609,7 +625,12 @@ async function* attemptGemini(opts: {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: opts.system }] },
         contents,
-        generationConfig: { maxOutputTokens: MAX_OUTPUT_TOKENS },
+        generationConfig: {
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          ...(thinksOnRequest(opts.model)
+            ? { thinkingConfig: { thinkingBudget: THINKING_BUDGET } }
+            : {}),
+        },
       }),
     },
     opts.signal,
@@ -648,6 +669,20 @@ async function* attemptGemini(opts: {
 }
 
 /**
+ * A note to append when the model stopped early, or null when it finished properly.
+ *
+ * Appended to the reply rather than thrown: the text that did arrive is worth keeping,
+ * and an error would replace it with nothing.
+ */
+function truncationNote(finish: string | undefined): string | null {
+  if (!finish || finish === 'STOP') return null;
+  if (finish === 'MAX_TOKENS') {
+    return '\n\n_(cut off — it hit the length limit. Ask it to carry on, or to be briefer.)_';
+  }
+  return `\n\n_(cut off — the model stopped early: ${finish}.)_`;
+}
+
+/**
  * A stream can finish having yielded nothing: no text, and either `finishReason:
  * "STOP"` or no finish reason at all. The old code only treated a *different* finish
  * reason (SAFETY, RECITATION, …) as an error, so that case fell through every check
@@ -668,7 +703,14 @@ async function* streamGemini(opts: {
 }): AsyncGenerator<string> {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const { sawText, finish } = yield* attemptGemini(opts);
-    if (sawText) return;
+    if (sawText) {
+      // The finish reason used to be ignored the moment any text arrived, so a reply
+      // the model had abandoned looked identical to one it had finished — you got half
+      // a sentence and no hint that there was more. Say so instead.
+      const cut = truncationNote(finish);
+      if (cut) yield cut;
+      return;
+    }
 
     const hardStop = finish && finish !== 'STOP';
     if (hardStop) throw new MentorError(`Gemini stopped without answering (${finish}).`);
