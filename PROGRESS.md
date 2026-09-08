@@ -465,3 +465,31 @@ stacked.
 The thinking budget is sent only to Flash models on purpose: other families either
 reject the field or enforce their own floor, and a 400 there would break the chat
 outright rather than merely truncate it.
+
+**Ask about a highlighted passage (2026-09-08).** Highlight anything in the theory or
+the task, and a small "Explain this" pill appears above the selection; tapping it opens
+the mentor with that passage already asked about in detail.
+
+Deliberately not built on `contextmenu` alone. Right-click is the desktop gesture and it
+is handled, but this is read mostly on a phone, where the equivalent is a long-press
+raising the *system* selection menu — which a web page cannot add an item to. So the
+trigger is the selection itself, via `selectionchange`: one mechanism covering
+mouse-drag, double-click, long-press and shift-arrow. The native menu is suppressed only
+when there is actually a selection inside the lesson to ask about, so right-clicking a
+link, or long-pressing with nothing selected, still behaves normally.
+
+The passage is quoted into a framed prompt rather than sent bare — a stray fragment of a
+sentence reads like an instruction otherwise. On the task screen the framing also says
+"do not write it for me", so the prime directive survives someone highlighting a
+checklist item.
+
+`MentorSheet` gained an `ask` prop for this: starters couldn't do the job because they
+only render on an empty thread, and asking about a passage has to work on the tenth
+question as readily as the first. It awaits `chat.open()` before sending, so the
+question lands in that day's thread rather than racing whichever was last loaded.
+
+Verified in a browser: pill appears on selection and is positioned inside the viewport;
+right-click with a selection shows it and suppresses the native menu; right-click with
+no selection leaves the native menu alone; selecting the page heading (outside the
+watched element) offers nothing; a two-character selection offers nothing; the question
+is really sent and the reply renders.

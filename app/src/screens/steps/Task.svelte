@@ -5,6 +5,7 @@
   import Button from '../../components/Button.svelte';
   import CopyLine from '../../components/CopyLine.svelte';
   import MentorSheet from '../../components/MentorSheet.svelte';
+  import SelectionAsk from '../../components/SelectionAsk.svelte';
   import { today } from '../../lib/date';
 
   interface Props {
@@ -19,6 +20,7 @@
   const score = $derived(app.quizScore(day, weekId));
 
   let asking = $state(false);
+  let ask = $state<string | null>(null);
   const week = $derived(app.findDay(weekId, day.id)?.week ?? null);
 
   // Openers for someone mid-attempt. None of them ask for the implementation — the
@@ -41,6 +43,16 @@
 
   // Debounced so a long "what confused me" isn't a write to IndexedDB per keypress.
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Wraps the highlighted passage rather than sending it bare, so the model is told
+   * what the quoted text *is*. The framing also keeps the prime directive intact: it
+   * asks what a step means, never for the step to be done.
+   */
+  const explainPrompt = (text: string) =>
+    `Explain this part of today's task in detail — what it is asking for and why, and` +
+    ` what I should understand before attempting it. Do not write it for me:` +
+    `\n\n> ${text.replace(/\n/g, '\n> ')}`;
+
   function onNotesInput(e: Event) {
     notes = (e.currentTarget as HTMLTextAreaElement).value;
     clearTimeout(timer);
@@ -79,7 +91,9 @@
 <h1>{day.title}</h1>
 
 {#if task}
-  <Markdown source={task.markdown} />
+  <SelectionAsk onask={(text) => { ask = explainPrompt(text); asking = true; }}>
+    <Markdown source={task.markdown} />
+  </SelectionAsk>
 
   {#if task.files.length}
     <div class="files">
@@ -152,13 +166,13 @@
   <Button onclick={done}>Done ✓</Button>
 </div>
 
-<button class="ask" onclick={() => (asking = true)} aria-label="Ask the mentor">
+<button class="ask" onclick={() => { ask = null; asking = true; }} aria-label="Ask the mentor">
   <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3 1-5.5A8 8 0 1 1 21 12z" /></svg>
   <span>Ask</span>
 </button>
 
 {#if week}
-  <MentorSheet {week} {day} open={asking} onclose={() => (asking = false)} {suggestions} />
+  <MentorSheet {week} {day} {ask} open={asking} onclose={() => (asking = false)} {suggestions} />
 {/if}
 
 <style>

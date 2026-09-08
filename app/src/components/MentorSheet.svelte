@@ -7,6 +7,7 @@
    * conversation you find later under Mentor, rather than a second transcript that
    * quietly disagrees with the first.
    */
+  import { untrack } from 'svelte';
   import type { Day, Week } from '../lib/types';
   import { app } from '../lib/app.svelte';
   import { chat } from '../lib/chat.svelte';
@@ -31,8 +32,19 @@
     onclose: () => void;
     /** Shown as tappable starters when the thread is empty. */
     suggestions?: (string | Starter)[];
+    /**
+     * A question to send the moment the sheet opens, rather than offer.
+     *
+     * Starters can't do this job: they only render on an empty thread, and the point
+     * of asking about a highlighted passage is that it works on the tenth question as
+     * readily as the first.
+     */
+    ask?: string | null;
   }
-  let { week, day, open, onclose, suggestions = [] }: Props = $props();
+  let { week, day, open, onclose, suggestions = [], ask = null }: Props = $props();
+
+  /** So re-renders while the reply streams don't send the same question again. */
+  let asked = $state<string | null>(null);
 
   const starters = $derived(
     suggestions.map((s) => (typeof s === 'string' ? { text: s, send: true } : { send: true, ...s })),
@@ -45,9 +57,21 @@
   const lang = $derived(TRACKS[(week.track ?? 'cpp') as Track].lang);
 
   $effect(() => {
-    if (!open) return;
+    if (!open) {
+      asked = null;
+      return;
+    }
     chat.context = { week, day };
     void chat.open(day.id);
+  });
+
+  // Awaits the open, so the question lands in this day's thread rather than racing
+  // whichever one was last loaded into the store.
+  $effect(() => {
+    if (!open || !ask || ask === untrack(() => asked)) return;
+    const question = ask;
+    asked = question;
+    void chat.open(day.id).then(() => send(question));
   });
 
   // Follow the stream, but inside the sheet rather than the page.
