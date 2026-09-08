@@ -417,3 +417,32 @@ Checked and found fine: the streak can't double-count two days finished on one d
 (`completeDay` guards on `lastActiveDate === date`), and the C++-specific badges not
 firing on SQL is correct rather than broken. One copy fix — the generic seven-day streak
 badge said "the C++ is downstream of it" on both tracks.
+
+**"Google is having a moment" (2026-09-08).** A 503 from Gemini went straight to the
+screen as a dead end you had to tap through. `post()` did exactly one fetch, so every
+transient blip cost a manual retry.
+
+Three changes, in increasing order of how much they help:
+
+1. **`post()` retries what is the far end's problem** — 500/502/503/504, and dropped
+   connections — up to three attempts with exponential backoff and jitter. Safe at that
+   layer specifically because it returns *before* the body is read, so a retry can never
+   duplicate text already on screen. `Retry-After` is honoured when sent, capped at 8s
+   so the UI never sits still for a server-suggested minute. A bare 429 is deliberately
+   *not* retried: on the free tier that's a quota, and retrying into a quota is how you
+   stay in it — it only comes back if the server itself named a delay.
+
+2. **A busy model falls through to another.** Google overloads its newest models
+   noticeably more than its older ones (noted here weeks ago), so `BusyError` is now its
+   own type and `streamReply` walks a ranked chain: chosen model, then up to two
+   alternates. Only ever before the first character reaches the screen — half a reply
+   followed by a second model starting over would be worse than the error. A retired
+   model (404) falls through the same way.
+
+3. **The message admits it already tried**, so "try again" isn't the only advice on
+   offer when it does surface.
+
+Verified in a browser against a stubbed provider, three scenarios: a single 503 clears
+invisibly (2 attempts, answer, no error); an overloaded model falls to the next one
+(3 attempts, then the alternate answers, no error); a total outage retries 6 times
+across 2 models and then says so.

@@ -190,6 +190,7 @@
           provider: app.mentorProvider,
           key,
           model: app.progress.settings.mentorModel,
+          alternates: app.fallbackModels,
           system: forgePrompt(context),
           messages: [{ role: 'user', content: 'Write the challenge.' }],
         }),
@@ -222,6 +223,7 @@
         provider: app.mentorProvider,
         key,
         model: app.progress.settings.mentorModel,
+        alternates: app.fallbackModels,
         system:
           card?.kind === 'forge'
             ? reviewGraderPrompt(context, challenge)
