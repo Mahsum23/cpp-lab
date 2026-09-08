@@ -328,6 +328,8 @@ function script(steps) {
   globalThis.fetch = async (url, init = {}) => {
     const step = steps[Math.min(i++, steps.length - 1)];
     calls.push({ url: String(url), model: /models\/([^:]+):/.exec(String(url))?.[1] });
+    // Mirror the simple stub, so assertions about the request body work either way.
+    seen = { url: String(url), method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body };
     const bytes = new TextEncoder().encode(step.body ?? '');
     return {
       ok: step.status >= 200 && step.status < 300,
@@ -391,6 +393,48 @@ ok('the first model was retried before giving up on it', calls.filter((c) => c.m
 calls = script([{ status: 404, text: JSON.stringify({ error: { message: 'gone' } }) }, { status: 200, body: say('fallback') }]);
 ok('a 404 also falls through', (await drain(ask({ alternates: ['gemini-2.5-flash'] }))) === 'fallback');
 ok('a gone model is not retried, only replaced', calls.length === 2, String(calls.length));
+
+console.log('\n— a reply that was cut short says so —');
+
+// Gemini 2.5+ spends thinking tokens out of maxOutputTokens, so a reply can stop
+// mid-sentence with text already on screen. That used to be indistinguishable from a
+// finished answer.
+script([{ status: 200, body: sse([
+  { candidates: [{ content: { parts: [{ text: 'This part is yours to run, but here is how' }] } }] },
+  { candidates: [{ finishReason: 'MAX_TOKENS' }] },
+]) }]);
+let cut = await drain(ask());
+ok('the text that did arrive is kept', cut.startsWith('This part is yours to run'), cut);
+ok('and the reply admits it was cut off', /cut off/i.test(cut), cut);
+ok('naming the length limit specifically', /length limit/i.test(cut), cut);
+
+// Any other early stop is worth naming too.
+script([{ status: 200, body: sse([
+  { candidates: [{ content: { parts: [{ text: 'partial' }] } }] },
+  { candidates: [{ finishReason: 'SAFETY' }] },
+]) }]);
+cut = await drain(ask());
+ok('another early stop names its reason', /cut off .*SAFETY/i.test(cut), cut);
+
+// A normal reply must stay clean — no footnote on every message.
+script([{ status: 200, body: sse([
+  { candidates: [{ content: { parts: [{ text: 'a complete answer' }] }, finishReason: 'STOP' }] },
+]) }]);
+ok('a finished reply gets no note', (await drain(ask())) === 'a complete answer');
+
+console.log('\n— thinking must not eat the whole budget —');
+script([{ status: 200, body: sse([{ candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] }]) }]);
+await drain(ask({ model: 'gemini-flash-latest' }));
+let cfg = JSON.parse(seen.body).generationConfig;
+ok('the output budget leaves room after thinking', cfg.maxOutputTokens >= 4096, String(cfg.maxOutputTokens));
+ok('a Flash model is given a bounded thinking budget', cfg.thinkingConfig?.thinkingBudget > 0, JSON.stringify(cfg));
+ok('and that budget is well under the total', cfg.thinkingConfig.thinkingBudget < cfg.maxOutputTokens / 2);
+
+// Other families reject the field or have their own floor; a 400 would break the chat.
+script([{ status: 200, body: sse([{ candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] }]) }]);
+await drain(ask({ model: 'gemini-2.5-pro' }));
+cfg = JSON.parse(seen.body).generationConfig;
+ok('a non-Flash model is not sent thinkingConfig', cfg.thinkingConfig === undefined, JSON.stringify(cfg));
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all mentor cases pass');
 process.exit(fails ? 1 : 0);
