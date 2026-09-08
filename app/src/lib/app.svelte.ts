@@ -658,6 +658,18 @@ class AppStore {
    * question still passes the "is it in the list?" check and stays selected forever.
    * A 404 is the only reliable evidence the model is dead, so it's what we act on.
    */
+  /**
+   * Models to fall through to when the chosen one is busy, best first.
+   *
+   * Taken from the list already fetched from the provider and ranked, minus whatever
+   * is selected. Capped: falling through six models turns a blip into a long wait, and
+   * by the third failure it isn't the model that's wrong.
+   */
+  get fallbackModels(): string[] {
+    const chosen = this.progress.settings.mentorModel;
+    return this.mentorModels.map((m) => m.id).filter((id) => id !== chosen).slice(0, 2);
+  }
+
   async retireModel(dead: string): Promise<void> {
     if (this.progress.settings.mentorModel !== dead) return;
     const next = this.mentorModels.find((m) => m.id !== dead);

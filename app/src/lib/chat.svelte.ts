@@ -128,6 +128,7 @@ class ChatStore {
         provider: app.mentorProvider,
         key,
         model,
+        alternates: app.fallbackModels,
         system: this.buildSystem(this.context),
         messages: history,
         signal: this.controller.signal,

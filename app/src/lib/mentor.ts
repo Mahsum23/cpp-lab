@@ -307,6 +307,15 @@ export function normalizeKey(raw: string): string {
 
 export class MentorError extends Error {}
 
+/**
+ * The far end was busy rather than unhappy with us — a 5xx, or a rate limit.
+ *
+ * Worth its own type because it's the one failure another model might not have: Google
+ * overloads its newest models noticeably more often than its older ones, so a busy
+ * `-latest` is a reason to try the next one down, not a reason to give up.
+ */
+export class BusyError extends MentorError {}
+
 /** A 404 from the provider: the selected model is gone, so the stored choice is stale. */
 export class ModelGoneError extends MentorError {}
 
@@ -322,17 +331,80 @@ function window_(messages: ChatMessage[]): ChatMessage[] {
   return history;
 }
 
-async function post(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
-  let res: Response;
-  try {
-    res = await fetch(url, { ...init, signal });
-  } catch (err) {
-    if ((err as Error)?.name === 'AbortError') throw new DOMException('aborted', 'AbortError');
-    throw new MentorError(
-      navigator.onLine ? 'Could not reach the API.' : 'Offline — the mentor needs a connection.',
+/**
+ * Statuses worth trying again without telling anyone.
+ *
+ * All of these mean "the far end is busy", not "your request is wrong" — Google 503s
+ * its newest models fairly often, and every one of those became a dead end on screen
+ * that had to be tapped through by hand. 429 is deliberately absent: on the free tier
+ * that's a quota, and retrying into a quota is how you stay in it. It comes back only
+ * when the server itself says when, via Retry-After.
+ */
+const TRANSIENT = new Set([500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+/** However long the server asks for, the UI is not sitting still for a minute. */
+const MAX_BACKOFF_MS = 8000;
+
+/** Seconds, or an HTTP date. Absent or unparseable means "we choose". */
+function retryAfterMs(res: Response): number | null {
+  const raw = res.headers?.get?.('retry-after');
+  if (!raw) return null;
+  const secs = Number(raw);
+  if (Number.isFinite(secs)) return Math.min(secs * 1000, MAX_BACKOFF_MS);
+  const at = Date.parse(raw);
+  return Number.isNaN(at) ? null : Math.min(Math.max(0, at - Date.now()), MAX_BACKOFF_MS);
+}
+
+/** Exponential, with jitter so two devices retrying don't stay in lockstep. */
+const backoffMs = (attempt: number) =>
+  Math.min(MAX_BACKOFF_MS, 400 * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5));
+
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
     );
+  });
+
+/**
+ * POST, retrying the failures that are the far end's problem rather than ours.
+ *
+ * Safe to retry here specifically because nothing has been streamed yet — this returns
+ * before the body is read, so a second attempt can't duplicate text already on screen.
+ */
+async function post(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    let res: Response | null = null;
+    try {
+      res = await fetch(url, { ...init, signal });
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') throw new DOMException('aborted', 'AbortError');
+      // A dropped connection is as transient as a 503, so it gets the same treatment —
+      // unless the device knows it is offline, where retrying is just a slower error.
+      if (!navigator.onLine || attempt >= MAX_ATTEMPTS) {
+        throw new MentorError(
+          navigator.onLine ? 'Could not reach the API.' : 'Offline — the mentor needs a connection.',
+        );
+      }
+    }
+
+    if (res) {
+      if (res.ok) return res;
+      const after = retryAfterMs(res);
+      // 429 only when the server named a delay; anything else transient on its own.
+      const retryable = TRANSIENT.has(res.status) || (res.status === 429 && after !== null);
+      if (!retryable || attempt >= MAX_ATTEMPTS) return res;
+      await sleep(after ?? backoffMs(attempt), signal);
+      continue;
+    }
+    await sleep(backoffMs(attempt), signal);
   }
-  return res;
 }
 
 /** Both providers put a human-readable string at `error.message`; dig it out. */
@@ -435,14 +507,18 @@ function explainGemini(status: number, message: string): string {
   if (status === 429) {
     return "Gemini's free tier is rate-limited, and you've hit it. Wait a minute, or switch to a Flash model — its limits are much higher.";
   }
-  if (status >= 500) return 'Google is having a moment. Try again shortly.';
+  if (status >= 500) {
+    return 'Google is having a moment — the app already retried a few times. Give it a minute, or switch models in Settings.';
+  }
   return message || `The API said ${status}.`;
 }
 
 /** Builds the right error class for a Gemini HTTP failure. */
 function geminiError(status: number, message: string): MentorError {
   const text = explainGemini(status, message);
-  return status === 404 ? new ModelGoneError(text) : new MentorError(text);
+  if (status === 404) return new ModelGoneError(text);
+  if (status >= 500 || status === 429) return new BusyError(text);
+  return new MentorError(text);
 }
 
 interface GeminiModel {
@@ -613,7 +689,9 @@ function explainAnthropic(status: number, message: string): string {
     return 'That account has no API credit. The API is prepaid and separate from a Claude subscription — top it up at console.anthropic.com.';
   }
   if (status === 429) return 'Rate limited. Give it a few seconds.';
-  if (status === 529 || status >= 500) return 'The API is overloaded right now. Try again in a moment.';
+  if (status === 529 || status >= 500) {
+    return 'The API is overloaded — the app already retried a few times. Give it a minute.';
+  }
   return message || `The API said ${status}.`;
 }
 
@@ -646,7 +724,12 @@ async function* streamAnthropic(opts: {
     },
     opts.signal,
   );
-  if (!res.ok) throw new MentorError(explainAnthropic(res.status, await errorMessage(res)));
+  if (!res.ok) {
+    const text = explainAnthropic(res.status, await errorMessage(res));
+    throw res.status >= 500 || res.status === 429 || res.status === 529
+      ? new BusyError(text)
+      : new MentorError(text);
+  }
 
   for await (const data of sseFrames(res)) {
     let event: { type?: string; delta?: { text?: string }; error?: { message?: string } };
@@ -681,15 +764,49 @@ export async function listModels(provider: MentorProvider, key: string): Promise
  * callback because cancellation then falls out of the language: the caller stops
  * iterating, the `finally` runs, the reader is released.
  */
-export function streamReply(opts: {
+/**
+ * Ask, and if the model is merely busy, ask a different one.
+ *
+ * `alternates` is the ranked list to fall through, and it only ever gets used before
+ * the first character reaches the screen — half a reply followed by a second model
+ * starting over would be worse than the error. A retired model (404) also falls
+ * through here, since "gone" is at least as good a reason to try the next one as
+ * "busy" is.
+ */
+export async function* streamReply(opts: {
   provider: MentorProvider;
   key: string;
   model: string;
   system: string;
   messages: ChatMessage[];
   signal?: AbortSignal;
+  /** Ranked models to fall back to, in order. Tried only if nothing has streamed. */
+  alternates?: string[];
 }): AsyncGenerator<string> {
-  return opts.provider === 'gemini' ? streamGemini(opts) : streamAnthropic(opts);
+  const chain = [opts.model, ...(opts.alternates ?? []).filter((m) => m && m !== opts.model)];
+  let last: unknown;
+
+  for (const model of chain) {
+    let streamed = false;
+    try {
+      const source =
+        opts.provider === 'gemini'
+          ? streamGemini({ ...opts, model })
+          : streamAnthropic({ ...opts, model });
+      for await (const chunk of source) {
+        streamed = true;
+        yield chunk;
+      }
+      return;
+    } catch (err) {
+      // Once text is on screen the request is committed: restarting it elsewhere would
+      // repeat what was already said.
+      if (streamed) throw err;
+      if (!(err instanceof BusyError || err instanceof ModelGoneError)) throw err;
+      last = err;
+    }
+  }
+  throw last;
 }
 
 // --- review deck ----------------------------------------------------------

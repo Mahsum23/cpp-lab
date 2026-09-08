@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, ModelGoneError, normalizeKey } = await import(file);
+const { streamReply, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -313,6 +313,84 @@ ok('a copied env line loses its prefix', normalizeKey('GEMINI_API_KEY=AIzaSyAbc1
 ok('an exported env line does too', normalizeKey('export API_KEY="AIzaSyAbc123"') === 'AIzaSyAbc123');
 ok('an internal space (mobile line-wrap) is removed', normalizeKey('AIzaSy Abc123') === 'AIzaSyAbc123');
 ok('an empty paste stays empty', normalizeKey('   ') === '');
+
+// --- a busy provider should not become a dead end --------------------------
+
+console.log('\n— retrying what the far end fumbled —');
+
+/**
+ * Replays a scripted sequence of responses, one per fetch, recording each attempt.
+ * `body` on a 200 is the SSE stream; anything else is an error payload.
+ */
+function script(steps) {
+  const calls = [];
+  let i = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    const step = steps[Math.min(i++, steps.length - 1)];
+    calls.push({ url: String(url), model: /models\/([^:]+):/.exec(String(url))?.[1] });
+    const bytes = new TextEncoder().encode(step.body ?? '');
+    return {
+      ok: step.status >= 200 && step.status < 300,
+      status: step.status,
+      headers: { get: (h) => (h.toLowerCase() === 'retry-after' ? (step.retryAfter ?? null) : null) },
+      json: async () => null,
+      text: async () => step.text ?? '',
+      body: { getReader() { let done = false; return {
+        read: async () => (done ? { done: true } : ((done = true), { done: false, value: bytes })),
+        cancel: async () => {} }; } },
+    };
+  };
+  return calls;
+}
+
+const say = (t) => sse([{ candidates: [{ content: { parts: [{ text: t }] } }] }]);
+const drain = async (gen) => { let out = ''; for await (const c of gen) out += c; return out; };
+const ask = (over = {}) => streamReply({
+  provider: 'gemini', key: 'AIzaTEST', model: 'gemini-flash-latest',
+  system: 'SYS', messages: [{ role: 'user', content: 'hi' }], ...over,
+});
+
+// A 503 that clears on the second attempt should be completely invisible.
+let calls = script([{ status: 503 }, { status: 200, body: say('recovered') }]);
+ok('a 503 is retried rather than surfaced', (await drain(ask())) === 'recovered');
+ok('and it took two attempts', calls.length === 2, String(calls.length));
+
+// Three 503s in a row is a real outage, and the message should admit we already tried.
+calls = script([{ status: 503 }]);
+const dead = await drain(ask()).then(() => null, (e) => e);
+ok('a persistent 503 gives up eventually', dead instanceof Error, String(dead));
+ok('and says it already retried', /already retried/i.test(dead?.message ?? ''), dead?.message);
+ok('it is typed as busy, not as a plain failure', dead instanceof BusyError);
+ok('after exactly MAX_ATTEMPTS tries', calls.length === 3, String(calls.length));
+
+// A 400 is our fault, not theirs: retrying it just wastes the user's time.
+calls = script([{ status: 400, text: JSON.stringify({ error: { message: 'bad request' } }) }]);
+await drain(ask()).catch(() => {});
+ok('a 400 is not retried', calls.length === 1, String(calls.length));
+
+// 429 is a quota on the free tier — only retried when the server names a delay.
+calls = script([{ status: 429 }]);
+await drain(ask()).catch(() => {});
+ok('a bare 429 is not retried into its own quota', calls.length === 1, String(calls.length));
+calls = script([{ status: 429, retryAfter: '0' }, { status: 200, body: say('ok now') }]);
+ok('a 429 with Retry-After is honoured', (await drain(ask())) === 'ok now');
+ok('and that took two attempts', calls.length === 2, String(calls.length));
+
+console.log('\n— falling through to another model —');
+
+// Google overloads its newest models most, so a busy one is a reason to try the next.
+calls = script([{ status: 503 }, { status: 503 }, { status: 503 }, { status: 200, body: say('older model answered') }]);
+ok(
+  'a busy model falls through to an alternate',
+  (await drain(ask({ alternates: ['gemini-2.5-flash'] }))) === 'older model answered',
+);
+ok('the alternate is actually a different model', calls.at(-1).model === 'gemini-2.5-flash', calls.at(-1).model);
+ok('the first model was retried before giving up on it', calls.filter((c) => c.model === 'gemini-flash-latest').length === 3);
+
+// A retired model is at least as good a reason to move on as a busy one.
+calls = script([{ status: 404, text: JSON.stringify({ error: { message: 'gone' } }) }, { status: 200, body: say('fallback') }]);
+ok('a 404 also falls through', (await drain(ask({ alternates: ['gemini-2.5-flash'] }))) === 'fallback');
+ok('a gone model is not retried, only replaced', calls.length === 2, String(calls.length));
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all mentor cases pass');
 process.exit(fails ? 1 : 0);
