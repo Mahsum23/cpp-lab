@@ -4,6 +4,7 @@
   import Markdown from '../../components/Markdown.svelte';
   import Button from '../../components/Button.svelte';
   import MentorSheet from '../../components/MentorSheet.svelte';
+  import SelectionAsk from '../../components/SelectionAsk.svelte';
 
   interface Props {
     day: Day;
@@ -14,6 +15,7 @@
   let { day, weekId, hasQuiz, onnext }: Props = $props();
 
   let asking = $state(false);
+  let ask = $state<string | null>(null);
   const week = $derived(app.findDay(weekId, day.id)?.week ?? null);
 
   // Openers worth a tap while reading, rather than a blank box. Deliberately about
@@ -25,6 +27,15 @@
     'Why is it designed like this?',
   ]);
 
+  /**
+   * Wraps the highlighted passage rather than sending it bare, so the model is told
+   * what the quoted text *is* — otherwise a stray fragment of a sentence reads like an
+   * instruction rather than the thing being asked about.
+   */
+  const explainPrompt = (text: string) =>
+    `Explain this passage from today's material in detail — what it means, why it is` +
+    ` true, and what it would look like in practice:\n\n> ${text.replace(/\n/g, '\n> ')}`;
+
   function next() {
     void app.markTheoryDone(day, weekId);
     onnext();
@@ -34,7 +45,9 @@
 <p class="eyebrow">Theory</p>
 <h1>{day.title}</h1>
 
-<Markdown source={day.theoryMarkdown} />
+<SelectionAsk onask={(text) => { ask = explainPrompt(text); asking = true; }}>
+  <Markdown source={day.theoryMarkdown} />
+</SelectionAsk>
 
 <div class="cta">
   <Button full onclick={next}>
@@ -45,13 +58,13 @@
 
 <!-- Floating, because the question usually arrives mid-paragraph rather than at the
      end of one — theory pages are long and this has to stay in reach while scrolling. -->
-<button class="ask" onclick={() => (asking = true)} aria-label="Ask the mentor">
+<button class="ask" onclick={() => { ask = null; asking = true; }} aria-label="Ask the mentor">
   <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3 1-5.5A8 8 0 1 1 21 12z" /></svg>
   <span>Ask</span>
 </button>
 
 {#if week}
-  <MentorSheet {week} {day} open={asking} onclose={() => (asking = false)} {suggestions} />
+  <MentorSheet {week} {day} {ask} open={asking} onclose={() => (asking = false)} {suggestions} />
 {/if}
 
 <style>
