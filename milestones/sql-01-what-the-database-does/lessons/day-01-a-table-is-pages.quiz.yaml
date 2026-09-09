@@ -6,11 +6,10 @@
 questions:
   - id: q1
     prompt: >
-      A table has 200 rows packed into 6 pages. You run a query that returns exactly one
-      row, found by scanning. What is the smallest amount of data the engine could have
-      read from disk?
+      A table has 200 rows packed into 6 pages. A query returns exactly one row, found by
+      scanning. What is the smallest amount of data the engine could have read from disk?
     options:
-      - text: One page — 4KB by default
+      - text: One page — 8 kB in PostgreSQL
         correct: true
         why: >
           The page is the unit of I/O. Even a single-byte column in a single row costs
@@ -19,136 +18,156 @@ questions:
       - text: Just the bytes of that row
         correct: false
         why: >
-          Nothing in the stack can read a partial page. The row's bytes come along
-          inside the page that holds them; you never pay per row.
-      - text: All 6 pages, since a scan reads the whole table
+          Nothing in the stack can read a partial page. The row's bytes arrive inside the
+          page that holds them; you never pay per row.
+      - text: All six pages, since a scan reads the whole table
         correct: false
         why: >
           A scan *may* read every page, but it can stop the moment it has what it needs.
-          The question asks for the smallest possible, and that's the page the row is on.
+          The question asks for the smallest possible, and that is the one page the row
+          sits on.
       - text: It depends entirely on the row's width
         correct: false
         why: >
-          Row width changes how many rows fit in a page, and a very wide value can spill
-          onto overflow pages — but the floor is still one page, whatever the row weighs.
+          Width changes how many rows fit per page, not the size of a read. A 20-byte row
+          and a 2000-byte row both cost one page to reach.
 
   - id: q2
     prompt: >
-      Why is reading the tenth column of a row more expensive than reading the first, in
-      a row-store engine?
+      You run `UPDATE t SET note = 'x' WHERE id = 1` in PostgreSQL. What happens to the
+      row's physical location, and to the previous version of the row?
     options:
       - text: >
-          Columns are stored end to end with no fixed offsets, so reaching the tenth
-          means walking past the first nine
+          A new version of the row is written elsewhere — possibly on a different page —
+          and the old version stays in the file, marked dead
         correct: true
         why: >
-          The row header gives each value's type and length, not its address. Finding
-          column ten is a walk, not a jump — which is why the cost scales with bytes
-          skipped rather than columns requested.
-      - text: Later columns are stored on separate overflow pages
+          This is MVCC. An UPDATE is an insert plus a tombstone, never an edit in place.
+          Watch `ctid` change across the statement and you have seen it happen; the dead
+          version is still on disk until a vacuum reclaims its space.
+      - text: >
+          The row's bytes are overwritten where they sit, so the ctid is unchanged
         correct: false
         why: >
-          Overflow pages exist, but they're for values too large for a page — a long
-          TEXT or BLOB. Ordinary columns all live in the same row, whatever their
-          position.
-      - text: It isn't — column access is constant time either way
+          That would break the property Postgres is built around: a concurrent reader
+          holding an older snapshot must still be able to see the previous version. It
+          cannot, if you overwrote it. The old version has to survive the update.
+      - text: >
+          The old version is deleted immediately and the new one takes its slot
         correct: false
         why: >
-          That would be true if rows were fixed-width C structs with known offsets. They
-          aren't: values are variable-length, so the offsets can't be known in advance.
-      - text: The engine has to re-parse the row for each column accessed
+          Immediate deletion has the same problem — a transaction that started before
+          your update is entitled to keep reading the old version. Reclaiming that space
+          is a *later*, separate job, which is exactly what VACUUM is for.
+      - text: >
+          The row moves only if the new value is longer than the old one
         correct: false
         why: >
-          It parses the header once. The cost is the walk through the values, not
-          repeated parsing.
+          Length is irrelevant to whether a new version is written; a new version is
+          always written. It can influence *where* the new version lands, but even
+          shrinking a value produces a second copy.
 
   - id: q3
     prompt: >
-      You declare `id INT PRIMARY KEY` in SQLite instead of `id INTEGER PRIMARY KEY`.
-      What actually changes?
+      Your table's file is 4 GB on disk, of which only 500 MB is live rows. You run
+      `VACUUM`. What happens to the size of the file, and why?
     options:
       - text: >
-          `INTEGER PRIMARY KEY` makes your column the rowid itself; `INT PRIMARY KEY`
-          leaves the rowid alone and adds a separate index
+          It stays 4 GB — VACUUM marks the dead space reusable by that table but does not
+          return it to the operating system
         correct: true
         why: >
-          Exactly that spelling is load-bearing. One gives you a column that *is* the
-          table's B-tree key; the other gives you a hidden rowid plus an index you pay
-          for on every write.
-      - text: Nothing — `INT` and `INTEGER` are synonyms everywhere in SQLite
+          This is the most misunderstood thing in Postgres operations. Plain VACUUM stops
+          the file from growing further, because new rows fill the freed space, but the
+          file only shrinks if free space happens to sit at the very end. To actually get
+          the 3.5 GB back you need VACUUM FULL, which rewrites the table into a new file
+          under an ACCESS EXCLUSIVE lock — or pg_repack, which does it without the lock.
+      - text: It drops to roughly 500 MB, since that is what is still live
         correct: false
         why: >
-          They're synonyms for type affinity, which is why this is so easy to miss. For
-          the rowid alias specifically, only the literal word `INTEGER` counts.
-      - text: '`INT PRIMARY KEY` is rejected as a syntax error'
+          That is VACUUM FULL's behaviour, not VACUUM's, and the distinction matters
+          precisely when a disk is filling up. Plain VACUUM never rewrites the file.
+      - text: It grows, because VACUUM writes bookkeeping about what it freed
         correct: false
         why: >
-          It's perfectly valid, which is the problem — you get a working table with an
-          extra index and no warning that you meant something else.
-      - text: '`INT` limits the column to 32 bits'
+          VACUUM does write — it touches the visibility map and the free space map — but
+          those are separate small forks, not growth of the table's own file.
+      - text: >
+          It stays 4 GB, and the dead space is permanently wasted until the table is
+          dropped
         correct: false
         why: >
-          SQLite stores integers in as many bytes as the value needs, up to 64 bits,
-          regardless of the declared type name.
+          Half right, and the wrong half matters. The space is not wasted: it is on the
+          free space map and the next inserts and updates will land in it. That is why a
+          well-vacuumed table reaches a steady size instead of growing forever.
 
   - id: q4
     prompt: >
-      A colleague says "the rows come back in the order I inserted them, I checked."
-      What is wrong with relying on that?
+      In PostgreSQL an index entry points at a physical `(page, slot)` address. Given
+      only that, why can updating one *unindexed* column of a row cause writes to five
+      different indexes?
     options:
       - text: >
-          Without `ORDER BY` the engine may return rows in any order, and adding an index
-          later can silently change it
+          The update writes the row at a new physical address, so every index that points
+          at the old address has to be given the new one
         correct: true
         why: >
-          Order with no `ORDER BY` is an accident of the plan the optimiser picked today.
-          A new index gives it a cheaper path, the order changes, and nothing was
-          "broken" — the query never asked for an order.
-      - text: Insertion order is never preserved, so the observation must be wrong
+          The indexes are not stale because of what the column meant — they are stale
+          because of where the row *is*. This write amplification was Uber's headline
+          reason for migrating off Postgres in 2016. InnoDB dodges it by having secondary
+          indexes point at the primary key rather than a location, paying an extra lookup
+          on every index read instead.
+      - text: Postgres rebuilds all indexes on a table whenever any row in it changes
         correct: false
         why: >
-          The observation is usually right, which is what makes it dangerous. A rowid
-          table scanned in key order really does come back in insertion order — until
-          the plan changes.
-      - text: It only holds if the table has a primary key
+          Nothing so drastic — the work is per-row, not per-table. A single-row update
+          adds one entry per index, which is bad enough at scale but is not a rebuild.
+      - text: >
+          Each index stores a copy of the whole row, so all copies must be kept in sync
         correct: false
         why: >
-          It has nothing to do with declaring a key. Any table can be read by any plan
-          the optimiser prefers.
-      - text: It's fine as long as nobody deletes rows
+          An index stores its own key columns plus a pointer, not the whole row. If it
+          stored the whole row, updating an indexed column would be the expensive case —
+          but here the expensive case is updating an *unindexed* one.
+      - text: >
+          It cannot — Postgres skips indexes whose columns did not change
         correct: false
         why: >
-          Deletes free slots that later inserts can reuse, so they're one way to see it
-          break — but a new index or a different plan will do it without a single delete.
+          There is an optimisation in this direction, HOT (heap-only tuple) updates, but
+          it only applies when the new version fits on the *same page*. Once the row has
+          to move to another page, every index must be updated.
 
   - id: q5
     prompt: >
-      What is the difference in physical layout between a row store and a column store,
-      and which suits `SELECT avg(price) FROM sales` over 50 million rows?
+      What are the hidden `xmin` and `xmax` columns on a PostgreSQL row, and how do they
+      let one transaction read a table while another rewrites it?
     options:
       - text: >
-          A row store keeps a row's columns together; a column store keeps a column's
-          values together — so the column store reads only `price`
+          The transaction that created this row version and the one that deleted it — so
+          each transaction can filter to the versions that were live when it started
         correct: true
         why: >
-          The aggregate touches one column of the table. A row store must walk every
-          row's bytes to reach it; a column store reads that column's values contiguously
-          and skips the rest of the table entirely.
+          Visibility is a comparison, not a lock. Your transaction has a snapshot; a row
+          version is visible if its xmin committed before that snapshot and its xmax did
+          not. Since every writer creates new versions rather than editing old ones, the
+          versions your snapshot needs are still sitting there.
+      - text: The minimum and maximum values of the row's indexed columns
+        correct: false
+        why: >
+          They have nothing to do with your data. The x stands for transaction (xact);
+          both hold transaction ids, and they are the same on a row whose columns are
+          entirely unrelated.
+      - text: Timestamps recording when the row was inserted and last modified
+        correct: false
+        why: >
+          Tempting, and they are used for ordering — but they are transaction ids, not
+          times. That distinction is why they can run out: they are 32-bit counters, and
+          the ceiling of about two billion is what makes wraparound a real operational
+          hazard.
       - text: >
-          A column store keeps the same layout but adds an index per column, so it suits
-          the query
+          A read lock and a write lock held on the row while a transaction touches it
         correct: false
         why: >
-          It isn't an index — it's a different physical arrangement of the data itself.
-          There's no row to index into.
-      - text: They're the same on disk and differ only in the query planner
-        correct: false
-        why: >
-          The layout is the whole difference, and it's why they ship as separate
-          products rather than as a planner flag.
-      - text: >
-          A row store suits it better, since all the values are already in one place
-        correct: false
-        why: >
-          "One place" means one *row*. The query wants one column across all rows, which
-          in a row store is the maximally scattered access pattern.
+          Backwards — these fields exist so that locks are *not* needed for reading.
+          Postgres's readers-never-block-writers property comes precisely from resolving
+          visibility by comparing ids rather than by taking a lock.

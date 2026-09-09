@@ -1,139 +1,185 @@
+# Answer key for day 03. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
 questions:
   - id: q1
-    prompt: '`SELECT NULL = NULL` — what comes back, and why isn''t it either true or false?'
-    options:
-      - text: '`NULL`, because comparing two unknowns can''t produce a verdict'
-        correct: true
-        why: >
-          SQL has three truth values. "Is the value I don't know equal to the other value
-          I don't know?" has no honest answer, so the comparison yields unknown rather
-          than inventing one.
-      - text: '`1`, because a null is equal to itself like any other value'
-        correct: false
-        why: >
-          That's the intuition the design deliberately rejects. `NULL` marks an absent
-          value, and two absences aren't evidence of sameness. `IS NULL` is the operator
-          that returns 1 here.
-      - text: '`0`, because a null isn''t equal to anything'
-        correct: false
-        why: >
-          Close, and a common half-memory — but false would be a verdict, and the engine
-          isn't entitled to one. Unknown is not the same as false, which is exactly why
-          `NOT` can't rescue it.
-      - text: An error — nulls can't be compared with `=`
-        correct: false
-        why: >
-          It's perfectly legal SQL and runs silently. The silence is what makes null bugs
-          hard to find.
-
-  - id: q2
-    prompt: 'Why does `WHERE x NOT IN (1, 2, NULL)` return no rows regardless of what `x` is?'
+    prompt: >
+      In PostgreSQL, what does `NULL = NULL` evaluate to, and what does `WHERE` do with a
+      row whose condition evaluates to that?
     options:
       - text: >
-          It expands to `x <> 1 AND x <> 2 AND x <> NULL`, and that last term is unknown,
-          so the whole condition is never true
+          Unknown, a third truth value — and `WHERE` discards the row, exactly as it would
+          for false
         correct: true
         why: >
-          `true AND unknown` is unknown, and `WHERE` keeps only rows where the condition
-          is true. One null in the list is enough to make the answer unknown for every
-          row.
-      - text: '`NOT IN` doesn''t accept null values in its list and returns empty'
+          NULL means unknown, so whether two unknowns are equal is itself unknown. SQL
+          runs on three-valued logic, and `WHERE` keeps a row only when the condition is
+          *true*. Because unknown and false are discarded identically and silently, a
+          query built on unknowns returns a plausible-looking result and logs nothing.
+      - text: False, and the row is discarded
         correct: false
         why: >
-          The null is accepted quite happily. The emptiness comes from three-valued
-          logic, not from a rejection.
-      - text: The optimiser can't build a plan, so it returns nothing
+          The row is discarded, but the reason matters enormously. If it were false you
+          could rely on `NOT (NULL = NULL)` being true — and it is not, it is unknown too.
+          That is precisely how NOT IN goes wrong.
+      - text: True, since both sides are identical
         correct: false
         why: >
-          The plan is fine and the query runs normally. The result is the honest
-          consequence of the logic, not a planner failure.
-      - text: It returns no rows only when `x` is itself null
+          Identical *syntax*, not identical values. NULL is not a value that can be equal
+          to anything, including another NULL — which is why `IS NULL` had to be invented
+          as separate syntax.
+      - text: It raises an error, which is why `IS NULL` exists
         correct: false
         why: >
-          It returns nothing for every `x`, null or not — including values obviously not
-          in the list, which is what makes it so hard to spot.
+          No error is raised, and that is the whole danger. An error would be a gift; you
+          would find it in a log. Instead the expression quietly evaluates to unknown and
+          the row silently vanishes.
+
+  - id: q2
+    prompt: >
+      Walk through why `WHERE x NOT IN (1, 2, NULL)` returns no rows for every possible
+      value of `x`.
+    options:
+      - text: >
+          It expands to `x <> 1 AND x <> 2 AND x <> NULL`; the last term is always
+          unknown, so the whole conjunction is at best unknown and never true
+        correct: true
+        why: >
+          The crucial part is that this does not depend on x. Even when x is 7 and both
+          real comparisons are true, `true AND true AND unknown` is unknown, and `WHERE`
+          keeps only true. One NULL anywhere in the list disables the entire predicate for
+          every input. `NOT EXISTS` is the fix, because it asks about the existence of
+          rows rather than the equality of values.
+      - text: >
+          `NOT IN` cannot be used with subqueries that return NULL, so PostgreSQL returns
+          an empty set
+        correct: false
+        why: >
+          Nothing special-cases NULL here and nothing is refused. The empty result is the
+          ordinary evaluation of ordinary three-valued logic, which is exactly why it is
+          so hard to spot.
+      - text: >
+          The NULL matches every value, so every row is excluded by the NOT
+        correct: false
+        why: >
+          A tidy story that gives the right answer for the wrong reason, and it will
+          mislead you next time. NULL matches nothing — the comparison yields unknown, not
+          a match. If NULL genuinely matched everything, plain `IN` would return every
+          row, and it returns none.
+      - text: >
+          The list is sorted for the lookup and NULL sorts before everything, truncating it
+        correct: false
+        why: >
+          No sorting or truncation is involved. `IN` against a literal list is a chain of
+          equality comparisons; the outcome comes from what those comparisons evaluate to.
 
   - id: q3
     prompt: >
-      A table has 100 rows; 30 have a null `duration`. What do `count(*)`,
-      `count(duration)` and `avg(duration)` report, and which silently misleads?
+      A column `v` holds the values 1, 2 and NULL. What do `count(*)`, `count(v)` and
+      `avg(v)` return, and why can that quietly make a dashboard wrong?
     options:
       - text: >
-          100, 70, and the mean of the 70 non-null values — the average, because it
-          quietly excludes the missing ones
+          3, 2 and 1.5 — aggregates skip NULLs, so the average divided by 2 rather than 3
         correct: true
         why: >
-          `avg` divides by the count of non-null values, not by the number of rows. If
-          nulls are your timeouts, the average improves as the service gets worse.
-      - text: 100, 100 and the mean over all 100 rows, treating nulls as zero
+          `count(*)` counts rows, `count(v)` counts non-NULL values, and `avg` sums 3 over
+          2 values. Whether 1.5 is right depends entirely on what the NULL meant. "Sensor
+          offline" makes it the correct average of known readings; "we failed to record a
+          zero" makes it a 50% overstatement. The database cannot distinguish the two
+          cases, and neither can anything downstream of it.
+      - text: 3, 3 and 1.0 — NULL counts as zero in numeric aggregates
         correct: false
         why: >
-          Nothing in SQL treats a null as zero. Both `count(col)` and `avg` skip them
-          entirely.
-      - text: 100, 70, and null, since any null in the input poisons the aggregate
+          This is the intuition the behaviour is designed to contradict. NULL is not zero;
+          it is unknown. Treating it as zero would mean claiming knowledge you do not
+          have, so SQL leaves it out of the calculation entirely.
+      - text: 3, 2 and NULL — one unknown input makes the whole aggregate unknown
         correct: false
         why: >
-          That's true of arithmetic on nulls (`1 + NULL` is null) but not of aggregates.
-          Aggregates skip nulls and return a real number — which is precisely why the
-          problem is invisible.
-      - text: All three report 70, since nulls aren't really rows
+          That is how NULL behaves in *scalar* expressions — `1 + NULL` really is NULL —
+          but aggregates deliberately break that rule and skip nulls instead. Knowing that
+          aggregates are the exception is most of the point of this question.
+      - text: >
+          An error, since an average cannot be computed over an unknown value
         correct: false
         why: >
-          `count(*)` counts rows and doesn't look at values at all, so it reports 100.
-          The gap between it and `count(col)` is the tell.
+          No error. Aggregates over columns containing NULLs are entirely routine — the
+          risk is a plausible number, not a failure. (`avg` over *no* non-NULL rows at all
+          returns NULL rather than raising.)
 
   - id: q4
     prompt: >
-      Name the two places where SQL treats two nulls as the same thing, despite
-      `NULL = NULL` being unknown.
+      Name a place where SQL treats two NULLs as equal to each other, and a place where it
+      treats them as not equal.
     options:
-      - text: '`GROUP BY` puts them in one group, and `DISTINCT` collapses them to one row'
+      - text: >
+          `GROUP BY` and `DISTINCT` put all NULLs together; `WHERE v = NULL` and a plain
+          `UNIQUE` constraint treat them as never equal
         correct: true
         why: >
-          Both are about identity rather than comparison, so they have to make a choice —
-          and they choose to treat nulls as one thing. The same null that won't equal
-          itself in a `WHERE` groups with itself a clause later.
-      - text: '`ORDER BY` and `WHERE`'
+          Both halves are real and they contradict each other inside one language. Two
+          NULL rows collapse into a single group, yet `WHERE v = NULL` matches neither of
+          them, and a UNIQUE column will happily accept both. `ORDER BY` takes a third
+          position — Postgres sorts NULLs as larger than everything, hence NULLS FIRST as
+          an option. This inconsistency is what the long-running theoretical argument
+          about nulls is actually about.
+      - text: >
+          They are never treated as equal anywhere; that is the single consistent rule
         correct: false
         why: >
-          `ORDER BY` gives nulls a consistent *position*, which isn't the same as calling
-          them equal, and `WHERE` is the clause where a null comparison drops the row.
-      - text: '`JOIN ... ON` and `UNIQUE` constraints'
+          It would be a much easier language if that were true. Run `GROUP BY v` on a
+          table with two NULL rows and you get one group of two — which is only possible
+          if something decided those NULLs were the same.
+      - text: >
+          They are equal everywhere except inside aggregate functions
         correct: false
         why: >
-          Both go the other way: a join on null columns matches nothing, and `UNIQUE`
-          permits many nulls precisely because it can't call them equal.
-      - text: '`COUNT` and `SUM`'
+          Backwards on the main point, and aggregates are not doing an equality comparison
+          at all — they simply exclude NULL inputs before computing anything.
+      - text: >
+          Equality depends on the column's type; numeric NULLs compare equal, text NULLs
+          do not
         correct: false
         why: >
-          Those skip nulls rather than grouping them. Skipping is a third behaviour
-          again — neither equal nor unequal, just absent.
+          Type has nothing to do with it. The behaviour differs by *clause* — GROUP BY
+          versus WHERE — and is identical for every data type.
 
   - id: q5
     prompt: >
-      You add `UNIQUE` to a nullable column to enforce "at most one active session per
-      user". What actually happens?
+      A `UNIQUE` column in PostgreSQL already contains a NULL. You insert another NULL.
+      What happens, and how would you make it fail instead?
     options:
       - text: >
-          Rows with a null in that column are all allowed, because two nulls never
-          compare equal
+          It is accepted — uniqueness is defined by equality and NULLs are never equal —
+          and `UNIQUE NULLS NOT DISTINCT` makes the second one fail
         correct: true
         why: >
-          The constraint is enforced by comparison, and nulls don't compare equal, so it
-          has nothing to object to. You get unlimited rows with a null there — the
-          standard requires this, and every major engine complies.
-      - text: The second null insert is rejected, like any duplicate
+          You can insert as many NULLs into a UNIQUE column as you like, which is correct
+          by the rules and almost never what the person reading the schema expects.
+          PostgreSQL 15 added NULLS NOT DISTINCT to say "for this constraint, treat
+          unknowns as equal"; before that the options were NOT NULL or a partial unique
+          index. It took about thirty years for the language to offer the choice.
+      - text: >
+          It is rejected — a unique constraint permits at most one NULL
         correct: false
         why: >
-          That's the intuition the constraint doesn't share. PostgreSQL 15 added
-          `UNIQUE NULLS NOT DISTINCT` specifically to offer this behaviour as an opt-in.
-      - text: The column is implicitly made `NOT NULL`
+          That is SQL Server's behaviour, and assuming it is portable is how this bug
+          crosses engines. The SQL standard, and PostgreSQL with it, allows any number of
+          NULLs in a unique column by default.
+      - text: >
+          It is accepted, and there is no way to forbid it short of `NOT NULL`
         correct: false
         why: >
-          `UNIQUE` and `NOT NULL` are independent. If you want both, you have to say
-          both.
-      - text: It works, since only one row can be active at a time anyway
+          Right about the acceptance, out of date on the remedy. NOT NULL is one answer,
+          but `UNIQUE NULLS NOT DISTINCT` (PostgreSQL 15+) forbids the duplicate NULL
+          while still permitting a single one — and a partial unique index solved it
+          before that.
+      - text: >
+          It is accepted, but only because the column is nullable; a NOT NULL column would
+          compare NULLs as equal
         correct: false
         why: >
-          Nothing enforces that. The whole point is that the constraint you added does
-          not constrain the case you cared about.
+          A NOT NULL column cannot contain a NULL at all, so there is nothing there to
+          compare. Nullability governs whether NULLs may be stored, never how they compare
+          once stored.

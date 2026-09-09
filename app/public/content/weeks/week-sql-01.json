@@ -4,162 +4,162 @@
   "title": "What the Database Does",
   "milestone": "sql-01-what-the-database-does",
   "track": "sql",
-  "intro": "If you write SQL that works but have never looked at what the engine does with it, this is the layer underneath. Everything here runs in sqlite3 — one binary, no server — so the whole track fits on whatever machine you happen to have open.",
+  "intro": "If you write SQL that works but have never looked at what the engine does with it, this is the layer underneath. Everything runs against PostgreSQL 16 — the engine most likely to be under whatever you build next, and one of the few that will hand you a raw page and tell you what is on it. A container and a psql prompt is the whole setup.",
   "days": [
     {
       "id": "sql-day-01",
       "day": 1,
       "title": "A table is a file of pages",
       "estMinutes": 25,
-      "teaser": "Why reading one row costs four kilobytes, and the hidden column you already have",
-      "teachBack": "A page is the unit of I/O. Explain what that means for a query that returns a single narrow row from a large table — what does the engine actually read, and what would have to be true for it to read less?",
+      "teaser": "Your UPDATE didn't update anything, and VACUUM gave back none of the 4 GB",
+      "teachBack": "A page is the unit of I/O, and an UPDATE writes a new version of the row rather than editing it. Put those two facts together and explain why a table can triple in size while its row count stays flat — and what plain VACUUM does about it, given that it does not shrink the file.",
       "slug": "a-table-is-pages",
       "status": "available",
-      "theoryMarkdown": "You already write queries that work. This track is about the layer underneath them: what\nthe engine does with the bytes once your `SELECT` arrives. Start with the most physical\nquestion there is — where does a row actually live?\n\n### A row is not the unit of anything\n\nThe mental model most people carry is that a table is a list of rows, and reading a row\nreads a row. Neither half is true.\n\nA database file is a flat array of fixed-size **pages**. Every page is the same size,\nand the page is the unit the engine reads, writes, caches and locks. Rows are packed\ninto pages; a page holds as many as fit. When you ask for one row, the engine reads the\nwhole page that row sits in — because that is the smallest thing it can read.\n\nIn SQLite the page size is baked into the file at creation:\n\n```sql\nPRAGMA page_size;\nPRAGMA page_count;\nSELECT page_size * page_count AS bytes FROM pragma_page_size(), pragma_page_count();\n```\n\n4096 bytes by default, which is not a coincidence: it matches the page size of the\nvirtual-memory system and of most filesystems, so one database page is one filesystem\npage is one memory page. PostgreSQL uses 8192 for the same family of reasons. The\nnumber is a compromise nobody has wanted to relitigate since the 1990s: bigger pages\nwaste less space on per-page bookkeeping and read more useful bytes per seek, smaller\npages waste less I/O when you only wanted one row.\n\nYou can watch the file grow in page-sized steps rather than row-sized ones:\n\n```sql\nCREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, note TEXT);\nPRAGMA page_count;\nINSERT INTO t(name, note) VALUES ('a', 'x');\nPRAGMA page_count;\n```\n\nCreating the table alone takes an empty file to two pages — one for the schema, one for\nthe table's own root — before a single row exists. Then the first row costs nothing\nextra, and neither do the next hundred: the count sits still until a page fills, and the\nfile gains exactly one more. Growth is in page-sized steps, and the steps have nothing\nto do with how many rows you inserted.\n\n### What the row itself is\n\nInside the page, a row is a length-prefixed run of bytes: a header saying what type each\ncolumn is and how long it is, then the values end to end. There is no fixed column\noffset to jump to — to read the fourth column the engine walks the first three.\n\nThat is why `SELECT *` is not free even when you were going to read most of it, and why\nnarrow tables are faster than wide ones in ways that surprise people: the cost is not\n\"per column you asked for\", it is \"per byte the engine had to walk past\".\n\n> [!NOTE]\n> This is a **row store**, and it is one of two answers. Column stores — ClickHouse,\n> DuckDB, Parquet — put all of one column's values together instead, so a query touching\n> three columns of a hundred reads three columns' worth of bytes. That is the whole\n> reason analytics engines exist as separate products: same SQL, opposite physical\n> layout. Row stores win when you want whole rows; column stores win when you want whole\n> columns.\n\n### The hidden column you already have\n\nEvery ordinary SQLite table has a `rowid`: a 64-bit integer key that the table is\nphysically sorted by, whether you asked for one or not.\n\n```sql\nSELECT rowid, * FROM t LIMIT 3;\n```\n\nThat works on a table where no such column was declared. The table is not a heap of rows\nin insertion order — it is a B-tree keyed on `rowid`, and \"the table\" *is* that tree.\n\nDeclaring `id INTEGER PRIMARY KEY` does something special here: it doesn't create a\nsecond key, it makes your column *be* the `rowid`. Exactly that spelling, too —\n`INTEGER PRIMARY KEY` aliases the rowid, while `INT PRIMARY KEY` or\n`BIGINT PRIMARY KEY` do not, and quietly get you a separate index instead. It's the\nsharpest edge in SQLite's type system and it is invisible until you measure.\n\nPostgreSQL made the opposite choice: its tables really are unordered heaps, and its\nequivalent of a rowid — `ctid` — is a physical address of the form `(page, slot)` that\nchanges when the row is updated. Two engines, two answers, and knowing which one you're\non changes what \"the table's order\" even means.\n\n> [!NOTE]\n> There is no such thing as the natural order of a table. A `SELECT` with no `ORDER BY`\n> may come back in insertion order today and in a different order tomorrow because\n> someone added an index, and both are correct. Every \"the rows came out shuffled\" bug\n> is this.\n\n### Worth knowing: the file will tell you about itself\n\nSQLite ships a virtual table called `dbstat` that reports where every page went:\n\n```sql\nSELECT name, count(*) AS pages, sum(payload) AS bytes\nFROM dbstat\nGROUP BY name\nORDER BY pages DESC;\n```\n\nOne row per table and index, with the page count each is actually costing you. It's the\nquickest way to find out that an index you forgot about is twice the size of the table\nit indexes.",
+      "theoryMarkdown": "You already write queries that work. This track is about the layer underneath them: what\nthe engine does with the bytes once your `SELECT` arrives. Start with the most physical\nquestion there is — where does a row actually live?\n\nEverything below is run against **PostgreSQL 16**, because it is the engine most likely\nto be under whatever you build next, and because it is unusually willing to show you its\nown internals. Stack Overflow's developer survey has had it as the most-used database\nsince 2023, and by 2025 it had pulled to 55.6% of all respondents — 58.2% of professional\ndevelopers, roughly eighteen points clear of MySQL in second. But popularity is not why\nit earns this track. It earns it because you can ask Postgres to hand you a raw 8 kB page\nand tell you what is on it, and almost nothing else will.\n\n### A row is not the unit of anything\n\nThe mental model most people carry is that a table is a list of rows, and reading a row\nreads a row. Neither half is true.\n\nA table on disk is a flat array of fixed-size **pages** — Postgres calls the file a\n*heap*. Every page is the same size, and the page is the unit the engine reads, writes,\ncaches and locks. Rows are packed into pages; a page holds as many as fit. When you ask\nfor one row, the engine reads the whole page that row sits in, because that is the\nsmallest thing it can read.\n\n```sql\nSHOW block_size;\n```\n\n```\n block_size\n------------\n 8192\n```\n\n8192 bytes, and it is a compile-time constant: changing it means rebuilding Postgres and\nrecreating every cluster, which is why essentially nobody does. SQLite defaults to 4096,\nmatching the virtual-memory page and most filesystem blocks. The number is a compromise\nnobody has wanted to relitigate since the 1990s — bigger pages waste less space on\nper-page bookkeeping and read more useful bytes per seek, smaller pages waste less I/O\nwhen you only wanted one row.\n\nWatch the file grow in page-sized steps rather than row-sized ones:\n\n```sql\nCREATE TABLE t(id bigserial PRIMARY KEY, name text, note text);\nSELECT pg_relation_size('t') / 8192 AS pages;\nINSERT INTO t(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 2000) g;\nSELECT pg_relation_size('t') / 8192 AS pages, pg_size_pretty(pg_relation_size('t')) AS heap;\n```\n\n```\n pages\n-------\n     0\n\n pages |  heap\n-------+--------\n    23 | 184 kB\n```\n\nA freshly created Postgres table is **zero pages** — an empty file. (SQLite's answer is\ndifferent and worth knowing: creating a table there costs pages before any row exists,\nbecause the schema and the table's own tree root have to live somewhere.) Then 2000 rows\nland in 23 pages, and the file grew one page at a time at moments that had nothing to do\nwith your row count. Ninety-seven of those rows fit on the first page — a number you will\nbe able to derive rather than guess by the end of this lesson.\n\n### Where a row is, exactly\n\nEvery Postgres row carries hidden system columns you never declared. The one that\nanswers \"where does this row live\" is `ctid`:\n\n```sql\nSELECT ctid, id, name FROM t WHERE id IN (1, 2, 82) ORDER BY id;\n```\n\n```\n  ctid  | id |  name\n--------+----+--------\n (0,1)  |  1 | name1\n (0,2)  |  2 | name2\n (0,82) | 82 | name82\n```\n\n`(page, slot)`. Row 1 is the first slot of page zero; row 82 is the 82nd slot of the same\npage. This is a **physical address**, not an identity — and the difference is the whole\nlesson of the next section.\n\n### An UPDATE does not update\n\nHere is the fact that surprises people who have used Postgres for years:\n\n```sql\nUPDATE t SET note = 'changed' WHERE id = 1;\nSELECT ctid FROM t WHERE id = 1;\n```\n\n```\n  ctid\n---------\n (22,56)\n```\n\nThe row moved from page 0 to page 22. Postgres did not modify the row in place. It wrote\na **new version** of the row wherever there was space, and marked the old one as dead.\nBoth copies are in the file right now.\n\nThat is MVCC — multi-version concurrency control — and it is the mechanism behind\nPostgres's most-loved property: readers never block writers and writers never block\nreaders, because a reader is looking at a version that hasn't gone anywhere. The two\nother hidden columns are the bookkeeping:\n\n```sql\nSELECT ctid, xmin, xmax, id FROM t ORDER BY id LIMIT 3;\n```\n\n```\n  ctid   | xmin | xmax | id\n---------+------+------+----\n (22,56) |  798 |    0 |  1\n (0,2)   |  797 |    0 |  2\n (0,3)   |  797 |    0 |  3\n```\n\n`xmin` is the transaction that created this version, `xmax` the transaction that deleted\nit (0 if it is still live). Row 1 wears its update on its sleeve: same table, same\n`INSERT`, but a *newer* `xmin` than its neighbours, because the version you are looking\nat was created by the `UPDATE` and not by the insert. Every query you run is really \"show me the versions visible\nto my transaction id\", which is why a long-running `SELECT` can sit there returning a\nconsistent snapshot of a table being rewritten underneath it.\n\nThe bill arrives as **bloat**:\n\n```sql\nSELECT pg_size_pretty(pg_relation_size('t')) AS before_updates;\nUPDATE t SET note = note || 'a';\nSELECT count(*) AS live_rows, pg_size_pretty(pg_relation_size('t')) AS file FROM t;\n```\n\nRun that middle statement three times, changing the appended character each time, so\nevery row gets three new versions:\n\n```\n live_rows |  file\n-----------+--------\n      2000 | 720 kB\n```\n\nSame 2000 rows, and the file went from 184 kB to 720 kB. Three updates of every row left\nthree dead versions of every row lying in the heap. Now clean up:\n\n```sql\nVACUUM t;\nSELECT pg_size_pretty(pg_relation_size('t')) AS after_vacuum;\nVACUUM FULL t;\nSELECT pg_size_pretty(pg_relation_size('t')) AS after_vacuum_full;\n```\n\n```\n after_vacuum\n--------------\n 720 kB\n\n after_vacuum_full\n-------------------\n 184 kB\n```\n\n**Plain `VACUUM` gave back nothing.** It marks the dead space reusable *by that table*,\nso the file stops growing — but it does not shrink the file, and this is the single most\nmisunderstood thing about Postgres operations. `VACUUM FULL` genuinely returns the space,\nby rewriting the whole table into a new file, and it takes an `ACCESS EXCLUSIVE` lock for\nthe duration: nothing reads or writes that table until it finishes. On a large production\ntable that is an outage, which is why teams reach for `pg_repack` instead, and why \"our\ndisk is full and `VACUUM` didn't help\" is a support conversation that happens every week\nof the year.\n\n> [!NOTE]\n> **The most expensive consequence of ctid, in production.** Because an index entry\n> points at a physical `(page, slot)`, moving a row means every index on the table has to\n> be updated — even indexes on columns your `UPDATE` never touched. Uber's engineering\n> blog made this famous in 2016 as their headline reason for migrating off Postgres:\n> a table with a dozen indexes turned a one-column update into twelve index writes, and\n> that amplification then rode through their replication stream, which ships physical\n> page changes rather than statements. MySQL's InnoDB avoids it by making secondary\n> indexes point at the primary key instead of a physical location — which costs an extra\n> lookup on every index read. There is no free answer here, only a trade someone picked.\n\n### Worth knowing: ask Postgres for the raw bytes of a page\n\nThere is a contrib extension that reads pages directly, and it turns every claim above\ninto something you can check yourself. Rebuild the table first if you have been updating\nit — the numbers below are page 0 of a table freshly loaded with those 2000 rows:\n\n```sql\nCREATE EXTENSION IF NOT EXISTS pageinspect;\nSELECT lower, upper, pagesize FROM page_header(get_raw_page('t', 0));\nSELECT count(*) AS tuples, min(lp_len) AS small, max(lp_len) AS big FROM heap_page_items(get_raw_page('t', 0));\n```\n\n```\n lower | upper | pagesize\n-------+-------+----------\n   412 |   432 |     8192\n\n tuples | smallest | largest\n--------+----------+---------\n     97 |       79 |      80\n```\n\nDo the arithmetic and the page layout falls out of it. A page starts with a 24-byte\nheader, then grows an array of 4-byte **line pointers** downward from the front while the\nrow data itself is stacked upward from the back. `lower` is where the pointer array ends,\n`upper` where the data begins, and the gap between them is the free space — here\n432 − 412 = 20 bytes, so this page is full.\n\nWhich gives you an invariant to check rather than a number to believe:\n**`lower` = 24 + 4 × tuples**. Here that is 24 + 97 × 4 = 412, exactly. Run those two\nqueries against any page of any table of your own and it will still hold, whatever the\ncounts happen to be. That layer of indirection is also why a row can be moved *within* a\npage without any index noticing — the line pointer keeps the slot number stable while the\ndata behind it moves.\n\nNow account for one row's 79 bytes. Eight for the bigint, six for `'name1'`, 41 for the\n40-character note — varying-length values each carry a length byte — and the other 24 are\na per-row header that is yours whether you want it or not. Postgres charges 23 bytes of\nvisibility bookkeeping per row, rounded up for alignment. That is why a table of millions\nof narrow rows is far bigger than `rows × columns` suggests, and why \"just add a boolean\ncolumn\" is never as free as it sounds.\n\n> [!NOTE]\n> **The clock nobody watches until it stops them.** Transaction ids are 32-bit, so they\n> wrap. Postgres protects itself by refusing all writes once a table's oldest unfrozen\n> transaction gets too far behind — `SELECT name, setting FROM pg_settings WHERE name =\n> 'autovacuum_freeze_max_age'` shows the threshold, 200 million by default, against a\n> 2^31 ceiling. Vacuum's *other* job, besides reclaiming space, is freezing old rows so\n> this never happens. When it falls behind on a write-heavy table the ending is always\n> the same: Sentry's engineering blog describes losing most of a US working day to\n> exactly this, and the only recovery is to stop accepting writes and vacuum.",
       "quiz": [
         {
           "id": "q1",
-          "prompt": "A table has 200 rows packed into 6 pages. You run a query that returns exactly one row, found by scanning. What is the smallest amount of data the engine could have read from disk?",
+          "prompt": "A table has 200 rows packed into 6 pages. A query returns exactly one row, found by scanning. What is the smallest amount of data the engine could have read from disk?",
           "options": [
             {
-              "text": "One page — 4KB by default",
+              "text": "One page — 8 kB in PostgreSQL",
               "correct": true,
               "why": "The page is the unit of I/O. Even a single-byte column in a single row costs one whole page, because a page is the smallest thing the engine can ask the filesystem for."
             },
             {
               "text": "Just the bytes of that row",
               "correct": false,
-              "why": "Nothing in the stack can read a partial page. The row's bytes come along inside the page that holds them; you never pay per row."
+              "why": "Nothing in the stack can read a partial page. The row's bytes arrive inside the page that holds them; you never pay per row."
             },
             {
-              "text": "All 6 pages, since a scan reads the whole table",
+              "text": "All six pages, since a scan reads the whole table",
               "correct": false,
-              "why": "A scan *may* read every page, but it can stop the moment it has what it needs. The question asks for the smallest possible, and that's the page the row is on."
+              "why": "A scan *may* read every page, but it can stop the moment it has what it needs. The question asks for the smallest possible, and that is the one page the row sits on."
             },
             {
               "text": "It depends entirely on the row's width",
               "correct": false,
-              "why": "Row width changes how many rows fit in a page, and a very wide value can spill onto overflow pages — but the floor is still one page, whatever the row weighs."
+              "why": "Width changes how many rows fit per page, not the size of a read. A 20-byte row and a 2000-byte row both cost one page to reach."
             }
           ]
         },
         {
           "id": "q2",
-          "prompt": "Why is reading the tenth column of a row more expensive than reading the first, in a row-store engine?",
+          "prompt": "You run `UPDATE t SET note = 'x' WHERE id = 1` in PostgreSQL. What happens to the row's physical location, and to the previous version of the row?",
           "options": [
             {
-              "text": "Later columns are stored on separate overflow pages",
+              "text": "The row's bytes are overwritten where they sit, so the ctid is unchanged",
               "correct": false,
-              "why": "Overflow pages exist, but they're for values too large for a page — a long TEXT or BLOB. Ordinary columns all live in the same row, whatever their position."
+              "why": "That would break the property Postgres is built around: a concurrent reader holding an older snapshot must still be able to see the previous version. It cannot, if you overwrote it. The old version has to survive the update."
             },
             {
-              "text": "It isn't — column access is constant time either way",
+              "text": "The old version is deleted immediately and the new one takes its slot",
               "correct": false,
-              "why": "That would be true if rows were fixed-width C structs with known offsets. They aren't: values are variable-length, so the offsets can't be known in advance."
+              "why": "Immediate deletion has the same problem — a transaction that started before your update is entitled to keep reading the old version. Reclaiming that space is a *later*, separate job, which is exactly what VACUUM is for."
             },
             {
-              "text": "The engine has to re-parse the row for each column accessed",
+              "text": "The row moves only if the new value is longer than the old one",
               "correct": false,
-              "why": "It parses the header once. The cost is the walk through the values, not repeated parsing."
+              "why": "Length is irrelevant to whether a new version is written; a new version is always written. It can influence *where* the new version lands, but even shrinking a value produces a second copy."
             },
             {
-              "text": "Columns are stored end to end with no fixed offsets, so reaching the tenth means walking past the first nine",
+              "text": "A new version of the row is written elsewhere — possibly on a different page — and the old version stays in the file, marked dead",
               "correct": true,
-              "why": "The row header gives each value's type and length, not its address. Finding column ten is a walk, not a jump — which is why the cost scales with bytes skipped rather than columns requested."
+              "why": "This is MVCC. An UPDATE is an insert plus a tombstone, never an edit in place. Watch `ctid` change across the statement and you have seen it happen; the dead version is still on disk until a vacuum reclaims its space."
             }
           ]
         },
         {
           "id": "q3",
-          "prompt": "You declare `id INT PRIMARY KEY` in SQLite instead of `id INTEGER PRIMARY KEY`. What actually changes?",
+          "prompt": "Your table's file is 4 GB on disk, of which only 500 MB is live rows. You run `VACUUM`. What happens to the size of the file, and why?",
           "options": [
             {
-              "text": "`INT` limits the column to 32 bits",
+              "text": "It stays 4 GB, and the dead space is permanently wasted until the table is dropped",
               "correct": false,
-              "why": "SQLite stores integers in as many bytes as the value needs, up to 64 bits, regardless of the declared type name."
+              "why": "Half right, and the wrong half matters. The space is not wasted: it is on the free space map and the next inserts and updates will land in it. That is why a well-vacuumed table reaches a steady size instead of growing forever."
             },
             {
-              "text": "`INTEGER PRIMARY KEY` makes your column the rowid itself; `INT PRIMARY KEY` leaves the rowid alone and adds a separate index",
+              "text": "It stays 4 GB — VACUUM marks the dead space reusable by that table but does not return it to the operating system",
               "correct": true,
-              "why": "Exactly that spelling is load-bearing. One gives you a column that *is* the table's B-tree key; the other gives you a hidden rowid plus an index you pay for on every write."
+              "why": "This is the most misunderstood thing in Postgres operations. Plain VACUUM stops the file from growing further, because new rows fill the freed space, but the file only shrinks if free space happens to sit at the very end. To actually get the 3.5 GB back you need VACUUM FULL, which rewrites the table into a new file under an ACCESS EXCLUSIVE lock — or pg_repack, which does it without the lock."
             },
             {
-              "text": "Nothing — `INT` and `INTEGER` are synonyms everywhere in SQLite",
+              "text": "It drops to roughly 500 MB, since that is what is still live",
               "correct": false,
-              "why": "They're synonyms for type affinity, which is why this is so easy to miss. For the rowid alias specifically, only the literal word `INTEGER` counts."
+              "why": "That is VACUUM FULL's behaviour, not VACUUM's, and the distinction matters precisely when a disk is filling up. Plain VACUUM never rewrites the file."
             },
             {
-              "text": "`INT PRIMARY KEY` is rejected as a syntax error",
+              "text": "It grows, because VACUUM writes bookkeeping about what it freed",
               "correct": false,
-              "why": "It's perfectly valid, which is the problem — you get a working table with an extra index and no warning that you meant something else."
+              "why": "VACUUM does write — it touches the visibility map and the free space map — but those are separate small forks, not growth of the table's own file."
             }
           ]
         },
         {
           "id": "q4",
-          "prompt": "A colleague says \"the rows come back in the order I inserted them, I checked.\" What is wrong with relying on that?",
+          "prompt": "In PostgreSQL an index entry points at a physical `(page, slot)` address. Given only that, why can updating one *unindexed* column of a row cause writes to five different indexes?",
           "options": [
             {
-              "text": "It's fine as long as nobody deletes rows",
+              "text": "It cannot — Postgres skips indexes whose columns did not change",
               "correct": false,
-              "why": "Deletes free slots that later inserts can reuse, so they're one way to see it break — but a new index or a different plan will do it without a single delete."
+              "why": "There is an optimisation in this direction, HOT (heap-only tuple) updates, but it only applies when the new version fits on the *same page*. Once the row has to move to another page, every index must be updated."
             },
             {
-              "text": "It only holds if the table has a primary key",
+              "text": "Each index stores a copy of the whole row, so all copies must be kept in sync",
               "correct": false,
-              "why": "It has nothing to do with declaring a key. Any table can be read by any plan the optimiser prefers."
+              "why": "An index stores its own key columns plus a pointer, not the whole row. If it stored the whole row, updating an indexed column would be the expensive case — but here the expensive case is updating an *unindexed* one."
             },
             {
-              "text": "Insertion order is never preserved, so the observation must be wrong",
+              "text": "Postgres rebuilds all indexes on a table whenever any row in it changes",
               "correct": false,
-              "why": "The observation is usually right, which is what makes it dangerous. A rowid table scanned in key order really does come back in insertion order — until the plan changes."
+              "why": "Nothing so drastic — the work is per-row, not per-table. A single-row update adds one entry per index, which is bad enough at scale but is not a rebuild."
             },
             {
-              "text": "Without `ORDER BY` the engine may return rows in any order, and adding an index later can silently change it",
+              "text": "The update writes the row at a new physical address, so every index that points at the old address has to be given the new one",
               "correct": true,
-              "why": "Order with no `ORDER BY` is an accident of the plan the optimiser picked today. A new index gives it a cheaper path, the order changes, and nothing was \"broken\" — the query never asked for an order."
+              "why": "The indexes are not stale because of what the column meant — they are stale because of where the row *is*. This write amplification was Uber's headline reason for migrating off Postgres in 2016. InnoDB dodges it by having secondary indexes point at the primary key rather than a location, paying an extra lookup on every index read instead."
             }
           ]
         },
         {
           "id": "q5",
-          "prompt": "What is the difference in physical layout between a row store and a column store, and which suits `SELECT avg(price) FROM sales` over 50 million rows?",
+          "prompt": "What are the hidden `xmin` and `xmax` columns on a PostgreSQL row, and how do they let one transaction read a table while another rewrites it?",
           "options": [
             {
-              "text": "A row store suits it better, since all the values are already in one place",
+              "text": "A read lock and a write lock held on the row while a transaction touches it",
               "correct": false,
-              "why": "\"One place\" means one *row*. The query wants one column across all rows, which in a row store is the maximally scattered access pattern."
+              "why": "Backwards — these fields exist so that locks are *not* needed for reading. Postgres's readers-never-block-writers property comes precisely from resolving visibility by comparing ids rather than by taking a lock."
             },
             {
-              "text": "A row store keeps a row's columns together; a column store keeps a column's values together — so the column store reads only `price`",
+              "text": "The transaction that created this row version and the one that deleted it — so each transaction can filter to the versions that were live when it started",
               "correct": true,
-              "why": "The aggregate touches one column of the table. A row store must walk every row's bytes to reach it; a column store reads that column's values contiguously and skips the rest of the table entirely."
+              "why": "Visibility is a comparison, not a lock. Your transaction has a snapshot; a row version is visible if its xmin committed before that snapshot and its xmax did not. Since every writer creates new versions rather than editing old ones, the versions your snapshot needs are still sitting there."
             },
             {
-              "text": "They're the same on disk and differ only in the query planner",
+              "text": "Timestamps recording when the row was inserted and last modified",
               "correct": false,
-              "why": "The layout is the whole difference, and it's why they ship as separate products rather than as a planner flag."
+              "why": "Tempting, and they are used for ordering — but they are transaction ids, not times. That distinction is why they can run out: they are 32-bit counters, and the ceiling of about two billion is what makes wraparound a real operational hazard."
             },
             {
-              "text": "A column store keeps the same layout but adds an index per column, so it suits the query",
+              "text": "The minimum and maximum values of the row's indexed columns",
               "correct": false,
-              "why": "It isn't an index — it's a different physical arrangement of the data itself. There's no row to index into."
+              "why": "They have nothing to do with your data. The x stands for transaction (xact); both hold transaction ids, and they are the same on a row whose columns are entirely unrelated."
             }
           ]
         }
       ],
       "task": {
-        "markdown": "Get a database in front of you and look at its pages.\n\n1. Install `sqlite3` if you don't have it — one binary, no server, no configuration. It's\n   almost certainly already on your machine.\n2. Create a database with one table, insert a few hundred rows, and watch\n   `PRAGMA page_count` change as you go. Note where it jumps and where it doesn't.\n3. Work out the file's size from `page_size * page_count`, then check it against what\n   the filesystem says with `ls -l`. They should agree.\n4. Select `rowid` from your table even though you never declared it.\n5. Then query `dbstat` and find out how many pages your table is actually costing.",
+        "markdown": "Get a PostgreSQL server in front of you and make it show you its own pages. Do not take\nany of the numbers above on trust — the point of this exercise is that you produced them.\n\nIf you have no Postgres to hand, `docker run --rm -e POSTGRES_PASSWORD=x -p 5432:5432\npostgres:16` and `psql -h localhost -U postgres` is a 30-second setup.\n\n1. Confirm `block_size`, then create a table and check `pg_relation_size` before and\n   after inserting a couple of thousand rows. Record where the page count jumps.\n2. Select `ctid` alongside your own columns and work out how many rows are landing per\n   page.\n3. Update one row. Select its `ctid` again. Explain the number you get.\n4. Update *every* row three times, then compare `pg_relation_size` and `count(*)`.\n5. Run `VACUUM`, measure again, then `VACUUM FULL`, and measure again. Only one of them\n   changes the file size — record both numbers.\n\nWrite every number you saw into the file as a comment beside the query that produced it.\nThat file is the point of the exercise, not the queries.",
         "files": [
           "sql/day01.sql"
         ],
-        "compile": "sqlite3 day01.db < sql/day01.sql",
+        "compile": "psql -h localhost -U postgres -f sql/day01.sql",
         "checklist": [
-          "`PRAGMA page_size` and `PRAGMA page_count` both queried",
-          "observed `page_count` jumping in steps rather than growing per row",
-          "`page_size * page_count` checked against the real file size on disk",
-          "selected `rowid` from a table that never declared it",
-          "`dbstat` queried for the per-table page count"
+          "`block_size` confirmed and the table's page count measured before and after inserts",
+          "`ctid` selected, and rows-per-page worked out from it",
+          "a single row observed changing its `ctid` after an `UPDATE`",
+          "the file measured growing while `count(*)` stayed the same",
+          "`VACUUM` and `VACUUM FULL` both measured, and you can say why only one shrank it"
         ]
       }
     },
@@ -168,155 +168,155 @@
       "day": 2,
       "title": "An index is a sorted copy",
       "estMinutes": 30,
-      "teaser": "Your index exists, the column is right, and the plan still says SCAN. Three reasons why.",
-      "teachBack": "An index is a second sorted tree, not an annotation. Use that to explain both why `WHERE lower(email) = ?` can't use an index on `email`, and why the fix is an index on the expression rather than on the column.",
+      "teaser": "Same index, same query, one word different — and the planner refuses it",
+      "teachBack": "An index is a second sorted tree, not an annotation on the table. Use that to explain both why `WHERE lower(email) = ?` cannot use an index on `email`, and why a planner that has a perfectly usable index will sometimes choose to ignore it and be right to.",
       "slug": "an-index-is-a-sorted-copy",
       "status": "available",
-      "theoryMarkdown": "Yesterday: a table is pages, and finding a row without help means reading them all.\nToday: what an index actually is, and the exact reasons a perfectly good one gets\nignored.\n\n### It is a second table you don't get to see\n\nAn index is not an annotation on a table, and it is not a hint. It is **another B-tree,\ncontaining the indexed columns plus a pointer back to the row**, kept sorted.\n\nThat single sentence explains almost everything indexes do:\n\n- Lookups get fast because the tree is sorted, so finding a value is a descent through\n  a handful of pages instead of a walk through all of them.\n- Writes get slower because every `INSERT` now writes two trees, and every `UPDATE` of\n  an indexed column writes two trees.\n- The database gets bigger, sometimes larger than the table, because the index is a\n  real copy of real data.\n- `ORDER BY` on the indexed column can become free — the sorted order already exists on\n  disk, so there is nothing to sort.\n\nYou never pay for an index once. You pay on every write, forever, in exchange for the\nreads.\n\n### Ask the engine what it plans to do\n\nNever guess about this. Every engine will tell you, and in SQLite the question is:\n\n```sql\nCREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT, note TEXT);\nEXPLAIN QUERY PLAN SELECT * FROM t WHERE name = 'name7';\nCREATE INDEX idx_name ON t(name);\nEXPLAIN QUERY PLAN SELECT * FROM t WHERE name = 'name7';\n```\n\nBefore the index, the plan is one word you should learn to dread:\n\n```\nSCAN t\n```\n\nAfter it:\n\n```\nSEARCH t USING INDEX idx_name (name=?)\n```\n\n(`SELECT *` here wants `note`, which the index doesn't carry — hold that thought.)\n\n**SCAN means every row. SEARCH means a descent.** In PostgreSQL the same distinction is\n`Seq Scan` versus `Index Scan`, and `EXPLAIN ANALYZE` there will also run the query and\nreport what really happened, which is the version you want when the estimate and reality\ndisagree.\n\n### Why a perfectly good index gets ignored\n\nHere is the rule that catches everyone: **an index on a column can only answer questions\nabout that column's value.** The moment you wrap the column in a function, you are\nasking about a different value, and the sorted copy is sorted by the wrong thing.\n\n```sql\nEXPLAIN QUERY PLAN SELECT * FROM t WHERE lower(name) = 'name7';\n```\n\n`SCAN t`, with `idx_name` sitting right there. The index is ordered by `name`; the query\nasks about `lower(name)`; nothing in the tree is in that order. Same story for\n`WHERE price * 1.2 > 100`, `WHERE date(created_at) = '2026-01-01'`, and every\n`WHERE CAST(id AS TEXT) = ?` written to make a type error go away.\n\nThe fix is to index the expression you actually query:\n\n```sql\nCREATE INDEX idx_lower ON t(lower(name));\nEXPLAIN QUERY PLAN SELECT * FROM t WHERE lower(name) = 'name7';\n```\n\n```\nSEARCH t USING INDEX idx_lower (<expr>=?)\n```\n\n### The covering index\n\nIf the index contains every column the query needs, the engine can answer from the index\nalone and never touch the table:\n\n```sql\nEXPLAIN QUERY PLAN SELECT name FROM t WHERE name > 'name1';\n```\n\n```\nSEARCH t USING COVERING INDEX idx_name (name>?)\n```\n\n**COVERING** is the word to look for. It means the second lookup — index to row — didn't\nhappen at all, and it's why adding one more column to an index sometimes makes a query\nseveral times faster than adding a whole new index would.\n\n### Worth knowing: LIKE 'x%' does not use your index, and the reason is a default\n\nA prefix search looks like it should be an index range scan: everything starting with\n`name7` is contiguous in a sorted list. Try it:\n\n```sql\nEXPLAIN QUERY PLAN SELECT * FROM t WHERE name LIKE 'name7%';\n```\n\n```\nSCAN t\n```\n\nThe reason is that SQLite's `LIKE` is **case-insensitive for ASCII by default**, while\nyour index is sorted case-sensitively (BINARY collation). Sorted by `A < a < b`, an\nindex cannot produce the range \"everything matching `name7` in either case\" as one\ncontiguous run — so the optimiser correctly refuses.\n\nTwo ways out, and both restore the range scan:\n\n```sql\nPRAGMA case_sensitive_like = ON;\nCREATE INDEX idx_ci ON t(name COLLATE NOCASE);\n```\n\nEither makes the collation of the question match the collation of the index, and the\nplan turns into `SEARCH t USING COVERING INDEX ... (name>? AND name<?)` — note that it\nbecame a *range*, `>` and `<`, which is exactly what a prefix match is once you can\ntrust the order.\n\nThe general lesson outlives SQLite: **an index is only usable by a query whose collation\nmatches the index's.** In PostgreSQL this is the same trap wearing different clothes —\na `LIKE 'x%'` index scan there requires either the C locale or an explicit\n`text_pattern_ops` index, and thousands of people have discovered that on production the\nweek after it worked locally.",
+      "theoryMarkdown": "Yesterday: a table is a heap of pages, and finding a row without help means reading all\nof them. Today: what an index actually is, and the four separate reasons a perfectly good\none gets ignored.\n\n### It is a second table you don't get to see\n\nAn index is not an annotation on a table, and it is not a hint. It is **another B-tree,\ncontaining the indexed columns plus a pointer back to the row's physical location**, kept\nsorted.\n\nThat single sentence explains almost everything indexes do:\n\n- Lookups get fast, because the tree is sorted — finding a value is a descent through\n  three or four pages instead of a walk through all of them.\n- Writes get slower, because every `INSERT` now writes two trees, and (as yesterday's\n  `ctid` lesson showed) an `UPDATE` that moves a row writes *every* index on the table.\n- The database gets bigger, sometimes much bigger, because the index is a real copy of\n  real data.\n- `ORDER BY` on the indexed column can become free — the sorted order already exists on\n  disk, so there is nothing to sort.\n\nThat third point is not theoretical. Two indexes on a 50,000-row table:\n\n```\n  relname  | pg_size_pretty\n-----------+----------------\n idx_lower | 1544 kB\n idx_name  | 1544 kB\n s         | 4552 kB\n```\n\nTwo indexes on one column each, and they are already two thirds of the size of the table\nholding three columns. This is why index bloat is a real budget line and why\n`pg_stat_user_indexes.idx_scan = 0` — an index nobody has ever used — is the first thing\na Postgres consultant grep's for.\n\nYou never pay for an index once. You pay on every write, forever, in exchange for the\nreads.\n\n### Ask the planner, never guess\n\nEvery engine will tell you its plan. In Postgres:\n\n```sql\nCREATE TABLE s(id bigserial PRIMARY KEY, name text, note text);\nINSERT INTO s(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 50000) g;\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE name = 'name7';\n```\n\n```\n                     QUERY PLAN\n-----------------------------------------------------\n Seq Scan on s  (cost=0.00..1194.00 rows=1 width=58)\n   Filter: (name = 'name7'::text)\n```\n\n`Seq Scan` — every page, to find one row. Now build the index:\n\n```sql\nCREATE INDEX idx_name ON s(name);\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE name = 'name7';\n```\n\n```\n Index Scan using idx_name on s  (cost=0.29..8.31 rows=1 width=58)\n   Index Cond: (name = 'name7'::text)\n```\n\nCost 1194 to cost 8.31. Note `ANALYZE` in there — not `EXPLAIN ANALYZE`, the *other*\n`ANALYZE`, which updates the planner's statistics. Postgres does not pick plans by\nreading your query; it picks them by estimating rows from a sample of your data. Stale\nstatistics are behind an enormous share of \"it was fast yesterday\" incidents, and it is\nthe first thing to check after a bulk load.\n\nTwo numbers, both estimates: `cost` is in arbitrary units where 1.0 is roughly one\nsequential page read, and `rows` is how many the planner *thinks* will come back.\n`EXPLAIN ANALYZE` runs the query and prints what really happened next to the guess — and\nthe gap between estimate and reality is where nearly every planner mystery is solved.\n\n### Reason one: you asked about a different value\n\nHere is the rule that catches everyone: **an index on a column can only answer questions\nabout that column's value.** Wrap the column in a function and you are asking about a\ndifferent value, which the sorted copy is not sorted by.\n\n```sql\nEXPLAIN SELECT * FROM s WHERE lower(name) = 'name7';\n```\n\n```\n Seq Scan on s  (cost=0.00..1319.00 rows=250 width=58)\n   Filter: (lower(name) = 'name7'::text)\n```\n\n`Seq Scan`, with `idx_name` sitting right there. Same story for `WHERE price * 1.2 > 100`,\n`WHERE date(created_at) = '2026-01-01'`, and every `WHERE CAST(id AS text) = ?` written to\nmake a type error go away. Postgres's answer is to let you index the expression itself:\n\n```sql\nCREATE INDEX idx_lower ON s(lower(name));\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE lower(name) = 'name7';\n```\n\n```\n Index Scan using idx_lower on s  (cost=0.29..8.31 rows=1 width=58)\n   Index Cond: (lower(name) = 'name7'::text)\n```\n\nExpression indexes are a genuine Postgres advantage — MySQL only got them in 8.0.13, in\n2018 — and the case-insensitive-email index is the single most common use of them in\nproduction schemas anywhere.\n\n### Reason two: the index would be slower\n\nThis is the one people refuse to believe, so watch it happen. One table, one index, one\nquery shape — only the *value* changes:\n\n```\n=== WHERE status = 'rare'      (2,000 of 200,000 rows)\n Index Only Scan using idx_status on t2 (actual time=0.033..1.644 rows=2000 loops=1)\n Execution Time: 1.788 ms\n\n=== WHERE status = 'common'    (198,000 of 200,000 rows)\n Parallel Seq Scan on t2 (actual time=0.016..13.148 rows=99000 loops=2)\n Execution Time: 24.699 ms\n```\n\nThe planner used the index for `'rare'` and *refused* it for `'common'`, and it was right\nboth times. An index scan costs one descent per matching row, plus a jump to the heap for\neach; once you are fetching most of the table, reading it straight through in physical\norder is cheaper than 198,000 random jumps. This is why \"add an index\" does nothing for\nyour `WHERE deleted = false` filter when 99% of rows are not deleted — and why a partial\nindex (`CREATE INDEX ... WHERE deleted = true`) is often the actual answer.\n\n### Reason three: the query needed a column the index doesn't carry\n\nIf the index contains every column the query needs, the engine can answer from the index\nalone and never touch the heap:\n\n```sql\nEXPLAIN SELECT name FROM s WHERE name = 'name7';\n```\n\n```\n Index Only Scan using idx_name on s  (cost=0.29..8.31 rows=1 width=9)\n```\n\n**`Index Only Scan`** is the phrase to look for — it means the second lookup, index to\nrow, did not happen. Change that `SELECT name` to `SELECT *` and it drops back to a plain\n`Index Scan`, because `note` only exists in the heap. This is why adding one more column\nto an existing index sometimes beats adding a whole new index, and Postgres has dedicated\nsyntax for exactly that: `CREATE INDEX ... INCLUDE (note)` carries the extra column in the\nindex's leaf pages without making it part of the sort key.\n\n> [!NOTE]\n> Index-only scans in Postgres are only *mostly* index-only. The index has no visibility\n> information, so the engine still has to know whether each row is visible to your\n> transaction — it consults the **visibility map**, one bit per page saying \"everything on\n> this page is visible to everyone\". Pages the map hasn't marked force a heap fetch\n> anyway. `EXPLAIN ANALYZE` prints `Heap Fetches:`, and a high number there on a\n> supposedly index-only scan almost always means the table needs vacuuming. Two lessons\n> in and vacuum is already the answer to a second unrelated question.\n\n### Worth knowing: `C.UTF-8` is not `C`, and the difference is a sequential scan\n\nA prefix search looks like it should be a range scan — everything starting with `name7`\nis contiguous in a sorted list. It isn't:\n\n```sql\nEXPLAIN SELECT * FROM s WHERE name LIKE 'name7%';\n```\n\n```\n Seq Scan on s  (cost=0.00..1194.00 rows=1010 width=58)\n   Filter: (name ~~ 'name7%'::text)\n```\n\nThe reason is **collation**. An index is sorted according to some collation, and a\nlocale-aware one (`en_US.UTF-8`, and yes `C.UTF-8`) can sort in ways where the strings\nmatching a prefix are not one contiguous run — so `LIKE 'x%'` cannot be turned into a\nrange. Only the `C` collation, which compares byte by byte, guarantees it can.\n\nThe trap is that `C.UTF-8` *looks* like `C` and is not. Prove it by declaring an index\nwith the real thing:\n\n```sql\nCREATE INDEX idx_c ON s(name COLLATE \"C\");\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE name LIKE 'name7%';\n```\n\n```\n Bitmap Heap Scan on s  (cost=26.44..624.27 rows=1010 width=58)\n   ->  Bitmap Index Scan on idx_c  (cost=0.00..26.19 rows=990 width=0)\n         Index Cond: ((name >= 'name7'::text) AND (name < 'name8'::text))\n```\n\nLook at what the planner did with your `LIKE`: it rewrote it into `name >= 'name7' AND\nname < 'name8'`, a range, exactly as the intuition said it should. The equivalent without\ntouching collation is a `text_pattern_ops` index, which sorts by byte regardless of the\ndatabase's locale.\n\nTwo more things worth carrying out of this. First, the plan is a **Bitmap Heap Scan**, not\nan Index Scan — Postgres's middle gear for when a few thousand rows match: collect all\ntheir locations first, sort them into physical order, then sweep the heap once. Second,\nand this is the part that bites in production: a database created with a locale-aware\ncollation will *silently* not use your index for prefix searches, and you will discover it\nthe week after it worked on someone's laptop where the default was different.",
       "quiz": [
         {
           "id": "q1",
-          "prompt": "You add an index to speed up a slow report. Name two costs you have just taken on.",
+          "prompt": "You add an index to speed up a slow report. Name two distinct costs you have just taken on.",
           "options": [
             {
-              "text": "Every write to the table now maintains a second tree, and the database grows",
+              "text": "Every write to the table now maintains a second tree, and the index occupies real disk space of its own",
               "correct": true,
-              "why": "An index is a real sorted copy of real data. Inserts and updates of the indexed column write both trees, and the copy occupies real pages — sometimes more than the table itself."
+              "why": "Those are the two standing costs, and neither is small. Two single-column indexes on a three-column 50,000-row table came to 1544 kB each against a 4552 kB table — two thirds of the table's size, for two columns. And in PostgreSQL the write cost is worse than it first looks: because index entries hold a physical row location, an UPDATE that moves a row must touch every index on the table, not just the ones on columns you changed."
             },
             {
-              "text": "Existing queries must be rewritten to reference the index by name",
+              "text": "Queries that do not use the index have to skip past it while scanning",
               "correct": false,
-              "why": "The optimiser picks indexes; queries name tables and columns. Being able to add an index without touching query text is most of the point."
+              "why": "An index is a separate file. A sequential scan of the table never reads it and never steps over it."
             },
             {
-              "text": "The table has to be locked while the index exists",
+              "text": "The table must be locked whenever the index is used",
               "correct": false,
-              "why": "Building an index takes a lock briefly, but having one doesn't. If it did, nobody would use indexes."
+              "why": "Reading through an index takes no special lock. There is a locking cost to *building* one — which is why CREATE INDEX CONCURRENTLY exists — but that is a one-off, not a cost of having the index."
             },
             {
-              "text": "Reads of other columns get slower",
+              "text": "Reads of other columns get slower, because the row is now split in two",
               "correct": false,
-              "why": "Unindexed reads are unaffected. The optimiser simply won't use the index for them; it doesn't get in the way."
+              "why": "The row is not split. The index is an additional copy of the indexed columns; the heap still holds every column exactly as before, and reads that ignore the index are unaffected."
             }
           ]
         },
         {
           "id": "q2",
-          "prompt": "A query filtering on an indexed column shows `SCAN` in its plan. Give two different reasons that can happen even though the index exists and the column is right.",
+          "prompt": "A query filters on an indexed column and the plan still shows `Seq Scan`, even though the index exists and the column is right. Give two different reasons that can happen.",
           "options": [
             {
-              "text": "The table is too small, so the optimiser refuses to use any index",
+              "text": "The column is nullable, and PostgreSQL cannot index columns that contain NULLs",
               "correct": false,
-              "why": "A tempting answer, because on a tiny table a scan genuinely can be cheaper and the optimiser may choose it. But that's the optimiser being right, not the index being unusable — and it isn't one of the two structural reasons."
+              "why": "PostgreSQL B-trees do index NULLs, and `WHERE col IS NULL` can use an index. (This is a real difference between engines — Oracle's B-trees famously omit all-NULL keys — but it is not why Postgres would choose a Seq Scan.)"
             },
             {
-              "text": "The column is wrapped in a function, or the query's collation doesn't match the index's",
+              "text": "The filter wraps the column in a function or a cast, or the value matches so many rows that scanning is genuinely cheaper",
               "correct": true,
-              "why": "Both break the same rule: an index answers questions about the exact value in the exact order it was sorted. `lower(col)` is a different value; a case-insensitive `LIKE` against a case-sensitive index is a different order."
+              "why": "Two entirely different failures that produce the identical symptom. The first is a correctness limit — an index on `name` is sorted by `name`, so it can say nothing about `lower(name)`. The second is the planner being right: fetching 198,000 of 200,000 rows through an index means 198,000 random heap jumps, and reading the table straight through beat it by more than 10x in the lesson's measurement."
             },
             {
-              "text": "The index is too new for the optimiser to have noticed it",
+              "text": "The index has not finished building, or the table has too few rows for an index to exist",
               "correct": false,
-              "why": "Indexes are visible to the planner as soon as they're created. Stale *statistics* can cause bad estimates, but that's a different failure and it doesn't hide the index."
+              "why": "An unfinished CREATE INDEX is simply not visible to the planner yet, so this is not really a case of an index being ignored. And no row-count threshold governs whether an index can exist — small tables just rarely benefit."
             },
             {
-              "text": "SELECT * always forces a scan",
+              "text": "The statistics are stale, which makes the index physically unusable",
               "correct": false,
-              "why": "`SELECT *` prevents an index being *covering*, so the engine must fetch rows after the index lookup. It doesn't stop the lookup happening."
+              "why": "Stale statistics are a genuine and very common cause of a bad plan — but they mislead the planner's *estimate*, they do not make an index unusable. Run ANALYZE and the same index may suddenly be chosen for the same query."
             }
           ]
         },
         {
           "id": "q3",
-          "prompt": "What does `COVERING` mean in a query plan, and what work does it save?",
+          "prompt": "What does `Index Only Scan` mean in a PostgreSQL plan, what work does it save, and what can still force it to touch the heap anyway?",
           "options": [
             {
-              "text": "The index holds every column the query needs, so the engine answers from the index and never reads the table",
+              "text": "The index carried every column the query needed, so the heap lookup was skipped — except for pages the visibility map has not marked all-visible",
               "correct": true,
-              "why": "It eliminates the second hop — index entry to actual row — which on a large table is a random page read per matching row, and usually dominates the cost."
+              "why": "The saving is the second lookup: index entry to row. The catch is that an index holds no visibility information, so Postgres must still establish that each row is visible to your transaction. It uses the visibility map, one bit per page, and any page not marked forces a heap fetch after all. EXPLAIN ANALYZE prints `Heap Fetches:` — a large number there usually means the table wants vacuuming."
             },
             {
-              "text": "The engine has locked the rows the index points at",
+              "text": "Only one index was used, rather than combining several",
               "correct": false,
-              "why": "Nothing to do with locking. A covering read touches fewer things, if anything."
+              "why": "Combining indexes is a real Postgres capability, but it shows up as a BitmapAnd or BitmapOr over Bitmap Index Scans. \"Index Only\" refers to not visiting the heap."
             },
             {
-              "text": "The index is large enough to be held entirely in memory",
+              "text": "The query was answered from the index because the table itself was locked by another transaction",
               "correct": false,
-              "why": "Caching is real and helps, but it's not what the word means and it isn't what the plan is reporting."
+              "why": "Plan choice has nothing to do with locks held elsewhere. The planner picks this shape purely because the index happens to contain every column required."
             },
             {
-              "text": "The index covers every row in the table, so no rows can be missed",
+              "text": "The whole index was loaded into memory, so no disk reads were needed",
               "correct": false,
-              "why": "Ordinary indexes always contain every row (partial indexes aside). \"Covering\" is about columns, not rows."
+              "why": "\"Only\" describes which structures were consulted, not where they live. An Index Only Scan still reads index pages from disk if they are not cached."
             }
           ]
         },
         {
           "id": "q4",
-          "prompt": "Your table has an index on `email`. Which of these can use it — `WHERE email = ?`, `WHERE lower(email) = ?`, `WHERE email LIKE 'a%'`?",
+          "prompt": "Your table has an index on `email`. Which of `WHERE email = ?`, `WHERE lower(email) = ?` and `WHERE email LIKE 'a%'` can use it, and what decides the last one?",
           "options": [
             {
-              "text": "The first and second; `LIKE` can never use an index",
+              "text": "Equality and `LIKE 'a%'`; `lower(email)` works too once the statistics are refreshed",
               "correct": false,
-              "why": "Backwards on both counts. `lower(email)` needs an expression index, while a *prefix* `LIKE` is genuinely index-friendly given the right collation. A leading `%` is the one that can't be helped."
+              "why": "ANALYZE cannot help here. There is no entry anywhere in an index on `email` that records what `lower(email)` is, so no amount of better estimation makes that index answer the question. You need a second index, on the expression."
             },
             {
-              "text": "Only the first; the other two can never use an index",
+              "text": "Only the equality one; B-trees answer equality and nothing else",
               "correct": false,
-              "why": "Both are recoverable: an expression index handles `lower(email)`, and a matching collation handles the prefix match."
+              "why": "B-trees are excellent at ranges — that is what being sorted buys you. `>`, `<`, `BETWEEN` and `ORDER BY` all use them, and a prefix `LIKE` is a range in disguise when the collation permits."
             },
             {
-              "text": "All three, since all three filter on the indexed column",
+              "text": "All three, since all three mention only the indexed column",
               "correct": false,
-              "why": "Naming the column isn't enough — the index stores one specific value in one specific order, and two of these ask about something else."
+              "why": "Mentioning the column is not the test. The test is whether the query's condition can be expressed as a range over the *order the index is sorted in* — which `lower(email)` cannot be, at any collation."
             },
             {
-              "text": "The first straight away; the second not at all; the third only if the index's collation matches how LIKE compares",
+              "text": "Equality yes; `lower(email)` no, without an index on the expression; `LIKE 'a%'` only if the index's collation is `C` or it uses `text_pattern_ops`",
               "correct": true,
-              "why": "Equality on the bare column is exactly what the index is sorted for. `lower(email)` is a value the index doesn't contain. The prefix match is a range scan in principle, but only once the question's collation and the index's agree."
+              "why": "The first two follow from the index being sorted by `email` and nothing else. The third is the subtle one: turning `LIKE 'a%'` into the range `>= 'a' AND < 'b'` is only valid if the sort order is bytewise. A locale-aware collation may interleave strings so that the prefix matches are not contiguous — and `C.UTF-8` counts as locale-aware, despite the name."
             }
           ]
         },
         {
           "id": "q5",
-          "prompt": "Why does an index make `ORDER BY name` cheaper even for a query that returns every row in the table?",
+          "prompt": "`EXPLAIN` says a query will return 3 rows; `EXPLAIN ANALYZE` shows it actually returned 40,000. What is most likely wrong, and what does the planner do with a bad estimate?",
           "options": [
             {
-              "text": "The index lets the engine skip rows it doesn't need",
+              "text": "Nothing is wrong; `EXPLAIN` reports rows examined and `EXPLAIN ANALYZE` reports rows returned",
               "correct": false,
-              "why": "This query needs every row. The saving is the ordering, not any filtering."
+              "why": "Both report the same quantity: rows emitted by that node. One is the planner's estimate and the other is the measured truth, which is exactly why comparing them is useful."
             },
             {
-              "text": "It doesn't — returning every row means a scan, so the index is unused",
+              "text": "The query changed between the two runs, so the numbers are not comparable",
               "correct": false,
-              "why": "A full read still has to produce the requested order somehow. Doing it by reading a pre-sorted structure beats sorting the whole table."
+              "why": "EXPLAIN ANALYZE plans and executes the same statement, so the estimate and the actual come from one run. They are directly comparable by design."
             },
             {
-              "text": "Sorting happens in memory either way, so it's the same cost",
+              "text": "The planner notices the discrepancy mid-execution and re-plans with the real number",
               "correct": false,
-              "why": "Only if it fits. A sort too big for the buffer spills to disk, which is exactly the cost the ordered index avoids."
+              "why": "PostgreSQL does not re-plan mid-execution; the plan is fixed before the first row is produced, and a bad estimate is lived with to the end. Adaptive re-planning of this kind exists in some other systems, but assuming it here is how people conclude a plan \"should have fixed itself\"."
             },
             {
-              "text": "The index is already stored in that order, so there is nothing to sort",
+              "text": "The statistics are stale or unrepresentative — and since the estimate is what chooses the plan, a wrong one picks a plan suited to a query that does not exist",
               "correct": true,
-              "why": "Sorted order is the index's entire nature. Reading it in order yields rows in order, turning a sort into a walk — no temporary file, no sort buffer."
+              "why": "This gap is where nearly every planner mystery is solved, which is why you reach for EXPLAIN ANALYZE rather than EXPLAIN. Believing three rows, the planner happily picks an index scan or a nested loop; at 40,000 rows those become 40,000 random jumps or 40,000 inner scans. ANALYZE after a bulk load is the first thing to try, and correlated columns — where the planner assumes independence and is wrong — are the next suspect."
             }
           ]
         }
       ],
       "task": {
-        "markdown": "Prove each of these to yourself rather than taking the lesson's word for it. Use a table\nwith a few hundred rows — small is fine, the plan doesn't depend on size here.\n\n1. Run `EXPLAIN QUERY PLAN` for an equality filter with no index. Record the plan.\n2. Add the index, run it again, and record how the plan changed.\n3. Wrap the column in `lower()` and watch it fall back to a scan.\n4. Add an expression index and watch it recover.\n5. Get one query to report `COVERING INDEX`, and work out why that one qualifies when\n   your earlier one didn't.\n6. Reproduce the `LIKE 'x%'` scan, then fix it with a `COLLATE NOCASE` index and confirm\n   the plan turns into a range.\n\nWrite every plan you saw into the file as a comment beside the query that produced it.\nThat file is the point of the exercise, not the queries.",
+        "markdown": "Prove each of these to yourself rather than taking the lesson's word for it. Use enough\nrows that the planner has a real decision to make — 50,000 is plenty, and\n`generate_series` will produce them in one statement.\n\n1. `EXPLAIN` an equality filter with no index. Record the plan and its cost.\n2. Add the index, `ANALYZE`, run it again, and record how both changed.\n3. Wrap the column in `lower()` and watch it fall back to a sequential scan.\n4. Add an expression index and watch it recover.\n5. Get one query to report `Index Only Scan`, then change it so the same index gives you\n   a plain `Index Scan`, and work out what you changed.\n6. Build a column where one value is rare and one is common, index it, and find the query\n   where Postgres uses the index and the query where it refuses. Use `EXPLAIN ANALYZE` and\n   compare the execution times — the refusal should be the faster one.\n\nWrite every plan you saw into the file as a comment beside the query that produced it.\nThat file is the point of the exercise, not the queries.",
         "files": [
           "sql/day02.sql"
         ],
-        "compile": "sqlite3 day02.db < sql/day02.sql",
+        "compile": "psql -h localhost -U postgres -f sql/day02.sql",
         "checklist": [
-          "the same query planned both with and without an index, both plans recorded",
-          "a function on the indexed column observed falling back to `SCAN`",
+          "the same query planned with and without an index, both plans and costs recorded",
+          "a function on the indexed column observed falling back to a sequential scan",
           "an expression index built, and the plan recovering",
-          "one query reporting `COVERING INDEX`, and you can say why",
-          "`LIKE 'x%'` scanning, then using a range after the collation is fixed"
+          "one query reporting `Index Only Scan`, and one reporting `Index Scan` off the same",
+          "the planner observed *refusing* an index for an unselective value, with"
         ]
       }
     },
@@ -326,154 +326,154 @@
       "title": "NULL is not a value",
       "estMinutes": 25,
       "teaser": "The query that returned zero rows for two years and never logged an error",
-      "teachBack": "Walk through why `x NOT IN (1, 2, NULL)` returns nothing for every possible `x`. Expand the expression, say what each term evaluates to, and explain why `WHERE` then drops the row.",
+      "teachBack": "Walk through why `x NOT IN (1, 2, NULL)` returns nothing for every possible `x`. Expand the expression, say what each term evaluates to, and explain why `WHERE` then drops the row — including why it drops it silently rather than erroring.",
       "slug": "null-is-not-a-value",
       "status": "available",
-      "theoryMarkdown": "The last two days were physical. This one is about semantics, and it's here early\nbecause it is the single most reliable source of quietly wrong answers in SQL — the kind\nthat don't error, don't look odd, and are off by exactly the rows you cared about.\n\n### Three-valued logic\n\nMost languages have two truth values. SQL has three: **true, false, and unknown**.\n\n`NULL` does not mean zero, or empty string, or \"false\". It means *no value is recorded\nhere*, and the consequence is that any comparison involving it can't produce a verdict:\n\n```sql\nSELECT NULL = NULL;\nSELECT NULL <> NULL;\nSELECT NULL IS NULL;\n```\n\nThe first two return `NULL` — not true, not false. Only the third returns `1`. That is\nthe whole design in three lines: **you cannot ask whether an unknown equals anything,\nincluding another unknown.** \"Is the value I don't know the same as the other value I\ndon't know?\" has no honest answer but \"unknown\", and SQL refuses to invent one.\n\n`WHERE` keeps only rows where the condition is **true**. Unknown is not true, so:\n\n```sql\nSELECT 1 WHERE NULL = NULL;\n```\n\nreturns no rows. Not an error, not a warning — silence. That silence is the entire\nproblem.\n\n### The one that has actually cost people money\n\n`NOT IN` with a `NULL` anywhere in the list returns nothing. Ever.\n\n```sql\nSELECT 3 WHERE 3 IN (1, NULL);\nSELECT 3 WHERE 3 NOT IN (1, NULL);\n```\n\nBoth come back empty, and the second is the dangerous one. Expand it: `3 NOT IN (1,\nNULL)` is `3 <> 1 AND 3 <> NULL`, which is `true AND unknown`, which is **unknown** —\nnot true, so the row is dropped. It doesn't matter that 3 obviously isn't in the list.\nAs long as one `NULL` is present, `NOT IN` can never return true for any value.\n\nThe usual shape in real code:\n\n```sql\nSELECT * FROM orders\nWHERE customer_id NOT IN (SELECT id FROM banned_customers);\n```\n\nThe day someone inserts a `banned_customers` row with a `NULL` id, this query silently\nreturns zero orders. It has been correct for two years; nothing was deployed; there is\nno error in any log. Use `NOT EXISTS` instead, which asks a row-at-a-time question and\nis immune:\n\n```sql\nSELECT * FROM orders o\nWHERE NOT EXISTS (SELECT 1 FROM banned_customers b WHERE b.id = o.customer_id);\n```\n\n### Aggregates quietly disagree with each other\n\n```sql\nCREATE TABLE u(v INTEGER);\nINSERT INTO u VALUES (1), (2), (NULL);\nSELECT count(*), count(v), sum(v), avg(v) FROM u;\n```\n\n`3, 2, 3, 1.5`.\n\n`count(*)` counts rows. `count(v)` counts **non-null values** — a different question with\na confusingly similar spelling. `sum` and `avg` skip nulls entirely, so the average is\n3/2, not 3/3. If your \"average response time\" quietly excludes every request that\ntimed out and recorded no time, you have a metric that improves as your service gets\nworse.\n\n### Where NULL suddenly does equal NULL\n\nHaving insisted that nothing equals `NULL`, SQL then has two places where nulls are\ntreated as the same thing after all:\n\n```sql\nSELECT v, count(*) FROM u GROUP BY v;\n```\n\n`GROUP BY` puts all the nulls in one group, and `DISTINCT` collapses them to one row.\nIt has to — grouping is about identity, not comparison — but it does mean the same\n`NULL` that refuses to equal itself in a `WHERE` cheerfully groups with itself one clause\nlater.\n\n### Worth knowing: UNIQUE doesn't mean unique\n\n```sql\nCREATE TABLE w(v INTEGER UNIQUE);\nINSERT INTO w VALUES (NULL), (NULL), (NULL);\nSELECT count(*) FROM w;\n```\n\nThree rows, no error. A `UNIQUE` constraint is enforced by comparing values, and two\nnulls don't compare equal, so the constraint has nothing to object to. Standard SQL\nrequires this, and SQLite, PostgreSQL, Oracle and MySQL all agree.\n\nThis is why \"one active session per user\" implemented as a nullable `UNIQUE` column\nlets you create unlimited sessions with a null in it. PostgreSQL 15 finally added\n`UNIQUE NULLS NOT DISTINCT` to opt out — a good clue as to how often this bites, since\nit took the standard about forty years to admit people wanted the other behaviour.",
+      "theoryMarkdown": "Two lessons about where bytes live. This one is about a single value that isn't one, and\nthe class of bug it produces: queries that are syntactically perfect, throw no error, log\nnothing, and return the wrong answer for years.\n\n### It is not zero, and it is not empty\n\n`NULL` means *unknown*. Not absent, not blank, not a default — unknown. Once you take\nthat literally, everything else follows, including the parts that look broken.\n\nIf a value is unknown, then any comparison with it is also unknown:\n\n```sql\nSELECT NULL = NULL AS \"null = null\", NULL <> NULL AS \"null <> null\", NULL IS NULL AS \"is null\";\n```\n\n```\n null = null | null <> null | is null\n-------------+--------------+---------\n             |              | t\n```\n\nThe first two came back **blank — which is psql printing NULL**, not false. `NULL = NULL`\nis not false; it is unknown, because two unknown quantities may or may not be equal and\nSQL declines to guess. This is why `IS NULL` exists as separate syntax: it is the only\noperator that asks about the unknown-ness itself rather than about the value.\n\nSo SQL does not run on booleans. It runs on **three-valued logic**: true, false, unknown.\nAnd the rule that turns that from trivia into production bugs is one line long:\n\n> `WHERE` keeps a row only when the condition is **true**. Unknown is discarded, exactly\n> like false.\n\nSilently. That is the whole failure mode.\n\n### The query that returns nothing, forever\n\nHere is the shape, and it is in more codebases than anyone would like:\n\nThree users, and one of the two orders has a NULL `user_id` — a returns row, a deleted\naccount, a legacy import, whatever your schema permits:\n\n```sql\nCREATE TABLE users(id int, name text);\nINSERT INTO users VALUES (1, 'ana'), (2, 'bo'), (3, 'cy');\n```\n\n```sql\nCREATE TABLE orders(id int, user_id int);\nINSERT INTO orders VALUES (10, 1), (11, NULL);\nSELECT name FROM users WHERE id NOT IN (SELECT user_id FROM orders);\n```\n\n```\n name\n------\n(0 rows)\n```\n\nTwo users have never ordered anything. The query says nobody has. It is a perfectly\nreasonable-looking way to ask the question, it returns a perfectly reasonable-looking\nempty result, and it is wrong.\n\nExpand it for user 2. `2 NOT IN (1, NULL)` means `2 <> 1 AND 2 <> NULL`:\n\n```\n 2=1 | 2=NULL | not in\n-----+--------+--------\n f   |        |\n```\n\n`2 <> 1` is true. `2 <> NULL` is **unknown**. And `true AND unknown` is unknown — not\ntrue — so `WHERE` drops the row. Now notice that nothing about this depended on the\nnumber 2. Whatever value you test, the second term stays unknown, so the whole `NOT IN`\nis at best unknown and the row is always dropped. **A single NULL anywhere in the list\nmakes `NOT IN` return nothing for every possible input.**\n\n`IN` is not symmetric with it: `2 IN (1, NULL)` is also unknown and also drops the row,\nbut at least it can return true when there *is* a match, so the bug hides only the misses.\n`NOT IN` hides everything.\n\nThe fix is `NOT EXISTS`, which is written in terms of rows rather than values and so has\nnothing to be unknown about:\n\n```sql\nSELECT name FROM users WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id);\n```\n\n```\n name\n------\n bo\n cy\n```\n\nPostgres will also usually plan `NOT EXISTS` better — as an anti-join rather than as a\nfilter — so the correct version is generally the faster one too. That is rare enough to\nbe worth enjoying.\n\n### It is contagious\n\nUnknown propagates through arithmetic and string operations as well as comparisons:\n\n```sql\nSELECT 'a' || NULL AS concat, 1 + NULL AS arith, coalesce('a' || NULL, 'fallback') AS fixed;\n```\n\n```\n concat | arith |  fixed\n--------+-------+----------\n        |       | fallback\n```\n\n`'a' || NULL` is not `'a'`. If one part of the greeting you are building is unknown, the\ngreeting is unknown. Every templating bug that renders an empty string where a name\nshould be traces back to this, and `coalesce(x, fallback)` — return the first non-NULL\nargument — is the standard defence.\n\nAggregates go the other way and **skip NULLs entirely**, which is the source of a whole\nsecond family of quiet wrongness:\n\n```sql\nCREATE TABLE n(v int);\nINSERT INTO n VALUES (1), (2), (NULL);\nSELECT count(*), count(v), sum(v), avg(v) FROM n;\n```\n\n```\n count | count | sum |       avg\n-------+-------+-----+--------------------\n     3 |     2 |   3 | 1.5000000000000000\n```\n\n`count(*)` counts rows: 3. `count(v)` counts non-NULL values: 2. And `avg` is 1.5, not 1\n— it divided by 2, not by 3. If those NULLs represent \"sensor was offline\", the average\nyou just reported is the average of the readings you have, which is a defensible answer.\nIf they represent \"we forgot to record a zero\", it is a lie. The database cannot tell the\ndifference, and neither can the dashboard.\n\n### The inconsistency the experts actually argue about\n\nHere is where SQL stops being merely counter-intuitive and becomes genuinely\nself-contradictory. `WHERE v = NULL` matches nothing, because two unknowns are not known\nto be equal. Put a second NULL into that same table and ask two more questions of it:\n\n```sql\nINSERT INTO n VALUES (NULL);\nSELECT v, count(*) FROM n GROUP BY v ORDER BY v;\nSELECT count(DISTINCT v) AS distinct_v, count(*) AS all_rows FROM n;\n```\n\n```\n v | count            distinct_v | all_rows\n---+-------           ------------+----------\n 1 |     1                     2 |        4\n 2 |     1\n   |     2\n```\n\n`GROUP BY` collected the two NULL rows into **one group of two** — treating them as equal\nto each other, in a language where `NULL = NULL` is not true — while `count(DISTINCT v)`\nignored them entirely and reported 2 distinct values out of 4 rows. `ORDER BY` has an opinion too:\nPostgres sorts NULLs as larger than every value, so they land last ascending and first\ndescending, and `ORDER BY x NULLS FIRST` exists because the standard left it to the\nimplementation.\n\nSo NULLs are unequal in `WHERE`, equal in `GROUP BY` and `DISTINCT`, absent from\naggregates, and last-by-default in `ORDER BY`. Four different answers to \"are two unknowns\nthe same thing\", inside one language.\n\nThat inconsistency is why this is one of the longest-running arguments in database theory.\nC. J. Date, who has spent four decades writing about the relational model and worked with\nCodd himself, argues that nulls should be removed from it outright: that three-valued\nlogic makes queries mean things their authors cannot predict, and that missing information\nbelongs in additional relations rather than in a magic value. It is not a fringe position,\nand it is not a settled one — Claude Rubinson's *Nulls, three-valued logic, and ambiguity\nin SQL* (SIGMOD Record, 2007) argues Date misreads his own example queries, while\nconceding the broader point: nulls introduce a startling amount of complexity into\napparently straightforward queries. Nobody in that argument thinks the current situation\nis *good*. You have to write queries in it anyway.\n\n### Worth knowing: UNIQUE lets in as many NULLs as you like — until you ask it not to\n\nA `UNIQUE` constraint is defined in terms of equality, and NULLs are never equal, so:\n\n```sql\nCREATE TABLE u(v int UNIQUE);\nINSERT INTO u VALUES (NULL), (NULL), (NULL);\nSELECT count(*) FROM u;\n```\n\n```\n count\n-------\n     3\n```\n\nThree NULLs in a unique column, no error. This is the standard's behaviour and it is\ncorrect by the rules — but it is not what \"unique\" means to the person reading your\nschema, and it is why partial unique indexes and `NOT NULL` on key columns are so common.\n\nPostgreSQL 15 finally added the other option:\n\n```sql\nCREATE TABLE u2(v int UNIQUE NULLS NOT DISTINCT);\nINSERT INTO u2 VALUES (NULL);\nINSERT INTO u2 VALUES (NULL);\n```\n\n```\nERROR:  duplicate key value violates unique constraint \"u2_v_key\"\nDETAIL:  Key (v)=(null) already exists.\n```\n\n`NULLS NOT DISTINCT` says: for the purpose of this constraint, treat unknowns as equal to\neach other. It arrived roughly thirty years into the language's life, which tells you how\nlong people put up with the alternative.\n\nOne more tool worth carrying: `IS DISTINCT FROM` is `<>` with unknowns treated as\ncomparable, so `WHERE v IS DISTINCT FROM 1` returns the NULL rows as well as the 2s —\nwhich is almost always what the person writing `WHERE v <> 1` actually meant.",
       "quiz": [
         {
           "id": "q1",
-          "prompt": "`SELECT NULL = NULL` — what comes back, and why isn't it either true or false?",
+          "prompt": "In PostgreSQL, what does `NULL = NULL` evaluate to, and what does `WHERE` do with a row whose condition evaluates to that?",
           "options": [
             {
-              "text": "`1`, because a null is equal to itself like any other value",
+              "text": "False, and the row is discarded",
               "correct": false,
-              "why": "That's the intuition the design deliberately rejects. `NULL` marks an absent value, and two absences aren't evidence of sameness. `IS NULL` is the operator that returns 1 here."
+              "why": "The row is discarded, but the reason matters enormously. If it were false you could rely on `NOT (NULL = NULL)` being true — and it is not, it is unknown too. That is precisely how NOT IN goes wrong."
             },
             {
-              "text": "`0`, because a null isn't equal to anything",
+              "text": "True, since both sides are identical",
               "correct": false,
-              "why": "Close, and a common half-memory — but false would be a verdict, and the engine isn't entitled to one. Unknown is not the same as false, which is exactly why `NOT` can't rescue it."
+              "why": "Identical *syntax*, not identical values. NULL is not a value that can be equal to anything, including another NULL — which is why `IS NULL` had to be invented as separate syntax."
             },
             {
-              "text": "`NULL`, because comparing two unknowns can't produce a verdict",
+              "text": "Unknown, a third truth value — and `WHERE` discards the row, exactly as it would for false",
               "correct": true,
-              "why": "SQL has three truth values. \"Is the value I don't know equal to the other value I don't know?\" has no honest answer, so the comparison yields unknown rather than inventing one."
+              "why": "NULL means unknown, so whether two unknowns are equal is itself unknown. SQL runs on three-valued logic, and `WHERE` keeps a row only when the condition is *true*. Because unknown and false are discarded identically and silently, a query built on unknowns returns a plausible-looking result and logs nothing."
             },
             {
-              "text": "An error — nulls can't be compared with `=`",
+              "text": "It raises an error, which is why `IS NULL` exists",
               "correct": false,
-              "why": "It's perfectly legal SQL and runs silently. The silence is what makes null bugs hard to find."
+              "why": "No error is raised, and that is the whole danger. An error would be a gift; you would find it in a log. Instead the expression quietly evaluates to unknown and the row silently vanishes."
             }
           ]
         },
         {
           "id": "q2",
-          "prompt": "Why does `WHERE x NOT IN (1, 2, NULL)` return no rows regardless of what `x` is?",
+          "prompt": "Walk through why `WHERE x NOT IN (1, 2, NULL)` returns no rows for every possible value of `x`.",
           "options": [
             {
-              "text": "`NOT IN` doesn't accept null values in its list and returns empty",
+              "text": "`NOT IN` cannot be used with subqueries that return NULL, so PostgreSQL returns an empty set",
               "correct": false,
-              "why": "The null is accepted quite happily. The emptiness comes from three-valued logic, not from a rejection."
+              "why": "Nothing special-cases NULL here and nothing is refused. The empty result is the ordinary evaluation of ordinary three-valued logic, which is exactly why it is so hard to spot."
             },
             {
-              "text": "It expands to `x <> 1 AND x <> 2 AND x <> NULL`, and that last term is unknown, so the whole condition is never true",
+              "text": "It expands to `x <> 1 AND x <> 2 AND x <> NULL`; the last term is always unknown, so the whole conjunction is at best unknown and never true",
               "correct": true,
-              "why": "`true AND unknown` is unknown, and `WHERE` keeps only rows where the condition is true. One null in the list is enough to make the answer unknown for every row."
+              "why": "The crucial part is that this does not depend on x. Even when x is 7 and both real comparisons are true, `true AND true AND unknown` is unknown, and `WHERE` keeps only true. One NULL anywhere in the list disables the entire predicate for every input. `NOT EXISTS` is the fix, because it asks about the existence of rows rather than the equality of values."
             },
             {
-              "text": "The optimiser can't build a plan, so it returns nothing",
+              "text": "The NULL matches every value, so every row is excluded by the NOT",
               "correct": false,
-              "why": "The plan is fine and the query runs normally. The result is the honest consequence of the logic, not a planner failure."
+              "why": "A tidy story that gives the right answer for the wrong reason, and it will mislead you next time. NULL matches nothing — the comparison yields unknown, not a match. If NULL genuinely matched everything, plain `IN` would return every row, and it returns none."
             },
             {
-              "text": "It returns no rows only when `x` is itself null",
+              "text": "The list is sorted for the lookup and NULL sorts before everything, truncating it",
               "correct": false,
-              "why": "It returns nothing for every `x`, null or not — including values obviously not in the list, which is what makes it so hard to spot."
+              "why": "No sorting or truncation is involved. `IN` against a literal list is a chain of equality comparisons; the outcome comes from what those comparisons evaluate to."
             }
           ]
         },
         {
           "id": "q3",
-          "prompt": "A table has 100 rows; 30 have a null `duration`. What do `count(*)`, `count(duration)` and `avg(duration)` report, and which silently misleads?",
+          "prompt": "A column `v` holds the values 1, 2 and NULL. What do `count(*)`, `count(v)` and `avg(v)` return, and why can that quietly make a dashboard wrong?",
           "options": [
             {
-              "text": "All three report 70, since nulls aren't really rows",
+              "text": "An error, since an average cannot be computed over an unknown value",
               "correct": false,
-              "why": "`count(*)` counts rows and doesn't look at values at all, so it reports 100. The gap between it and `count(col)` is the tell."
+              "why": "No error. Aggregates over columns containing NULLs are entirely routine — the risk is a plausible number, not a failure. (`avg` over *no* non-NULL rows at all returns NULL rather than raising.)"
             },
             {
-              "text": "100, 70, and null, since any null in the input poisons the aggregate",
+              "text": "3, 2 and NULL — one unknown input makes the whole aggregate unknown",
               "correct": false,
-              "why": "That's true of arithmetic on nulls (`1 + NULL` is null) but not of aggregates. Aggregates skip nulls and return a real number — which is precisely why the problem is invisible."
+              "why": "That is how NULL behaves in *scalar* expressions — `1 + NULL` really is NULL — but aggregates deliberately break that rule and skip nulls instead. Knowing that aggregates are the exception is most of the point of this question."
             },
             {
-              "text": "100, 70, and the mean of the 70 non-null values — the average, because it quietly excludes the missing ones",
+              "text": "3, 2 and 1.5 — aggregates skip NULLs, so the average divided by 2 rather than 3",
               "correct": true,
-              "why": "`avg` divides by the count of non-null values, not by the number of rows. If nulls are your timeouts, the average improves as the service gets worse."
+              "why": "`count(*)` counts rows, `count(v)` counts non-NULL values, and `avg` sums 3 over 2 values. Whether 1.5 is right depends entirely on what the NULL meant. \"Sensor offline\" makes it the correct average of known readings; \"we failed to record a zero\" makes it a 50% overstatement. The database cannot distinguish the two cases, and neither can anything downstream of it."
             },
             {
-              "text": "100, 100 and the mean over all 100 rows, treating nulls as zero",
+              "text": "3, 3 and 1.0 — NULL counts as zero in numeric aggregates",
               "correct": false,
-              "why": "Nothing in SQL treats a null as zero. Both `count(col)` and `avg` skip them entirely."
+              "why": "This is the intuition the behaviour is designed to contradict. NULL is not zero; it is unknown. Treating it as zero would mean claiming knowledge you do not have, so SQL leaves it out of the calculation entirely."
             }
           ]
         },
         {
           "id": "q4",
-          "prompt": "Name the two places where SQL treats two nulls as the same thing, despite `NULL = NULL` being unknown.",
+          "prompt": "Name a place where SQL treats two NULLs as equal to each other, and a place where it treats them as not equal.",
           "options": [
             {
-              "text": "`COUNT` and `SUM`",
+              "text": "Equality depends on the column's type; numeric NULLs compare equal, text NULLs do not",
               "correct": false,
-              "why": "Those skip nulls rather than grouping them. Skipping is a third behaviour again — neither equal nor unequal, just absent."
+              "why": "Type has nothing to do with it. The behaviour differs by *clause* — GROUP BY versus WHERE — and is identical for every data type."
             },
             {
-              "text": "`GROUP BY` puts them in one group, and `DISTINCT` collapses them to one row",
+              "text": "`GROUP BY` and `DISTINCT` put all NULLs together; `WHERE v = NULL` and a plain `UNIQUE` constraint treat them as never equal",
               "correct": true,
-              "why": "Both are about identity rather than comparison, so they have to make a choice — and they choose to treat nulls as one thing. The same null that won't equal itself in a `WHERE` groups with itself a clause later."
+              "why": "Both halves are real and they contradict each other inside one language. Two NULL rows collapse into a single group, yet `WHERE v = NULL` matches neither of them, and a UNIQUE column will happily accept both. `ORDER BY` takes a third position — Postgres sorts NULLs as larger than everything, hence NULLS FIRST as an option. This inconsistency is what the long-running theoretical argument about nulls is actually about."
             },
             {
-              "text": "`JOIN ... ON` and `UNIQUE` constraints",
+              "text": "They are equal everywhere except inside aggregate functions",
               "correct": false,
-              "why": "Both go the other way: a join on null columns matches nothing, and `UNIQUE` permits many nulls precisely because it can't call them equal."
+              "why": "Backwards on the main point, and aggregates are not doing an equality comparison at all — they simply exclude NULL inputs before computing anything."
             },
             {
-              "text": "`ORDER BY` and `WHERE`",
+              "text": "They are never treated as equal anywhere; that is the single consistent rule",
               "correct": false,
-              "why": "`ORDER BY` gives nulls a consistent *position*, which isn't the same as calling them equal, and `WHERE` is the clause where a null comparison drops the row."
+              "why": "It would be a much easier language if that were true. Run `GROUP BY v` on a table with two NULL rows and you get one group of two — which is only possible if something decided those NULLs were the same."
             }
           ]
         },
         {
           "id": "q5",
-          "prompt": "You add `UNIQUE` to a nullable column to enforce \"at most one active session per user\". What actually happens?",
+          "prompt": "A `UNIQUE` column in PostgreSQL already contains a NULL. You insert another NULL. What happens, and how would you make it fail instead?",
           "options": [
             {
-              "text": "Rows with a null in that column are all allowed, because two nulls never compare equal",
+              "text": "It is accepted — uniqueness is defined by equality and NULLs are never equal — and `UNIQUE NULLS NOT DISTINCT` makes the second one fail",
               "correct": true,
-              "why": "The constraint is enforced by comparison, and nulls don't compare equal, so it has nothing to object to. You get unlimited rows with a null there — the standard requires this, and every major engine complies."
+              "why": "You can insert as many NULLs into a UNIQUE column as you like, which is correct by the rules and almost never what the person reading the schema expects. PostgreSQL 15 added NULLS NOT DISTINCT to say \"for this constraint, treat unknowns as equal\"; before that the options were NOT NULL or a partial unique index. It took about thirty years for the language to offer the choice."
             },
             {
-              "text": "It works, since only one row can be active at a time anyway",
+              "text": "It is accepted, but only because the column is nullable; a NOT NULL column would compare NULLs as equal",
               "correct": false,
-              "why": "Nothing enforces that. The whole point is that the constraint you added does not constrain the case you cared about."
+              "why": "A NOT NULL column cannot contain a NULL at all, so there is nothing there to compare. Nullability governs whether NULLs may be stored, never how they compare once stored."
             },
             {
-              "text": "The second null insert is rejected, like any duplicate",
+              "text": "It is rejected — a unique constraint permits at most one NULL",
               "correct": false,
-              "why": "That's the intuition the constraint doesn't share. PostgreSQL 15 added `UNIQUE NULLS NOT DISTINCT` specifically to offer this behaviour as an opt-in."
+              "why": "That is SQL Server's behaviour, and assuming it is portable is how this bug crosses engines. The SQL standard, and PostgreSQL with it, allows any number of NULLs in a unique column by default."
             },
             {
-              "text": "The column is implicitly made `NOT NULL`",
+              "text": "It is accepted, and there is no way to forbid it short of `NOT NULL`",
               "correct": false,
-              "why": "`UNIQUE` and `NOT NULL` are independent. If you want both, you have to say both."
+              "why": "Right about the acceptance, out of date on the remedy. NOT NULL is one answer, but `UNIQUE NULLS NOT DISTINCT` (PostgreSQL 15+) forbids the duplicate NULL while still permitting a single one — and a partial unique index solved it before that."
             }
           ]
         }
       ],
       "task": {
-        "markdown": "Make each of these bite, then fix it.\n\n1. Build a small table with some nulls in it.\n2. Write a `NOT IN` query against a subquery that contains a null, and confirm it returns\n   nothing when it obviously should return rows.\n3. Rewrite the same question with `NOT EXISTS` and confirm it's now correct.\n4. Show `count(*)`, `count(col)`, `sum` and `avg` disagreeing on the same column, and\n   work out by hand what the average *should* be if nulls counted as zero.\n5. Create a `UNIQUE` column and insert three nulls into it. Then find a way to actually\n   forbid that — a partial index or a `CHECK` will do it.",
+        "markdown": "Build the bug, then fix it, then prove the fix.\n\n1. Create a `users` table and an `orders` table where `orders.user_id` is nullable, and\n   insert at least one order whose `user_id` is NULL.\n2. Ask \"which users have never ordered\" with `NOT IN` and a subquery. Record the result.\n   It should be visibly, silently wrong.\n3. Expand the failing condition by hand for one specific user: select each term of the\n   `AND` separately and record what each one evaluates to.\n4. Rewrite the question with `NOT EXISTS` and record the correct result.\n5. Then explore the inconsistency: on a table containing two NULLs, run `GROUP BY`,\n   `count(DISTINCT ...)`, `ORDER BY` and a `WHERE v = NULL`, and record which of them\n   treated the two NULLs as the same thing.\n6. Finally, get a `UNIQUE` column to accept several NULLs, then get it to reject them.\n\nWrite every result you saw into the file as a comment beside the query that produced it.\nThe comparison of step 2 against step 4 is the point of the exercise.",
         "files": [
           "sql/day03.sql"
         ],
-        "compile": "sqlite3 day03.db < sql/day03.sql",
+        "compile": "psql -h localhost -U postgres -f sql/day03.sql",
         "checklist": [
-          "`NULL = NULL` evaluated, and the result is neither 0 nor 1",
-          "a `NOT IN` query returning nothing because of one null, demonstrated",
+          "`NOT IN` with a NULL in the list observed returning zero rows",
+          "the failing condition expanded term by term, with the unknown one identified",
           "the same question answered correctly with `NOT EXISTS`",
-          "`count(*)` and `count(col)` shown disagreeing, and `avg` explained",
-          "three nulls inserted into a `UNIQUE` column, then a constraint that does stop them"
+          "`count(*)`, `count(v)` and `avg(v)` compared on a column containing a NULL",
+          "a `UNIQUE` column observed accepting several NULLs, then rejecting them"
         ]
       }
     }

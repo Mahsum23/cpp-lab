@@ -6,37 +6,40 @@
 # keyed by day id, so two weeks both calling a day "day-01" merges them into a single
 # record. build-content.mjs fails the build if that ever happens again.
 #
-# Teasers are hooks, not tables of contents. "pages, page_size, page_count" says nothing
-# the title doesn't; "why one row costs 4KB" makes someone open it.
+# Teasers are hooks, not tables of contents. "pages, ctid, VACUUM" says nothing the title
+# doesn't; "why VACUUM gave back none of the 4 GB" makes someone open it.
 id: week-sql-01
 title: What the Database Does
 milestone: sql-01-what-the-database-does
 track: sql
 intro: >
-  If you write SQL that works but have never looked at what the engine does with it,
-  this is the layer underneath. Everything here runs in sqlite3 — one binary, no server —
-  so the whole track fits on whatever machine you happen to have open.
+  If you write SQL that works but have never looked at what the engine does with it, this
+  is the layer underneath. Everything runs against PostgreSQL 16 — the engine most likely
+  to be under whatever you build next, and one of the few that will hand you a raw page
+  and tell you what is on it. A container and a psql prompt is the whole setup.
 
 days:
   - id: sql-day-01
     day: 1
     title: A table is a file of pages
     estMinutes: 25
-    teaser: Why reading one row costs four kilobytes, and the hidden column you already have
+    teaser: Your UPDATE didn't update anything, and VACUUM gave back none of the 4 GB
     teachBack: >
-      A page is the unit of I/O. Explain what that means for a query that returns a
-      single narrow row from a large table — what does the engine actually read, and
-      what would have to be true for it to read less?
+      A page is the unit of I/O, and an UPDATE writes a new version of the row rather
+      than editing it. Put those two facts together and explain why a table can triple in
+      size while its row count stays flat — and what plain VACUUM does about it, given
+      that it does not shrink the file.
 
   - id: sql-day-02
     day: 2
     title: An index is a sorted copy
     estMinutes: 30
-    teaser: Your index exists, the column is right, and the plan still says SCAN. Three reasons why.
+    teaser: Same index, same query, one word different — and the planner refuses it
     teachBack: >
-      An index is a second sorted tree, not an annotation. Use that to explain both why
-      `WHERE lower(email) = ?` can't use an index on `email`, and why the fix is an index
-      on the expression rather than on the column.
+      An index is a second sorted tree, not an annotation on the table. Use that to
+      explain both why `WHERE lower(email) = ?` cannot use an index on `email`, and why a
+      planner that has a perfectly usable index will sometimes choose to ignore it and be
+      right to.
 
   - id: sql-day-03
     day: 3
@@ -46,4 +49,4 @@ days:
     teachBack: >
       Walk through why `x NOT IN (1, 2, NULL)` returns nothing for every possible `x`.
       Expand the expression, say what each term evaluates to, and explain why `WHERE`
-      then drops the row.
+      then drops the row — including why it drops it silently rather than erroring.

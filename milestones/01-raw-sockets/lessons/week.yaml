@@ -51,7 +51,7 @@ days:
   - id: day-04
     day: 4
     title: accept()
-    estMinutes: 25
+    estMinutes: 30
     teaser: Two fds, one connection. The single most-missed fact in hand-rolled socket code.
     teachBack: >
       Explain why accept() returns a new fd instead of reusing the listening one. What
@@ -61,7 +61,7 @@ days:
   - id: day-05
     day: 5
     title: recv() and send(), once each
-    estMinutes: 25
+    estMinutes: 30
     teaser: Read the same bytes twice without consuming them, and prove the kernel's buffer is not yours.
     teachBack: >
       What does the return value of recv() mean — all three cases. Then: your buffer is

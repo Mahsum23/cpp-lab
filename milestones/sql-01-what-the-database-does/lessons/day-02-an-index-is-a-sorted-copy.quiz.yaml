@@ -1,138 +1,190 @@
+# Answer key for day 02. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
 questions:
   - id: q1
     prompt: >
-      You add an index to speed up a slow report. Name two costs you have just taken on.
+      You add an index to speed up a slow report. Name two distinct costs you have just
+      taken on.
     options:
-      - text: Every write to the table now maintains a second tree, and the database grows
+      - text: >
+          Every write to the table now maintains a second tree, and the index occupies
+          real disk space of its own
         correct: true
         why: >
-          An index is a real sorted copy of real data. Inserts and updates of the indexed
-          column write both trees, and the copy occupies real pages — sometimes more than
-          the table itself.
-      - text: Reads of other columns get slower
+          Those are the two standing costs, and neither is small. Two single-column
+          indexes on a three-column 50,000-row table came to 1544 kB each against a
+          4552 kB table — two thirds of the table's size, for two columns. And in
+          PostgreSQL the write cost is worse than it first looks: because index entries
+          hold a physical row location, an UPDATE that moves a row must touch every index
+          on the table, not just the ones on columns you changed.
+      - text: Reads of other columns get slower, because the row is now split in two
         correct: false
         why: >
-          Unindexed reads are unaffected. The optimiser simply won't use the index for
-          them; it doesn't get in the way.
-      - text: The table has to be locked while the index exists
+          The row is not split. The index is an additional copy of the indexed columns;
+          the heap still holds every column exactly as before, and reads that ignore the
+          index are unaffected.
+      - text: The table must be locked whenever the index is used
         correct: false
         why: >
-          Building an index takes a lock briefly, but having one doesn't. If it did,
-          nobody would use indexes.
-      - text: Existing queries must be rewritten to reference the index by name
+          Reading through an index takes no special lock. There is a locking cost to
+          *building* one — which is why CREATE INDEX CONCURRENTLY exists — but that is a
+          one-off, not a cost of having the index.
+      - text: Queries that do not use the index have to skip past it while scanning
         correct: false
         why: >
-          The optimiser picks indexes; queries name tables and columns. Being able to
-          add an index without touching query text is most of the point.
+          An index is a separate file. A sequential scan of the table never reads it and
+          never steps over it.
 
   - id: q2
     prompt: >
-      A query filtering on an indexed column shows `SCAN` in its plan. Give two different
-      reasons that can happen even though the index exists and the column is right.
+      A query filters on an indexed column and the plan still shows `Seq Scan`, even
+      though the index exists and the column is right. Give two different reasons that
+      can happen.
     options:
       - text: >
-          The column is wrapped in a function, or the query's collation doesn't match the
-          index's
+          The filter wraps the column in a function or a cast, or the value matches so
+          many rows that scanning is genuinely cheaper
         correct: true
         why: >
-          Both break the same rule: an index answers questions about the exact value in
-          the exact order it was sorted. `lower(col)` is a different value; a
-          case-insensitive `LIKE` against a case-sensitive index is a different order.
-      - text: The index is too new for the optimiser to have noticed it
+          Two entirely different failures that produce the identical symptom. The first
+          is a correctness limit — an index on `name` is sorted by `name`, so it can say
+          nothing about `lower(name)`. The second is the planner being right: fetching
+          198,000 of 200,000 rows through an index means 198,000 random heap jumps, and
+          reading the table straight through beat it by more than 10x in the lesson's
+          measurement.
+      - text: >
+          The index has not finished building, or the table has too few rows for an index
+          to exist
         correct: false
         why: >
-          Indexes are visible to the planner as soon as they're created. Stale
-          *statistics* can cause bad estimates, but that's a different failure and it
-          doesn't hide the index.
-      - text: The table is too small, so the optimiser refuses to use any index
+          An unfinished CREATE INDEX is simply not visible to the planner yet, so this is
+          not really a case of an index being ignored. And no row-count threshold governs
+          whether an index can exist — small tables just rarely benefit.
+      - text: >
+          The column is nullable, and PostgreSQL cannot index columns that contain NULLs
         correct: false
         why: >
-          A tempting answer, because on a tiny table a scan genuinely can be cheaper and
-          the optimiser may choose it. But that's the optimiser being right, not the
-          index being unusable — and it isn't one of the two structural reasons.
-      - text: SELECT * always forces a scan
+          PostgreSQL B-trees do index NULLs, and `WHERE col IS NULL` can use an index.
+          (This is a real difference between engines — Oracle's B-trees famously omit
+          all-NULL keys — but it is not why Postgres would choose a Seq Scan.)
+      - text: The statistics are stale, which makes the index physically unusable
         correct: false
         why: >
-          `SELECT *` prevents an index being *covering*, so the engine must fetch rows
-          after the index lookup. It doesn't stop the lookup happening.
+          Stale statistics are a genuine and very common cause of a bad plan — but they
+          mislead the planner's *estimate*, they do not make an index unusable. Run
+          ANALYZE and the same index may suddenly be chosen for the same query.
 
   - id: q3
-    prompt: What does `COVERING` mean in a query plan, and what work does it save?
+    prompt: >
+      What does `Index Only Scan` mean in a PostgreSQL plan, what work does it save, and
+      what can still force it to touch the heap anyway?
     options:
       - text: >
-          The index holds every column the query needs, so the engine answers from the
-          index and never reads the table
+          The index carried every column the query needed, so the heap lookup was
+          skipped — except for pages the visibility map has not marked all-visible
         correct: true
         why: >
-          It eliminates the second hop — index entry to actual row — which on a large
-          table is a random page read per matching row, and usually dominates the cost.
-      - text: The index covers every row in the table, so no rows can be missed
+          The saving is the second lookup: index entry to row. The catch is that an index
+          holds no visibility information, so Postgres must still establish that each row
+          is visible to your transaction. It uses the visibility map, one bit per page,
+          and any page not marked forces a heap fetch after all. EXPLAIN ANALYZE prints
+          `Heap Fetches:` — a large number there usually means the table wants vacuuming.
+      - text: The whole index was loaded into memory, so no disk reads were needed
         correct: false
         why: >
-          Ordinary indexes always contain every row (partial indexes aside). "Covering"
-          is about columns, not rows.
-      - text: The index is large enough to be held entirely in memory
+          "Only" describes which structures were consulted, not where they live. An
+          Index Only Scan still reads index pages from disk if they are not cached.
+      - text: >
+          The query was answered from the index because the table itself was locked by
+          another transaction
         correct: false
         why: >
-          Caching is real and helps, but it's not what the word means and it isn't what
-          the plan is reporting.
-      - text: The engine has locked the rows the index points at
+          Plan choice has nothing to do with locks held elsewhere. The planner picks this
+          shape purely because the index happens to contain every column required.
+      - text: >
+          Only one index was used, rather than combining several
         correct: false
         why: >
-          Nothing to do with locking. A covering read touches fewer things, if anything.
+          Combining indexes is a real Postgres capability, but it shows up as a BitmapAnd
+          or BitmapOr over Bitmap Index Scans. "Index Only" refers to not visiting the
+          heap.
 
   - id: q4
     prompt: >
-      Your table has an index on `email`. Which of these can use it —
-      `WHERE email = ?`, `WHERE lower(email) = ?`, `WHERE email LIKE 'a%'`?
+      Your table has an index on `email`. Which of `WHERE email = ?`,
+      `WHERE lower(email) = ?` and `WHERE email LIKE 'a%'` can use it, and what decides
+      the last one?
     options:
       - text: >
-          The first straight away; the second not at all; the third only if the index's
-          collation matches how LIKE compares
+          Equality yes; `lower(email)` no, without an index on the expression; `LIKE 'a%'`
+          only if the index's collation is `C` or it uses `text_pattern_ops`
         correct: true
         why: >
-          Equality on the bare column is exactly what the index is sorted for.
-          `lower(email)` is a value the index doesn't contain. The prefix match is a
-          range scan in principle, but only once the question's collation and the index's
-          agree.
-      - text: All three, since all three filter on the indexed column
+          The first two follow from the index being sorted by `email` and nothing else.
+          The third is the subtle one: turning `LIKE 'a%'` into the range `>= 'a' AND
+          < 'b'` is only valid if the sort order is bytewise. A locale-aware collation
+          may interleave strings so that the prefix matches are not contiguous — and
+          `C.UTF-8` counts as locale-aware, despite the name.
+      - text: All three, since all three mention only the indexed column
         correct: false
         why: >
-          Naming the column isn't enough — the index stores one specific value in one
-          specific order, and two of these ask about something else.
-      - text: Only the first; the other two can never use an index
+          Mentioning the column is not the test. The test is whether the query's condition
+          can be expressed as a range over the *order the index is sorted in* — which
+          `lower(email)` cannot be, at any collation.
+      - text: >
+          Only the equality one; B-trees answer equality and nothing else
         correct: false
         why: >
-          Both are recoverable: an expression index handles `lower(email)`, and a
-          matching collation handles the prefix match.
-      - text: The first and second; `LIKE` can never use an index
+          B-trees are excellent at ranges — that is what being sorted buys you. `>`, `<`,
+          `BETWEEN` and `ORDER BY` all use them, and a prefix `LIKE` is a range in
+          disguise when the collation permits.
+      - text: >
+          Equality and `LIKE 'a%'`; `lower(email)` works too once the statistics are
+          refreshed
         correct: false
         why: >
-          Backwards on both counts. `lower(email)` needs an expression index, while a
-          *prefix* `LIKE` is genuinely index-friendly given the right collation. A
-          leading `%` is the one that can't be helped.
+          ANALYZE cannot help here. There is no entry anywhere in an index on `email`
+          that records what `lower(email)` is, so no amount of better estimation makes
+          that index answer the question. You need a second index, on the expression.
 
   - id: q5
     prompt: >
-      Why does an index make `ORDER BY name` cheaper even for a query that returns every
-      row in the table?
+      `EXPLAIN` says a query will return 3 rows; `EXPLAIN ANALYZE` shows it actually
+      returned 40,000. What is most likely wrong, and what does the planner do with a bad
+      estimate?
     options:
-      - text: The index is already stored in that order, so there is nothing to sort
+      - text: >
+          The statistics are stale or unrepresentative — and since the estimate is what
+          chooses the plan, a wrong one picks a plan suited to a query that does not exist
         correct: true
         why: >
-          Sorted order is the index's entire nature. Reading it in order yields rows in
-          order, turning a sort into a walk — no temporary file, no sort buffer.
-      - text: The index lets the engine skip rows it doesn't need
+          This gap is where nearly every planner mystery is solved, which is why you reach
+          for EXPLAIN ANALYZE rather than EXPLAIN. Believing three rows, the planner
+          happily picks an index scan or a nested loop; at 40,000 rows those become
+          40,000 random jumps or 40,000 inner scans. ANALYZE after a bulk load is the
+          first thing to try, and correlated columns — where the planner assumes
+          independence and is wrong — are the next suspect.
+      - text: >
+          Nothing is wrong; `EXPLAIN` reports rows examined and `EXPLAIN ANALYZE` reports
+          rows returned
         correct: false
         why: >
-          This query needs every row. The saving is the ordering, not any filtering.
-      - text: It doesn't — returning every row means a scan, so the index is unused
+          Both report the same quantity: rows emitted by that node. One is the planner's
+          estimate and the other is the measured truth, which is exactly why comparing
+          them is useful.
+      - text: The query changed between the two runs, so the numbers are not comparable
         correct: false
         why: >
-          A full read still has to produce the requested order somehow. Doing it by
-          reading a pre-sorted structure beats sorting the whole table.
-      - text: Sorting happens in memory either way, so it's the same cost
+          EXPLAIN ANALYZE plans and executes the same statement, so the estimate and the
+          actual come from one run. They are directly comparable by design.
+      - text: >
+          The planner notices the discrepancy mid-execution and re-plans with the real
+          number
         correct: false
         why: >
-          Only if it fits. A sort too big for the buffer spills to disk, which is exactly
-          the cost the ordered index avoids.
+          PostgreSQL does not re-plan mid-execution; the plan is fixed before the first
+          row is produced, and a bad estimate is lived with to the end. Adaptive
+          re-planning of this kind exists in some other systems, but assuming it here is
+          how people conclude a plan "should have fixed itself".
