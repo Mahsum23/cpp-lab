@@ -26,6 +26,26 @@
   const steps = $derived(hasTeachBack ? 4 : 3);
   const clamped = $derived(Math.min(Math.max(step, 0), steps - 1));
 
+  /**
+   * The stepper is a switcher, not just a progress bar.
+   *
+   * Re-reading the theory after the quiz, or jumping straight back to the task, used
+   * to mean walking backwards through every step in between — the Back button was the
+   * only way through. Step indices are fixed (theory, quiz, task, explain) so a day
+   * without a quiz keeps the same numbering and simply doesn't offer that chip.
+   */
+  const chips = $derived(
+    [
+      { at: 0, label: 'Theory' },
+      ...(hasQuiz ? [{ at: 1, label: 'Quiz' }] : []),
+      { at: 2, label: 'Task' },
+      ...(hasTeachBack ? [{ at: 3, label: 'Explain' }] : []),
+    ].filter((c) => c.at < steps),
+  );
+
+  /** Which arcs are closed, so a chip can show what's already done. */
+  const done = $derived(day ? app.segments(day, weekId) : []);
+
   function goto(next: number) {
     if (next < 0) return router.back();
     if (next > steps - 1) return;
@@ -56,11 +76,22 @@
       <span></span>
     </div>
     <div class="row">
-      <button class="back" onclick={() => goto(clamped - 1)} aria-label="Back">
+      <button class="back" onclick={() => router.go('/today')} aria-label="Leave the session">
         <svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg>
         <span>Day {day.day}</span>
       </button>
-      <span class="count numeral">{clamped + 1}/{steps}</span>
+      <nav class="chips" aria-label="Session steps">
+        {#each chips as chip}
+          <button
+            class:on={clamped === chip.at}
+            class:done={done[chip.at] && clamped !== chip.at}
+            aria-current={clamped === chip.at ? 'step' : undefined}
+            onclick={() => goto(chip.at)}
+          >
+            {chip.label}
+          </button>
+        {/each}
+      </nav>
     </div>
   </div>
 
@@ -80,6 +111,33 @@
 {/if}
 
 <style>
+
+  /* Tappable, because moving between steps is something you do constantly and
+     walking back through the quiz to re-read a paragraph is absurd. */
+  .chips {
+    display: flex;
+    gap: 4px;
+    flex: none;
+  }
+
+  .chips button {
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-faint);
+    white-space: nowrap;
+  }
+
+  .chips button.done {
+    color: var(--ok);
+  }
+
+  .chips button.on {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
   .stepper {
     position: sticky;
     top: 0;
@@ -120,10 +178,6 @@
     stroke-linejoin: round;
   }
 
-  .count {
-    font-size: 13px;
-    color: var(--text-faint);
-  }
 
   .bar {
     height: 3px;

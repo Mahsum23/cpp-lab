@@ -31,6 +31,20 @@
   const gotIt = $derived(answered && picked === correctIndex);
   const last = $derived(index === questions.length - 1);
 
+  const anyAnswered = $derived(questions.some((qq) => qq.id in answers));
+
+  /**
+   * Answering the same five questions again, days later and with no theory on screen,
+   * is retrieval practice — the cheapest thing in the app and one of the few study
+   * techniques with strong evidence behind it. So it's one tap, not a reset buried in
+   * settings, and it costs nothing: the day stays finished and a clean sweep stays won.
+   */
+  async function retake() {
+    await app.retakeQuiz(day, weekId);
+    index = 0;
+    scrollTo({ top: 0 });
+  }
+
   function choose(i: number) {
     if (answered || !q) return;
     void app.answerQuiz(day, weekId, q.id, i);
@@ -49,7 +63,17 @@
 </script>
 
 {#if q}
-  <p class="eyebrow">Question {index + 1} of {questions.length}</p>
+  <div class="head">
+    <p class="eyebrow">Question {index + 1} of {questions.length}</p>
+    {#if anyAnswered}
+      <button class="retake" onclick={retake}>
+        <svg viewBox="0 0 24 24"
+          ><path d="M20 11a8 8 0 1 0-2.3 6M20 5v6h-6" /></svg
+        >
+        Retake
+      </button>
+    {/if}
+  </div>
   <h1>{q.prompt}</h1>
 
   <ul class="options">
@@ -105,6 +129,39 @@
 {/if}
 
 <style>
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .retake {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    margin: -4px -5px -4px 0;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-faint);
+  }
+
+  .retake:active {
+    background: var(--surface-2);
+  }
+
+  .retake svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   h1 {
     font-size: 21px;
     line-height: 1.35;

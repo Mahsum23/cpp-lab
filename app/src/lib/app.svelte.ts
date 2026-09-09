@@ -370,9 +370,26 @@ class AppStore {
   async finishQuiz(day: Day, weekId: string) {
     const p = this.mutable(day.id, weekId);
     const questions = day.quiz ?? [];
-    p.quiz.cleanSweep =
+    // Monotonic: a clean sweep, once earned, is kept. Retaking a quiz for practice
+    // must never be able to take XP away — deriveXp reads this field on every later
+    // completion, so demoting it here would silently reduce a total earned weeks ago.
+    p.quiz.cleanSweep ||=
       questions.length > 0 && questions.every((q) => this.wasCorrect(day, weekId, q.id));
     p.quiz.completedAt = new Date().toISOString();
+    await this.persist();
+  }
+
+  /**
+   * Clear the answers so the quiz can be taken again.
+   *
+   * `completedAt` and `cleanSweep` stay put: the arc on the day ring has been earned
+   * and shouldn't reopen because he wanted another pass at the questions. This is the
+   * cheap kind of retrieval practice — same questions, no theory on screen — and it
+   * should cost nothing to reach for.
+   */
+  async retakeQuiz(day: Day, weekId: string) {
+    const p = this.mutable(day.id, weekId);
+    p.quiz = { ...p.quiz, answers: {}, correct: {} };
     await this.persist();
   }
 
