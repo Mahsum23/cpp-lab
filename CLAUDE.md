@@ -204,6 +204,25 @@ experiment that lets him *see* it — `ls -l /proc/<pid>/fd`, `ss -tan`, `strace
 `MSG_PEEK` reading the same bytes twice. A claim he verified himself outranks a
 paragraph he believed.
 
+**Every output block in a lesson is real output, and every snippet is run before it
+ships.** Don't write plausible-looking terminal output from memory — actually run it, in
+the version the lesson names, and paste what came back. Then extract the lesson's snippets
+and run them end-to-end in a clean environment as a stranger following the file would:
+that pass has repeatedly caught snippets referencing a table the lesson never creates, and
+figures quoted from a different state than the reader will be in at that point. Where a
+number depends on state you can't control, give the reader an invariant to check
+(`lower = 24 + 4 × tuples`) rather than a figure to believe.
+
+**Ground every topic in what it means at work.** Alongside the mechanism, say where this
+shows up in a real system, what it costs somebody, and what the people who argue about it
+for a living think. Named, checkable stories beat generic ones — Uber's 2016 write-up on
+ctid write amplification, Sentry losing a working day to transaction-id wraparound, MySQL
+only getting expression indexes in 8.0.13 — and a live disagreement between experts
+(C. J. Date on nulls versus his critics in SIGMOD Record) is better than a settled fact,
+because it shows the field as something still being argued rather than a list to memorise.
+Verify each such claim by search before it ships; attribute a *position* rather than a
+quotation unless the quotation itself is confirmed. Never invent a company anecdote.
+
 **Day ids must be unique across every week in the repo, not just within one.** Progress,
 review cards and the mentor's chat threads are all flat maps keyed by day id, so two
 weeks both calling a day `day-01` merges them into a single record — finishing one
@@ -319,6 +338,16 @@ finish: at most three probes, then a ruling, so he is never trapped in an examin
 that cannot end. When writing a `teachBack` question, make it something he can get wrong
 in an interesting way: "what is the backlog a queue of, and who puts things in it" beats
 "explain listen()".
+
+## The SQL track is PostgreSQL-first
+
+He said plainly that Postgres is the database he wants to learn first, so the SQL track
+teaches PostgreSQL and everything in it is verified against a real server (16 at time of
+writing), not written from memory. Other engines appear only as contrast — "SQLite's
+answer is different, and here's why" — never as the spine of a lesson. Keep the setup a
+one-liner a stranger can run (`docker run --rm -e POSTGRES_PASSWORD=x -p 5432:5432
+postgres:16`), and lean on the things Postgres will show you that others won't: `ctid`,
+`xmin`/`xmax`, `EXPLAIN (ANALYZE, BUFFERS)`, `pageinspect`, `pg_stat_*`.
 
 ## Curriculum
 
