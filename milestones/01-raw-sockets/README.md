@@ -87,7 +87,10 @@ exit. Trigger it with `nc` or `telnet` — no client program yet.
 **Worth knowing:** `accept4()` takes the `SOCK_CLOEXEC`/`SOCK_NONBLOCK` flags directly,
 for exactly the race described on Day 1. And the client address is filled in *by the
 kernel*, which is why you pass a length in and get a length back — the same
-value-result parameter pattern that shows up all over this API.
+value-result parameter pattern that shows up all over this API. Then `SO_REUSEPORT`,
+which gives every process its *own* accept queue on one port: Google's answer in 2013 to
+measuring a three-to-one imbalance between accepting threads, and the mechanism behind
+every "one worker per core, all on port 443" deployment since.
 **Watch for:** the single most-missed fact in hand-rolled socket code — confusing the
 listening socket with the connected one.
 
@@ -99,7 +102,10 @@ bytes, `send()` those exact bytes back once, then close. No loop.
 **Worth knowing:** `MSG_PEEK` reads bytes without consuming them, so you can read the
 same data twice and prove the kernel's buffer is a separate thing from yours — a
 two-line experiment that makes the whole buffering model concrete. `MSG_WAITALL` and
-`MSG_DONTWAIT` are the other two flags worth knowing exist.
+`MSG_DONTWAIT` are the other two flags worth knowing exist. Then where this interface
+stands today: `io_uring` removes the syscall per operation, partly to pay back what the
+Spectre mitigations cost — and Google disabled it in ChromeOS, Android and their own
+production servers over the exploits it attracted.
 **Watch for:** `recv()` returning `0` (the peer sent FIN — an orderly shutdown) vs `-1`
 (error). Different things, both must be handled. Don't loop yet, even though you'll
 want to.
@@ -113,7 +119,8 @@ writes less than you asked.
 **Worth knowing:** two classics. First, Nagle's algorithm plus delayed ACK: two
 optimisations that are individually sensible and together produce a reproducible ~40ms
 stall on small back-and-forth writes — the reason `TCP_NODELAY` exists and gets set by
-approximately every RPC library ever written. You can measure it. Second, writing to a
+approximately every RPC library ever written. You can measure it, and Nagle himself is
+on record that the algorithm is not the half that's wrong. Second, writing to a
 socket the peer already closed raises `SIGPIPE`, whose default action is to *kill your
 process* — so a server that doesn't pass `MSG_NOSIGNAL` (or ignore the signal) dies
 silently when a client hangs up rudely.

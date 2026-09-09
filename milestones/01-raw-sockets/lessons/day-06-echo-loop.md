@@ -134,6 +134,20 @@ Essentially every RPC framework, database driver and game server sets it. Note i
 the *connected* socket, and note the name is a double negative you'll misread at least
 once: `TCP_NODELAY = 1` means "do not delay", i.e. Nagle **off**.
 
+The person most annoyed by all this is John Nagle himself. He is still around, still
+posts, and his position is that the algorithm bearing his name is not the problem:
+
+> That still irks me. The real problem is not tinygram prevention. It's ACK delays, and
+> that stupid fixed timer. They both went into TCP around the same time, but
+> independently.
+
+Which is the useful way to hold it: neither optimisation is wrong, and neither knows the
+other exists. Two independently reasonable local decisions producing a pathological
+global one is a shape you will meet again well outside networking. It is common enough
+that an AWS principal engineer titled a 2024 post on it *"It's always TCP_NODELAY. Every
+damn time."* — forty years after the algorithm shipped, it is still the first thing
+experienced people check when latency comes in suspiciously round numbers.
+
 Being honest about what you'll see today: on loopback, with an echo server, you probably
 *won't* reproduce the stall — there's no real network latency, and the traffic pattern
 is too simple to trigger the standoff. Knowing the mechanism matters more than measuring

@@ -104,6 +104,30 @@ kernel produced, and those chunks have nothing to do with the sizes the sender p
 Today you call `recv()` exactly once and see this happen. Tomorrow you loop, which is
 where it stops being a curiosity and starts being a bug you have to design against.
 
+### Is `recv()` still what fast servers call?
+
+Mostly yes, and that is worth saying plainly, because the interface you are learning
+today is not a museum piece. Nginx, Redis, PostgreSQL and essentially every language
+runtime's network stack bottom out in `recv()`/`send()` (or `readv`/`writev`, the same
+thing across several buffers) driven by an event loop. What changes at the top end is not
+the call but how many of them you make per unit of work.
+
+The genuinely new thing is **`io_uring`**, merged by Jens Axboe into Linux 5.1 in 2019. It
+replaces "one syscall per operation" with two shared ring buffers: you write submission
+entries into memory the kernel is also reading, and it writes completions back, so a
+batch of reads and writes can cost approximately zero syscalls. That matters because a
+syscall stopped being cheap around 2018, when the Spectre and Meltdown mitigations added
+real cost to every kernel boundary crossing — io_uring is in part an answer to a hardware
+bug.
+
+And then the twist, which is the part worth remembering: **Google turned it off.** io_uring
+became a favourite of kernel exploit writers — around 60% of the kernel exploits submitted
+to Google's own bounty programme targeted it — and Google's response was to disable it in
+ChromeOS, block it from Android apps with a seccomp filter, and switch it off on their
+production servers. A faster interface that the largest deployer of Linux on earth
+declined to run is a good reminder that "newer" and "better" are different axes, and that
+the boring old syscall you are learning today is boring for reasons that have value.
+
 ## Task
 
 Extend Day 4's program. After `accept()`:

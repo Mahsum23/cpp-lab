@@ -111,6 +111,36 @@ one immediately went back to sleep having found nothing. That's the **thundering
 modern Linux wakes only one, but the phrase outlived the bug and now gets used for any
 stampede-on-a-single-event problem.
 
+### What production servers do instead: SO_REUSEPORT
+
+Waking one process is not the same as waking a *fair* one. When Google measured several
+threads accepting on one listening socket under load, the thread that won the most
+connections took about three times as many as the thread that won the fewest — no bug,
+just the kernel handing every wakeup to whoever happened to be at the head of the wait
+queue.
+
+The answer, contributed by Tom Herbert at Google and merged into Linux 3.9 in 2013, is a
+socket option that changes who owns the accept queue:
+
+```cpp
+int yes = 1;
+setsockopt(listen_fd, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes));
+```
+
+With it set, several processes may each `bind()` and `listen()` on the *same* port and
+each gets **its own accept queue**. The kernel hashes each incoming connection's
+four-tuple to pick a queue, so there is no shared queue to contend on and no wakeup to
+lose. Note how different this is from `SO_REUSEADDR` on Day 3, despite the near-identical
+name: that one is about reusing an address in `TIME_WAIT`, this one is about several live
+sockets sharing a port on purpose.
+
+This is not obscure. NGINX exposes it as `listen 80 reuseport;` — added in 1.9.1, in 2015
+— and reported two-to-three times the throughput on multi-core machines with it on. If
+you have ever wondered how a server runs "one process per core, all on port 443", this is
+the mechanism. It has a matching downside worth knowing before you reach for it: because
+the choice is a hash rather than a queue, a process that is busy still gets its share of
+new connections, and restarting one worker drops the connections its queue was holding.
+
 ### Go and look at both sockets
 
 With a client connected, your process holds two sockets on port 9000 in different
