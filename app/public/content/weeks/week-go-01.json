@@ -1,0 +1,954 @@
+{
+  "schemaVersion": 1,
+  "id": "week-go-01",
+  "title": "Go, From Zero",
+  "milestone": "go-01-from-zero",
+  "track": "go",
+  "intro": "Go is a small language built almost entirely out of arguments about what to leave out. This week goes from an empty file to goroutines, stopping at the three or four places where Go behaves differently from what your instincts predict — and explaining why it was designed that way, because the reason is usually the part worth remembering. Everything here runs with nothing but the Go toolchain installed.",
+  "days": [
+    {
+      "id": "go-day-01",
+      "day": 1,
+      "title": "Hello, and a compiler that says no",
+      "estMinutes": 25,
+      "teaser": "An unused variable is a build error, and the rule everyone calls a language rule technically isn't one",
+      "teachBack": "Go refuses to compile a program containing an unused variable or an unused import. Give both of the separate motives behind that decision — one about your bugs, one about everybody's build times — and explain why the escape hatch was deliberately made ugly rather than convenient.",
+      "slug": "hello-and-refusals",
+      "status": "available",
+      "theoryMarkdown": "Go is a small language. That is not marketing — the spec is about 100 pages, it has 25\nkeywords, and you can hold most of it in your head. C++ has 90-odd keywords and a\nstandard nobody has read end to end. The whole design is a series of arguments about what\nto *leave out*, and the fastest way to understand Go is to keep asking \"what did they\nrefuse to add, and why\".\n\nToday: getting a program to run, and meeting the two refusals that make newcomers\nfurious in week one and grateful in month three.\n\n### The smallest program that works\n\n```go order\npackage main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello from Go\")\n}\n```\n\n```\nhello from Go\n```\n\nFour things worth naming:\n\n- **`package main`** — every Go file belongs to a package. The one called `main` is\n  special: it is the package that produces an executable. Everything else is a library.\n- **`import \"fmt\"`** — the standard library's formatted-I/O package. Roughly `<cstdio>`\n  and `<iostream>` in one, minus the operator overloading.\n- **`func main()`** — no arguments, no return value. Command-line arguments live in\n  `os.Args`, and you set the exit code with `os.Exit`. There is no `int main(int argc,\n  char **argv)` here.\n- **The tab.** Go indents with tabs, and you don't get an opinion. More on that below.\n\nTwo ways to run it:\n\n```bash\ngo run hello.go      # compile to a temp dir and execute, in one step\ngo build hello.go    # leave an executable called ./hello next to the source\n```\n\n`go run` feels like a scripting language and isn't one — it really is compiling. On this\nmachine, a warm `go build` of that file takes **0.3 seconds** and produces a **2.2 MB**\nbinary. That size is not bloat so much as honesty: the Go runtime, garbage collector and\nscheduler are all inside it. In exchange:\n\n```\n$ file hello\nhello: ELF 64-bit LSB executable, x86-64, statically linked\n\n$ ldd hello\n\tnot a dynamic executable\n```\n\n**Statically linked. No shared library dependencies at all.** Copy that file to a bare\ncontainer with nothing in it and it runs. If you have ever shipped a C++ binary and\ndiscovered the target box had the wrong `libstdc++`, you can probably see why this single\nproperty is most of the reason Docker, Kubernetes, Terraform and Prometheus are all\nwritten in Go. Deployment is `scp`.\n\n### Refusal one: an unused variable is an error\n\n```go\nfunc main() {\n\tcount := 42\n\tfmt.Println(\"hi\")\n}\n```\n\n```\n./bad.go:6:2: declared and not used: count\n```\n\nNot a warning. The build **fails**. Every other language you have used treats this as a\nlint at most — C++ has `-Wunused-variable`, which is off unless you asked for it and\nwhich everyone ignores anyway inside a wall of template errors.\n\n### Refusal two: an unused import is also an error\n\n```go\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n```\n\n```\n./bad2.go:5:2: \"os\" imported and not used\n```\n\nThis one gets people genuinely angry, because it fires constantly while you are still\n*writing* the code — you comment out four lines to test something and the program stops\ncompiling for reasons unrelated to what you were doing.\n\nThe reasoning is that both of these are almost always the fingerprint of a real bug:\nyou declared a variable meaning to use it and then used a different one; you imported a\npackage for a call you deleted. Catching them costs a rebuild; missing them costs an\nafternoon. The unused import has a second motive too — an import is a dependency, and\ndependencies you don't use still cost compile time for everyone who builds your package.\n\nThe escape hatches exist, and they are deliberately ugly enough that you won't leave them\nin by accident:\n\n```go\n_ = count   // \"yes, I know, I am not using this yet\"\n```\n\n```go\nimport _ \"net/http/pprof\"   // import ONLY for its side effects (its init function)\n```\n\nThat second one is not a hack — it is the standard way to register something. Importing\n`net/http/pprof` for its side effect is how you bolt a live profiler onto a running Go\nserver, which is a genuinely great trick you will meet again.\n\n### Refusal three: you don't get to have opinions about formatting\n\n```bash\ngofmt -d ugly.go     # show what it would change\ngofmt -w ugly.go     # rewrite the file in place\n```\n\n```diff\n package main\n+\n import \"fmt\"\n-func main(){\n-x:=1\n-fmt.Println( x )\n+\n+func main() {\n+\tx := 1\n+\tfmt.Println(x)\n }\n```\n\nThere is one canonical format, a tool that produces it, and no configuration. Tabs, not\nspaces. Braces where `gofmt` puts them, not where you like them. Every Go codebase on\nearth looks the same, and the entire category of pull-request argument about brace style\nsimply does not exist. After a decade of `.clang-format` files that differ per project,\nthis is a bigger quality-of-life win than it sounds.\n\n> [!NOTE]\n> **The origin story, and the more interesting truth behind it.** Go is usually said to\n> have been conceived while three engineers — Robert Griesemer, Rob Pike and Ken Thompson\n> (yes, *that* Ken Thompson, of Unix and B) — waited 45 minutes for a C++ binary at Google\n> to compile, in September 2007. Pike himself calls this \"the origin myth for Go\": the\n> 45-minute build was real, and so was the frustration, but the tidy anecdote is tidier\n> than what happened. Which is a useful thing to know in its own right, because the\n> *frustration* is what the language is actually built out of. Nearly every refusal above\n> is downstream of \"how long does the build take, and how much does the reader have to\n> know\".\n\n### Worth knowing: the rule everyone calls a language rule is technically optional\n\nThe Go specification ships with your Go installation — `/usr/local/go/doc/go_spec.html`\non a typical Linux setup. Search it for the unused-variable rule and here is the exact\nwording:\n\n> Implementation restriction: A compiler may make it illegal to declare a variable inside\n> a function body if the variable is never used.\n\n**May.** The language does not require it; it *permits* a compiler to. The `gc` compiler\nyou are using exercises that permission, so in practice it is a rule — but it is a rule\nthe toolchain chose, not one the language demands, which is a distinction almost nobody\nwho complains about it knows. Reading the actual spec of a language you are learning is\nan unreasonably high-value hour, and Go's is short enough to make that realistic.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "`go run hello.go` executes your program immediately, the way `python script.py` does. What is it actually doing underneath, and how does that differ from an interpreter?",
+          "options": [
+            {
+              "text": "Compiling to a real machine-code binary in a temporary directory and then executing it — the convenience is a wrapper, not interpretation",
+              "correct": true,
+              "why": "Go is compiled, always. `go run` just hides the build step and throws the binary away afterwards. This is why it feels like scripting and still produces native-speed code, and why a warm build of a small file takes about a third of a second rather than the minutes a comparable C++ translation unit can."
+            },
+            {
+              "text": "It compiles to bytecode that the Go runtime executes",
+              "correct": false,
+              "why": "The Go runtime is real — it carries the scheduler and garbage collector — but it is linked *into* your native binary, not a bytecode interpreter running above it."
+            },
+            {
+              "text": "It interprets the source directly, like CPython does with bytecode",
+              "correct": false,
+              "why": "There is no Go interpreter in the standard toolchain. If it were interpreting, `go build` could not produce a standalone executable that runs on a machine with no Go installed — and it does exactly that."
+            },
+            {
+              "text": "It JIT-compiles the hot paths while running, like the JVM",
+              "correct": false,
+              "why": "No JIT. Everything is compiled ahead of time, before a single line runs. Go deliberately has no VM to warm up, which is why a Go process reaches full speed on its first request rather than its thousandth."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "Your Go build fails with `\"os\" imported and not used`. Give two separate reasons the language designers made this an error rather than a warning.",
+          "options": [
+            {
+              "text": "It prevents name collisions between packages",
+              "correct": false,
+              "why": "Collisions are handled separately, by qualifying every use with the package name and by letting you rename an import. An unused import cannot collide with anything precisely because nothing refers to it."
+            },
+            {
+              "text": "Go has no linker, so every import must be reachable",
+              "correct": false,
+              "why": "Go very much has a linker, and it does dead-code elimination. The rule is a front-end policy, enforced long before linking."
+            },
+            {
+              "text": "Unused imports would make the binary larger, and Go binaries are already large",
+              "correct": false,
+              "why": "Half a reason at best. The linker drops code nothing reaches, so an unused import costs little in the final binary — the cost is in *compiling* it, which the linker cannot undo."
+            },
+            {
+              "text": "An unused import is usually the fingerprint of a real bug, and every import is a dependency that costs compile time for everyone who builds the package",
+              "correct": true,
+              "why": "Two independent motives, which is why the rule survived the complaints. The first is correctness — you imported it for a call you have since deleted or misspelled. The second is the one people forget: Go's compile speed is a design goal, not a happy accident, and unused dependencies are a tax on it."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "A Go \"hello world\" binary is around 2 MB where the C equivalent is a few kilobytes. What is in there, and what do you get in exchange for the size?",
+          "options": [
+            {
+              "text": "The source code, embedded so the runtime can recompile hot paths",
+              "correct": false,
+              "why": "Nothing recompiles at runtime; there is no JIT. The source is not shipped inside the binary."
+            },
+            {
+              "text": "Debug symbols, which is why release builds are small",
+              "correct": false,
+              "why": "Symbols are part of it and you can strip them with `-ldflags=\"-s -w\"`, but that saves a fraction. The bulk is runtime and library code that is genuinely being shipped."
+            },
+            {
+              "text": "The Go runtime — scheduler, garbage collector, type information — all statically linked, so the binary has no shared-library dependencies at all",
+              "correct": true,
+              "why": "`ldd` on it reports \"not a dynamic executable\". That property is why Go took over container tooling: you can copy the binary into an empty image and it runs, with no libc version to match and no runtime to install. Docker, Kubernetes and Terraform are all downstream of this trade."
+            },
+            {
+              "text": "A copy of the standard library in full, since Go cannot tell which parts you use",
+              "correct": false,
+              "why": "The linker does eliminate unreached code — a hello world does not carry `net/http`. What it cannot eliminate is the runtime itself, which every Go program needs from its first instruction."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "You are mid-debug, you commented out the only line using a variable, and Go now refuses to compile. What is the one-line escape hatch, and why is it written to be slightly ugly?",
+          "options": [
+            {
+              "text": "Declaring it with `var` instead of `:=`",
+              "correct": false,
+              "why": "The rule is about use, not about which declaration syntax produced it. A `var` declared inside a function and never used fails exactly the same way."
+            },
+            {
+              "text": "Building with a flag such as `go build -allow-unused`",
+              "correct": false,
+              "why": "No such flag exists, and its absence is intentional: a project-wide switch would be turned on once and never turned off."
+            },
+            {
+              "text": "A `//go:nolint` comment above the declaration",
+              "correct": false,
+              "why": "That family of directives is for third-party linters, not the compiler. No comment turns off a compile error in Go — the toolchain deliberately offers no pragma for this."
+            },
+            {
+              "text": "Assign it to the blank identifier — `_ = count` — and the ugliness is the point, so it does not survive code review by accident",
+              "correct": true,
+              "why": "`_` is Go's write-only variable: assignments to it are discarded and it counts as a use. It is deliberately conspicuous, because a silent way to disable the check would defeat the check. The same identifier does duty everywhere you want to ignore something, including discarding one of several return values."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "What does `import _ \"net/http/pprof\"` do, given that the blank identifier means you never refer to the package by name?",
+          "options": [
+            {
+              "text": "Imports every exported name into the current namespace, like a wildcard",
+              "correct": false,
+              "why": "That is `import . \"pkg\"`, the dot import, which is discouraged precisely because it makes it impossible to see where a name came from. The blank identifier is the opposite: no names at all."
+            },
+            {
+              "text": "Imports it purely for its side effects — its init function runs, registering profiling handlers on the default HTTP mux",
+              "correct": true,
+              "why": "A package's `init` runs on import whether or not you call anything in it, and the blank import says \"I want exactly that and nothing else\". For pprof it means a running server gains live CPU, heap and goroutine profiling endpoints for one line of code. Database drivers register themselves the same way."
+            },
+            {
+              "text": "Imports it lazily, so it is only loaded if something needs it at runtime",
+              "correct": false,
+              "why": "There is no lazy import in Go — linking happens at build time and init runs at startup. The blank import changes what you may *name*, not when it loads."
+            },
+            {
+              "text": "Silences the unused-import error while leaving the package genuinely unused",
+              "correct": false,
+              "why": "It does silence the error, but \"genuinely unused\" is wrong and that is the whole point: the package is doing work through its init function. Using a blank import on a package with no side effects accomplishes nothing."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Get Go on your machine and make the compiler shout at you on purpose. The refusals are\nthe lesson; meeting them deliberately now is much better than meeting them at 11pm.\n\nInstall Go from your package manager or from the official downloads — `go version` should\nprint something like `go version go1.24.7 linux/amd64`.\n\n1. Write and run the hello program with `go run`.\n2. Build it with `go build`, then check the result: how big is the binary, and what does\n   `file` say about it? On Linux, what does `ldd` say?\n3. Add a variable you never use. Record the exact error message.\n4. Add an import you never use. Record that error too.\n5. Make both errors go away *without* deleting the lines — use `_ =` for the variable and\n   the blank import for the package.\n6. Deliberately mangle the formatting — no spaces around operators, brace on its own\n   line, spaces instead of tabs — then run `gofmt -d` on it and read the diff before\n   running `gofmt -w`.\n\nKeep every error message you saw in the file as a comment beside the line that caused it.",
+        "files": [
+          "go/day01/hello.go"
+        ],
+        "compile": "go run go/day01/hello.go",
+        "checklist": [
+          "`go version` printed, and hello world ran under `go run`",
+          "binary built, its size and `file`/`ldd` output recorded",
+          "`declared and not used` triggered on purpose, message recorded",
+          "`imported and not used` triggered on purpose, message recorded",
+          "both silenced with `_` rather than by deleting the lines",
+          "`gofmt -d` diff read before `gofmt -w` was run"
+        ]
+      }
+    },
+    {
+      "id": "go-day-02",
+      "day": 2,
+      "title": "Zero values, and the walrus that bites",
+      "estMinutes": 30,
+      "teaser": "Why the same three lines can leave your variable untouched and never warn you",
+      "teachBack": "Explain what shadowing is in Go, using the `data, err := reload()` shape inside an `if` block. Say precisely which variables are new, what happens to the outer ones, and why `go vet` was deliberately left unable to warn about it.",
+      "slug": "zero-values",
+      "status": "available",
+      "theoryMarkdown": "Yesterday was the toolchain. Today is the part of Go you will type a thousand times:\ndeclaring things. It is a small topic with two genuinely sharp edges in it.\n\n### There is no uninitialised memory\n\n```go\nvar i int\nvar s string\nvar p *int\nfmt.Printf(\"int=%d string=%q ptr=%v\\n\", i, s, p)\n```\n\n```\nint=0 string=\"\" ptr=<nil>\n```\n\nEvery type in Go has a **zero value**, and every declaration without an initialiser gets\nit. Numbers are `0`, strings are `\"\"`, booleans are `false`, pointers and slices and maps\nand interfaces are `nil`. Structs are a struct of zero values, all the way down:\n\n```\nstruct={X:0 Y:0}\nslice=[] len=0\n```\n\nIf you have written C or C++, stop and appreciate how much this deletes. `int i;` at\nblock scope in C is *indeterminate* — reading it is undefined behaviour, and undefined\nbehaviour is not \"you get a garbage number\", it is \"the optimiser may now assume this\nline is unreachable and delete your bounds check\". A decade of security advisories lives\nin that gap. Go closes it by fiat: the value is always defined, and it always costs one\nmemory write you can't opt out of.\n\nThe design payoff is that zero values are chosen to be *useful*, not merely defined. A\n`nil` slice has length 0 and you can `append` to it. A `sync.Mutex`'s zero value is an\nunlocked mutex, so `var mu sync.Mutex` is ready to use with no constructor. Go has no\nconstructors at all, and this is why it can get away with that.\n\n### Two ways to declare, and one of them is only for inside functions\n\n```go\nvar count int = 42   // explicit type and value\nvar count = 42       // type inferred; still a var\ncount := 42          // short declaration — same thing, function bodies only\n```\n\nThe `:=` form is universally nicknamed the walrus, and it is what you will write almost\neverywhere. It declares *and* assigns, and infers the type. At package level you must use\n`var`, because `:=` needs a function body to live in.\n\n### The sharp edge: `:=` always declares something new\n\n```go\ncount := 1\nif true {\n\tcount := 2 // a NEW variable that shadows the outer one\n\t_ = count\n}\nfmt.Println(\"outer count is\", count)\n```\n\n```\nouter count is 1\n```\n\nThe inner `count` is a different variable that happens to share a name, and it dies at\nthe closing brace. The outer one was never touched. This is **shadowing**, it compiles\nwithout a murmur, and it is the single most common way a Go program silently does nothing.\n\nThe version that actually bites in real code looks like this, because it does not even\nhave an obvious inner scope:\n\n```go\ndata, err := load()\nif err != nil { return err }\n\nif needsRefresh {\n\tdata, err := reload()      // both are new; the outer data is unchanged\n\tif err != nil { return err }\n\t_ = data\n}\nuse(data)                      // still the old data. No warning, no error.\n```\n\nNote what saves you *sometimes*: if at least one variable on the left is new, `:=` will\n**assign** to the existing ones rather than redeclare them — but only within the same\nscope. Cross a brace and everything is new again. The fix is to use plain `=` when you\nmean assignment, and to declare `err` once at the top of the function.\n\n`go vet` does not catch this. Run `go tool vet help` and read the list of registered\nanalyzers — there are thirty-odd, checking everything from `Printf` argument types to\nlocks copied by value, and `shadow` is not among them. It exists, as a separate analyzer\nyou can attach with `go vet -vettool=...`, and it is kept out of the default set because\non idiomatic Go it fires constantly on shadowing that is entirely intentional. So this\none is on you, and knowing the shape of it is most of the defence.\n\n### No implicit numeric conversions. None.\n\n```go\nvar a int = 3\nvar b int64 = 4\nfmt.Println(a + b)\n```\n\n```\n./conv.go:8:14: invalid operation: a + b (mismatched types int and int64)\n```\n\nEven though `int` is 64 bits on this machine, `int` and `int64` are **different types**\nand Go will not quietly bridge them. You write `a + int(b)` and mean it.\n\nIf you have fought C's integer promotions — where comparing a signed `int` with an\nunsigned `size_t` silently converts one of them and your `i >= 0` loop guard becomes\npermanently true — you will recognise what is being prevented here. C's conversion rules\nare a lattice you have to memorise; Go's rule is one sentence: *there aren't any*. The\ncost is `int(...)` noise in arithmetic that mixes widths. The benefit is that the noise\nis exactly where the danger is.\n\n### Worth knowing: constants are not values, and they are arbitrarily precise\n\n```go order\nconst big = 1 << 62\nconst huge = big * 4\nfmt.Println(float64(huge) / 1e18)\n```\n\nAn untyped constant in Go is not stored in any machine type until it is used in a place\nthat needs one. It lives at arbitrary precision during compilation, so `huge` above is\n`2^64` — a value that fits in no Go integer type at all — and only becomes a problem if\nyou try to put it in one. This is why `math.MaxUint64` can be written as a plain constant,\nand why `const Pi = 3.14159265358979323846264338327950288419716939937510582097494459` is\nlegal and keeps every digit that the type you eventually assign it to can hold.\n\n```\n18.446744073709553\n```\n\nThat is 2^64 divided by 10^18 — a constant larger than `uint64` can hold, computed\nexactly and only then converted. Try to store it somewhere too small and the failure is\nat compile time, not runtime:\n\n```\n./over.go:8:16: cannot use big (untyped int constant 4611686018427387904) as int32 value\nin variable declaration (overflows)\n```\n\nNote that the compiler tells you the *value* it computed. That is an error message you\ncan only get from a language that does its constant arithmetic before choosing a type.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "In Go, what is the value of `var count int` before you assign anything to it, and how does that differ from `int count;` inside a function in C?",
+          "options": [
+            {
+              "text": "Exactly 0, guaranteed — where C leaves it indeterminate, and reading it is undefined behaviour rather than merely a garbage number",
+              "correct": true,
+              "why": "Every Go type has a zero value and every declaration without an initialiser gets it. The C difference is sharper than \"you get junk\": undefined behaviour licenses the optimiser to assume the read never happens, which is how it deletes surrounding checks. Go pays one unavoidable memory write to remove the entire category."
+            },
+            {
+              "text": "It is an error to declare a variable without initialising it",
+              "correct": false,
+              "why": "`var count int` is perfectly legal and extremely common. The error Go does raise is for a variable you never *use*, which is a different rule."
+            },
+            {
+              "text": "Undefined, exactly as in C — Go simply zeroes it in practice on most platforms",
+              "correct": false,
+              "why": "It is specified, not incidental. The zero value is part of the language, so you may rely on it across every compiler and platform — which is precisely what you may not do in C."
+            },
+            {
+              "text": "Whatever was previously on the stack, which is why Go encourages `:=`",
+              "correct": false,
+              "why": "That describes C. In Go the memory is zeroed regardless of what was there before, and `:=` is preferred for brevity, not safety."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "Name two zero values deliberately chosen so the zero value is immediately usable, and say what you can do with them without initialising anything.",
+          "options": [
+            {
+              "text": "A nil map, which can be written to; and a nil pointer, which can be dereferenced safely",
+              "correct": false,
+              "why": "Both halves are wrong, and dangerously so. Writing to a nil map panics — maps are the notable exception to the useful-zero-value rule and must be made with `make`. Dereferencing a nil pointer panics too."
+            },
+            {
+              "text": "An int, which is 0; and a string, which is empty",
+              "correct": false,
+              "why": "True but trivial — those are just the arithmetic identities, not cases where a designer chose the representation so that no initialisation step is needed. The interesting examples are the composite types."
+            },
+            {
+              "text": "A nil channel, which can be sent on; and a nil interface, on which methods can be called",
+              "correct": false,
+              "why": "A send on a nil channel blocks forever, and calling a method on a nil interface panics. Both are the opposite of usable — though the blocking nil channel is genuinely exploited in some select-loop idioms."
+            },
+            {
+              "text": "A nil slice, which has length 0 and can be appended to; and a `sync.Mutex`, whose zero value is an unlocked mutex ready to lock",
+              "correct": true,
+              "why": "This is the \"make the zero value useful\" design rule, and it is why Go can get away with having no constructors at all. `var s []int` then `append(s, 1)` works; `var mu sync.Mutex` then `mu.Lock()` works. A type whose zero value is broken is considered a design smell in Go."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "You write `count := 2` inside an `if` block when `count` already exists outside it. What happens to the outer variable, and what is this mistake called?",
+          "options": [
+            {
+              "text": "The outer variable is assigned 2, since `:=` falls back to assignment",
+              "correct": false,
+              "why": "There is a fallback, but it does not cross scopes: within *one* scope, `:=` will assign to existing variables as long as at least one name on the left is new. Cross a brace and every name is new again."
+            },
+            {
+              "text": "The outer variable becomes nil until the block exits",
+              "correct": false,
+              "why": "Nothing happens to the outer variable at all, and `nil` is not a value an `int` can hold."
+            },
+            {
+              "text": "It fails to compile, because the name is already taken in an enclosing scope",
+              "correct": false,
+              "why": "Shadowing is legal and often deliberate — that is exactly why the compiler stays quiet and why the shadow analyzer is kept out of the default `go vet` suite."
+            },
+            {
+              "text": "Nothing — a new variable is created that hides the outer one until the closing brace, which is shadowing",
+              "correct": true,
+              "why": "`:=` always declares. The outer variable is untouched, the inner one dies at the brace, and nothing warns you. It is the most common way a Go program silently does nothing, and it is nastiest in the `data, err := reload()` shape inside an `if`, where there is no obviously suspicious inner scope to look at."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "Go refuses to compile `a + b` where `a` is `int` and `b` is `int64`, even on a machine where both are 64 bits wide. Why, and what class of C bug does it prevent?",
+          "options": [
+            {
+              "text": "They are distinct types and Go performs no implicit numeric conversion at all — which removes C's promotion rules, where a signed/unsigned comparison silently converts one side",
+              "correct": true,
+              "why": "Identical width does not mean identical type. The C bug being designed out is the signed-versus-unsigned comparison: compare an `int` loop counter with a `size_t` and the int is converted to unsigned, making `i >= 0` permanently true. C's conversion rules are a lattice you memorise; Go's rule is that there are none, and the `int(b)` you must write sits exactly where the danger was."
+            },
+            {
+              "text": "`int` is 32 bits on some platforms, so the addition could overflow",
+              "correct": false,
+              "why": "Go's `int` is platform-dependent in size, but that is not the reason — the compiler rejects this even where it can prove both are 64 bits. The rule is about type identity, not representable range."
+            },
+            {
+              "text": "Because `+` is not defined for `int64`, only for `int`",
+              "correct": false,
+              "why": "`+` works fine on `int64`; `b + b` compiles. What fails is mixing two different types in one operation."
+            },
+            {
+              "text": "Go requires explicit conversion only when precision could be lost",
+              "correct": false,
+              "why": "There is no such exemption. Widening conversions that could not possibly lose anything still have to be written out, which is the point: one rule, no exceptions to remember."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "Why can `const huge = (1 << 62) * 4` compile in Go when no Go integer type can hold that value?",
+          "options": [
+            {
+              "text": "It is stored as a float64, which has the range even if it loses precision",
+              "correct": false,
+              "why": "Constants are not secretly floats; integer constants stay exact integers. If they were float64 the compiler could not report the precise value 18446744073709551616 in its overflow message."
+            },
+            {
+              "text": "The compiler promotes it to `uint64`, which is large enough",
+              "correct": false,
+              "why": "`uint64`'s maximum is 18446744073709551615, one less than this value — so even the widest integer type does not hold it, and that is exactly what makes the example worth showing."
+            },
+            {
+              "text": "It silently wraps around, as unsigned arithmetic does at runtime",
+              "correct": false,
+              "why": "No wrapping happens — that is the behaviour being avoided. Ask for it in a type too small and you get a compile error, not a wrapped value."
+            },
+            {
+              "text": "Untyped constants are evaluated at arbitrary precision during compilation and only take a machine type when used somewhere that needs one",
+              "correct": true,
+              "why": "The constant exists as an exact mathematical value until context forces a type on it, so `float64(huge)` is fine while `var x int64 = huge` fails at compile time with the computed value quoted back at you. It is also why a Pi constant can carry more digits than any type holds and still be correct for whichever type eventually receives it."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Prove the zero values and then get shadowed on purpose, so that the day you meet it in\nreal code you recognise the shape.\n\n1. Declare one variable of each of these with `var` and no initialiser: an `int`, a\n   `float64`, a `string`, a `bool`, a pointer, a slice, and a struct with two fields.\n   Print them all with `%v` and the string with `%q` so you can see it is empty rather\n   than absent.\n2. Append to the `nil` slice without initialising it first, and print the result. It\n   should work; be clear with yourself about why.\n3. Write the shadowing trap: a variable set outside a block, reassigned with `:=` inside\n   it, printed after. Then fix it so the outer variable really changes, and record what\n   you changed.\n4. Try to add an `int` to an `int64`. Record the exact error, then make it compile.\n5. Declare a constant larger than `int64` can hold, use it in a `float64` expression, and\n   then deliberately try to assign it to an `int32` and record that error too.",
+        "files": [
+          "go/day02/values.go"
+        ],
+        "compile": "go run go/day02/values.go",
+        "checklist": [
+          "every zero value printed, including a struct and an empty-versus-absent string",
+          "`append` to a `nil` slice observed working",
+          "shadowing reproduced deliberately, then fixed, with the fix recorded",
+          "the `mismatched types` error triggered and then resolved with an explicit conversion",
+          "an over-large constant used successfully, then made to fail at compile time"
+        ]
+      }
+    },
+    {
+      "id": "go-day-03",
+      "day": 3,
+      "title": "Slices are not arrays",
+      "estMinutes": 30,
+      "teaser": "The append that silently rewrites a slice you never passed in",
+      "teachBack": "A slice header has three fields. Use them to explain why `append` to a two-element sub-slice of a five-element slice can overwrite the original's data without allocating — and what the third index in `full[:2:2]` changes about that.",
+      "slug": "slices",
+      "status": "available",
+      "theoryMarkdown": "This is the day Go stops feeling obvious. Slices are the type you will use constantly,\nthey look like a dynamic array from any other language, and they have one behaviour that\nwill eventually cost you an afternoon. Better to spend twenty minutes on it now.\n\n### An array is a value. A slice is a view.\n\nGo has both, and they are different types with different behaviour.\n\n```go order\na := [3]int{1, 2, 3}\nb := a\nb[0] = 99\nfmt.Println(\"array a:\", a, \" b:\", b)\n```\n\n```\narray a: [1 2 3]  b: [99 2 3]\n```\n\n`[3]int` is an **array**: the length is part of the type, and assigning one **copies all\nthe elements**. `[3]int` and `[4]int` are as unrelated as `int` and `string`.\n\nNow the same thing with a slice:\n\n```go order\ns := []int{1, 2, 3}\nt := s\nt[0] = 99\nfmt.Println(\"slice s:\", s, \" t:\", t)\n```\n\n```\nslice s: [99 2 3]  t: [99 2 3]\n```\n\nBoth changed. `[]int` — no number in the brackets — is a **slice**, and a slice is a\nsmall three-word header:\n\n```\n┌──────────────┬────────┬────────┐\n│ ptr to array │  len   │  cap   │\n└──────────────┴────────┴────────┘\n```\n\nCopying a slice copies the *header*, not the elements. Both headers point at the same\nbacking array. If you know C++, a slice is close to a `std::span` — except that it also\nowns its backing array in the eyes of the garbage collector, and it can grow.\n\n**Almost every Go program uses slices and almost never uses arrays directly.** Arrays\nmostly appear as the thing a slice points at, and as fixed-size buffers like `[32]byte`\nfor a hash.\n\n### `len` is what's there, `cap` is what fits\n\n```go order\nvar s []int\ns = append(s, 1)\nfmt.Printf(\"len=%d cap=%d\\n\", len(s), cap(s))\n```\n\n`append` writes into spare capacity if there is any. When there isn't, it allocates a\nbigger array, copies everything across, and returns a slice pointing at the new one.\nWatch it happen:\n\n```\nlen= 1 cap= 1  <- grew\nlen= 2 cap= 2  <- grew\nlen= 3 cap= 4  <- grew\nlen= 5 cap= 8  <- grew\nlen= 9 cap=16  <- grew\n```\n\nDoubling, and the same amortised-constant-time argument as `std::vector`. This is also\nwhy `append` **returns** the slice and you must write `s = append(s, x)`: when it\nreallocates, your old header is pointing at the abandoned array. Forgetting the\nassignment is a beginner error, and one of the few places Go's strictness saves you for\nfree:\n\n```\n./noassign.go:7:2: append(s, 2) (value of type []int) is not used\n```\n\nYesterday's rule about unused things, doing an honest day's work.\n\nIf you know roughly how many elements you'll have, say so and skip the copying:\n\n```go\ns := make([]int, 0, 1000)   // len 0, cap 1000\n```\n\n### The trap\n\nHere is the one to actually remember. A sub-slice shares the original's backing array,\nand it inherits capacity all the way to the end of it:\n\n```go order\nfull := []int{1, 2, 3, 4, 5}\nhead := full[:2]\nfmt.Printf(\"head=%v len=%d cap=%d\\n\", head, len(head), cap(head))\nhead = append(head, 99)\nfmt.Println(\"full is now:\", full)\n```\n\n```\nhead=[1 2] len=2 cap=5\nfull is now: [1 2 99 4 5]\n```\n\nRead that twice. `head` looks like a two-element slice, but its capacity is **5** — it can\nsee all the way to the end of `full`'s array. So `append` finds spare room, does not\nallocate, and writes 99 straight over `full[2]`. A function that took `head` as a\nparameter and appended to it just silently corrupted a slice it was never given.\n\nThe fix is a **three-index slice**, which sets the capacity explicitly:\n\n```go order\nfull := []int{1, 2, 3, 4, 5}\nhead := full[:2:2]\nfmt.Printf(\"head=%v len=%d cap=%d\\n\", head, len(head), cap(head))\nhead = append(head, 99)\nfmt.Println(\"full is now:\", full)\n```\n\n```\nhead=[1 2] len=2 cap=2\nfull is now: [1 2 3 4 5]\n```\n\n`full[:2:2]` means low 0, high 2, **max 2** — capacity 2. Now `append` has no room, must\nallocate, and `full` is untouched. When you hand a sub-slice to code you don't control,\nthis is how you do it safely.\n\nThere is a C++ echo here worth noticing. Appending to a `std::vector` invalidates\niterators and pointers into it, and everyone learns that rule. Go's version is stranger:\n`append` never invalidates anything — the old array stays alive as long as something\npoints at it, because the garbage collector says so — but it may or may not *share* with\nwhat you had before, and which one you get depends on capacity. C++ makes the old view\ninvalid; Go makes it valid and possibly aliased, which is quieter and therefore worse to\ndebug.\n\n### Worth knowing: a giant array can be kept alive by a tiny slice\n\nBecause a slice holds a pointer into a backing array, the whole array stays reachable\neven if your slice covers three bytes of it:\n\n```go\ndata, _ := os.ReadFile(\"500mb.log\")   // 500 MB\nfirstLine := data[:60]                // still pins all 500 MB\n```\n\nHold `firstLine` in a cache and you have leaked half a gigabyte — a leak in a garbage\ncollected language, which is not supposed to be a thing you can do. The standard fix is\nto copy what you actually want out:\n\n```go\nfirstLine := append([]byte(nil), data[:60]...)   // fresh array, 60 bytes\n```\n\nSince Go 1.21 the standard library ships `slices.Clone` for exactly this, and you can\nwatch the pin let go — clone a 5-byte head of a 41-byte array and the copy reports\n`cap=8` instead of `cap=41`, because it is a genuinely new array. If you ever\nwondered how a Go service leaks memory without a single missing `free`, this is the\nmost common answer, along with goroutines that never exit — which is Day 6's problem.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "`a := [3]int{1,2,3}; b := a; b[0] = 99`. What is `a[0]` afterwards, and what would have happened if both had been slices instead?",
+          "options": [
+            {
+              "text": "`a[0]` is still 1, because assigning an array copies every element — with slices both would read 99, because assigning a slice copies only the header",
+              "correct": true,
+              "why": "This is the whole distinction. `[3]int` is a value type whose length is part of the type, so assignment is a full copy. `[]int` is a three-word header — pointer, length, capacity — and copying it leaves two headers pointing at one backing array. Nearly every Go surprise involving slices comes back to this."
+            },
+            {
+              "text": "`a[0]` is 99 in both cases; Go assigns by reference like Java or Python",
+              "correct": false,
+              "why": "Go has no reference assignment. Everything is copied — the question is only ever *what* gets copied, and for a slice that is the header rather than the elements."
+            },
+            {
+              "text": "`a[0]` is 1 in both cases, since Go copies on assignment everywhere",
+              "correct": false,
+              "why": "Right about arrays, wrong about slices. The copy is real for both, but copying a slice's header duplicates a pointer, and both copies then address the same elements."
+            },
+            {
+              "text": "It depends on whether the array escapes to the heap",
+              "correct": false,
+              "why": "Escape analysis decides *where* a value lives, never what assignment means. Copy semantics are the same on the stack and the heap."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "What are the three fields of a Go slice header, and which of them does copying a slice copy?",
+          "options": [
+            {
+              "text": "A pointer to a backing array, a length and a capacity — and copying duplicates all three, which duplicates the pointer rather than the elements",
+              "correct": true,
+              "why": "Three machine words. Because the pointer is duplicated rather than the array, two slices can disagree about length while addressing identical memory — which is exactly the situation the append trap exploits."
+            },
+            {
+              "text": "The elements, the length and the capacity; copying duplicates all the elements",
+              "correct": false,
+              "why": "That describes an array, and it is the behaviour slices exist to avoid. Passing a large slice to a function costs three words, not the data."
+            },
+            {
+              "text": "A pointer, a length, and a type tag; copying duplicates the pointer only",
+              "correct": false,
+              "why": "There is no type tag in a slice header — the element type is static and known at compile time. The third word is capacity, and it is the one that decides whether an append allocates."
+            },
+            {
+              "text": "A pointer and a length; capacity is computed from the backing array when needed",
+              "correct": false,
+              "why": "Capacity is stored, not computed — a slice has no way to ask an array how big it is, since the pointer may address the middle of one. `cap()` is a field read."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "Why must you write `s = append(s, x)` in Go rather than just `append(s, x)`?",
+          "options": [
+            {
+              "text": "Because append may return an error alongside the slice",
+              "correct": false,
+              "why": "Append returns exactly one value, the slice. It has no error case — it panics only if allocation itself fails, which takes the process with it."
+            },
+            {
+              "text": "Because when there is no spare capacity, append allocates a new array and returns a slice pointing at it — your old header would still address the abandoned one",
+              "correct": true,
+              "why": "Append cannot modify your header in place; it only has a copy of it. When it grows the array, the only way to hand you the result is the return value. Discarding it is caught by the compiler — `append(s, 2) (value of type []int) is not used` — which is yesterday's unused-value rule earning its keep."
+            },
+            {
+              "text": "Because append is a pure function and Go forbids side effects in builtins",
+              "correct": false,
+              "why": "Append is not pure at all — when there *is* spare capacity it writes straight into the existing backing array, which is visible to every other slice sharing it. That is precisely what makes the aliasing trap possible."
+            },
+            {
+              "text": "Purely stylistic; `append(s, x)` works but reads badly",
+              "correct": false,
+              "why": "It does not work, and it does not compile. Even if it did, it would lose the element whenever the array had to grow."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "`head := full[:2]` where `full` has five elements. What is `cap(head)`, and what does `append(head, 99)` do to `full`?",
+          "options": [
+            {
+              "text": "`cap(head)` is 5, and append allocates anyway because len is less than cap",
+              "correct": false,
+              "why": "Backwards: append allocates only when len *equals* cap. Room to spare is exactly the condition for writing in place."
+            },
+            {
+              "text": "`cap(head)` is 5, so append finds spare room and overwrites `full[2]` in place — `full` becomes [1 2 99 4 5]",
+              "correct": true,
+              "why": "A sub-slice inherits capacity all the way to the end of the backing array, so `head` can see memory it does not appear to own. No allocation happens, so the write lands in the original. A function handed `head` can corrupt data it was never shown, silently."
+            },
+            {
+              "text": "`cap(head)` is 2, so append allocates and `full` is unaffected",
+              "correct": false,
+              "why": "That is what `full[:2:2]` gives you — the three-index form that sets capacity explicitly. Plain `full[:2]` leaves capacity running to the end of the array, which is what makes this a trap rather than a footnote."
+            },
+            {
+              "text": "It panics, because appending past a sub-slice's length is out of bounds",
+              "correct": false,
+              "why": "Append never panics for this reason — extending beyond length is its entire job. Indexing past length panics; appending past it does not."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "You read a 500 MB file into memory and keep a 60-byte slice of it in a cache. How much memory stays reachable, and what is the fix?",
+          "options": [
+            {
+              "text": "60 bytes — the collector frees the rest of the array once nothing indexes it",
+              "correct": false,
+              "why": "There is no partial collection of an array. The allocation is the unit, and it survives entirely or not at all."
+            },
+            {
+              "text": "All 500 MB, and the only fix is to call `runtime.GC()` after slicing",
+              "correct": false,
+              "why": "Right about the leak, wrong about the remedy — and this is a trap worth avoiding on its own. Forcing a collection cannot free memory that is still reachable, and the slice makes it reachable. You have to break the pointer, not nudge the collector."
+            },
+            {
+              "text": "60 bytes, because slicing copies in Go",
+              "correct": false,
+              "why": "Slicing never copies; that is the property that makes it cheap. Copying is the thing you have to ask for explicitly, which is what the fix does."
+            },
+            {
+              "text": "All 500 MB, because the slice's pointer keeps the whole backing array alive — fixed by copying the 60 bytes into a fresh slice, e.g. `slices.Clone`",
+              "correct": true,
+              "why": "The garbage collector frees arrays, not ranges. One live pointer into an array keeps every byte of it reachable, so a 60-byte view pins half a gigabyte. This is how you leak memory in a garbage-collected language with no missing free, and along with goroutines that never exit it is the most common cause of a Go service growing without explanation."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Reproduce the trap. This is not a puzzle you should take on faith — it is far more\nconvincing when the numbers come out of your own terminal.\n\n1. Make an array and a slice of the same three values. Assign each to a second variable,\n   modify the second, print both. Record which one changed and satisfy yourself as to why.\n2. Append to an empty slice in a loop, printing `len` and `cap` each time the capacity\n   changes. Record the growth pattern.\n3. Build the trap: a five-element slice, a two-element sub-slice, an append to the\n   sub-slice, then print the original. Record `cap` of the sub-slice before appending —\n   that number is the whole explanation.\n4. Fix it with a three-index slice and show the original surviving unchanged.\n5. Write a function `func addOne(s []int)` that appends to its parameter, call it with a\n   sub-slice of a larger one, and see whether the caller's data survives. Then make it\n   safe.",
+        "files": [
+          "go/day03/slices.go"
+        ],
+        "compile": "go run go/day03/slices.go",
+        "checklist": [
+          "array copy versus slice share demonstrated side by side",
+          "capacity growth pattern recorded from a real loop",
+          "the aliasing trap reproduced, with the sub-slice's capacity recorded",
+          "the three-index fix shown protecting the original",
+          "a function observed corrupting its caller's slice, then made safe"
+        ]
+      }
+    },
+    {
+      "id": "go-day-04",
+      "day": 4,
+      "title": "Methods, and interfaces you never declare",
+      "estMinutes": 30,
+      "teaser": "strings.Builder has never heard of io.Writer, and satisfies it anyway",
+      "teachBack": "In Go a type implements an interface without ever naming it. Explain who decides what an interface contains under that arrangement versus a language with an `implements` keyword, and why that inversion is what makes one-method interfaces like `io.Writer` so widely satisfied.",
+      "slug": "methods-interfaces",
+      "status": "available",
+      "theoryMarkdown": "Go has no classes, no inheritance, no `virtual`, no constructors and no `this`. It has\nstructs, functions attached to types, and one of the better ideas in mainstream language\ndesign: interfaces that types satisfy without ever mentioning them.\n\n### A method is a function with a receiver\n\n```go\ntype Counter struct {\n\tn int\n}\n\nfunc (c *Counter) Bump() {\n\tc.n++\n}\n```\n\nThe `(c *Counter)` before the name is the **receiver**. That is the whole mechanism —\nthere is no class body, methods live at package level next to everything else, and the\nreceiver is an ordinary parameter that happens to be written in front. You can define\nmethods on any named type you declared, not just structs:\n\n```go\ntype Celsius float64\n\nfunc (c Celsius) String() string { return fmt.Sprintf(\"%.1f°C\", float64(c)) }\n```\n\n### The one decision that trips everyone: value or pointer receiver\n\n```go\nfunc (c Counter) BumpValue()    { c.n++ }\nfunc (c *Counter) BumpPointer() { c.n++ }\n```\n\n```\nafter value receiver:   0\nafter pointer receiver: 1\n```\n\n`BumpValue` receives a **copy** of the Counter. It increments the copy, the copy is\ndiscarded, and your original is untouched — and nothing warns you, because incrementing a\nlocal is perfectly legal. `BumpPointer` receives the address and modifies the real thing.\n\nThe rule in practice: **if the method modifies the receiver, or the struct is large, use\na pointer. Then use a pointer for all its methods**, even the ones that don't need it,\nbecause a type whose method set is half values and half pointers is a type whose\nbehaviour depends on how you happened to call it.\n\nGo does hide one piece of sugar here. You never write `(&c).BumpPointer()` — if `c` is\naddressable, Go inserts the `&` for you. That is why `c.BumpPointer()` compiles when `c`\nis a `Counter` and not a `*Counter`. C++ makes you pick `.` or `->`; Go decided that\ndistinction never carried information and removed it.\n\n### Interfaces: satisfied by accident, on purpose\n\n```go\ntype Greeter interface {\n\tGreet() string\n}\n\ntype English struct{ Name string }\n\nfunc (e English) Greet() string { return \"Hello, \" + e.Name }\n```\n\n```go\nvar g Greeter = English{Name: \"world\"}\nfmt.Println(g.Greet())\n```\n\n```\nHello, world\n```\n\nNotice what is **not** there. `English` does not say `implements Greeter`. There is no\n`: public Greeter`, no `@Override`, no registration. It has a method with the right name\nand signature, so it satisfies the interface. Full stop.\n\nThis is **structural typing**, and it inverts who is in charge. In C++ or Java, the\nauthor of a class decides which interfaces it implements, and if they didn't think of\nyours you are writing an adapter. In Go the *consumer* declares the interface, and every\nexisting type that happens to fit is instantly compatible — including types from\nlibraries written years before your interface existed.\n\nWatch it happen with the standard library:\n\n```go\nvar sb strings.Builder\nfmt.Fprintf(&sb, \"written through io.Writer: %d\", 42)\n```\n\n```\nwritten through io.Writer: 42\n```\n\n`fmt.Fprintf` takes an `io.Writer`. `strings.Builder` never mentions `io.Writer`\nanywhere. It has a `Write([]byte) (int, error)` method, which is all `io.Writer` asks\nfor, so it fits. The same one-method interface is satisfied by files, network\nconnections, HTTP response writers, gzip compressors, hash functions and\n`os.Stdout` — which is why \"write it to a string instead of the network\" is a\none-line change in Go and a refactor in most languages.\n\n`io.Writer` is worth staring at, because it is the whole philosophy in four lines:\n\n```go\ntype Writer interface {\n\tWrite(p []byte) (n int, err error)\n}\n```\n\n> [!NOTE]\n> **\"The bigger the interface, the weaker the abstraction.\"** That is Rob Pike, in his Go\n> proverbs, and it is the opposite of the instinct most of us bring from other languages\n> where interfaces accumulate methods to be \"complete\". In Go the most useful interfaces\n> in the entire ecosystem have exactly one method: `io.Writer`, `io.Reader`, `error`,\n> `fmt.Stringer`, `http.Handler`. A one-method interface is trivially satisfiable, so\n> almost everything satisfies it, so it composes with everything.\n>\n> You will also constantly hear **\"accept interfaces, return structs\"** quoted alongside\n> it, usually as though it were a second proverb. It isn't — it is a community idiom that\n> never made the canonical list — but it falls straight out of the real one: take the\n> loosest thing you can work with, hand back the most specific thing you have.\n\n### Worth knowing: the compile-time assertion nobody shows beginners\n\nBecause nothing declares intent, nothing tells you when you *meant* to satisfy an\ninterface and got the signature subtly wrong — a value receiver where a pointer was\nneeded, `Str()` instead of `String()`. The code compiles; it just isn't a `Stringer`, and\nyou find out when your log line prints `{0 0}` instead of your nice format.\n\nThe idiom for this is a variable declaration that does nothing:\n\n```go\nvar _ Greeter = English{}     // fails to compile if English stops satisfying Greeter\nvar _ Greeter = (*Spanish)(nil)  // same check, for a pointer receiver, with no allocation\n```\n\nAssign to the blank identifier, so nothing is stored and nothing is used, but the type\ncheck still runs — and when it fails it tells you exactly which method is missing:\n\n```\n./assert.go:16:17: cannot use Broken{} (value of struct type Broken) as Greeter value in\nvariable declaration: Broken does not implement Greeter (missing method Greet)\n``` You will find this line near the top of a great many real Go files, and\nit is one of those things that looks like line noise until someone explains it once.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "What is a receiver in Go, and where does it appear in a method declaration?",
+          "options": [
+            {
+              "text": "The interface a method belongs to, declared before the method name",
+              "correct": false,
+              "why": "Methods are attached to concrete types, never to interfaces. An interface only lists signatures; it never contains a method body or claims one."
+            },
+            {
+              "text": "The return type, written before the name as in C",
+              "correct": false,
+              "why": "Go puts return types after the parameter list. The parenthesised thing before the name is the receiver, and it is a syntax Go uses nowhere else."
+            },
+            {
+              "text": "The parameter written in parentheses before the method name — `func (c *Counter) Bump()` — making it an ordinary parameter that happens to sit in front",
+              "correct": true,
+              "why": "There is no class body to be inside. Methods are declared at package level like any function, and the receiver is what binds one to a type. Because it is just a parameter, all the normal rules about copying apply to it, which is the whole of the next question."
+            },
+            {
+              "text": "The implicit `this` pointer, available inside every method",
+              "correct": false,
+              "why": "Go has no implicit `this` and no implicit anything. You name the receiver yourself, and by convention give it a one- or two-letter name rather than `self` — precisely so it reads as the parameter it is."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "A Go method with a value receiver increments a field of its receiver. Why does the caller's value not change, and why is there no warning?",
+          "options": [
+            {
+              "text": "Because the struct escaped to the heap and the method saw a stale copy",
+              "correct": false,
+              "why": "Escape analysis is unrelated. The copy is made at the call, deterministically, whether the original lives on the stack or the heap."
+            },
+            {
+              "text": "Value receivers are immutable, so the assignment is silently ignored",
+              "correct": false,
+              "why": "Nothing is ignored — the copy really is modified, and you can print it inside the method to watch it change. Immutability would at least be enforceable; this is worse, because the write succeeds."
+            },
+            {
+              "text": "The method got a copy, incremented the copy, and discarded it — and incrementing a local variable is perfectly legal, so there is nothing for the compiler to object to",
+              "correct": true,
+              "why": "A value receiver is passed by value like any parameter. The mutation is real, it just happens to something about to be thrown away. This compiles cleanly and does nothing, which is why the guidance is to pick pointer receivers for any type with mutating methods and then use pointers for *all* of that type's methods, so the behaviour never depends on which one you happen to call."
+            },
+            {
+              "text": "It does change, unless the struct contains a pointer field",
+              "correct": false,
+              "why": "The caller's value never changes through a value receiver. A pointer *field* would let you reach shared data through the copy, but the receiver's own fields are still a copy."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "What does a Go type have to write in order to implement an interface?",
+          "options": [
+            {
+              "text": "Register the type with the interface at init time",
+              "correct": false,
+              "why": "Nothing is registered and there is no runtime bookkeeping to opt into. The check happens at compile time, at the point where a value is assigned to the interface."
+            },
+            {
+              "text": "Embed the interface in the struct, so its method set is inherited",
+              "correct": false,
+              "why": "Embedding an interface in a struct is legal but does something else entirely: it promotes the methods of whatever value you store there, and leaves you with a type that panics when that value is nil. It is not how implementing works."
+            },
+            {
+              "text": "An `implements` clause naming the interface",
+              "correct": false,
+              "why": "No such clause exists in Go. The nearest thing is the voluntary `var _ Iface = Type{}` assertion, which exists only so *you* find out at compile time when you break the fit."
+            },
+            {
+              "text": "Nothing — having methods with the right names and signatures is the whole requirement",
+              "correct": true,
+              "why": "This is structural typing, and it inverts who is in charge. In a nominal system the author of a type decides which interfaces it implements, so if they never heard of yours you write an adapter. In Go the consumer declares the interface, and every type that already fits — including ones written years earlier — is instantly compatible."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "`strings.Builder` never mentions `io.Writer` anywhere, yet `fmt.Fprintf` accepts a pointer to one. Explain how, and say who defines the interface in that arrangement.",
+          "options": [
+            {
+              "text": "`strings.Builder` embeds `io.Writer` internally, which is why it fits",
+              "correct": false,
+              "why": "It embeds nothing of the sort. If it did, it would need something to delegate to, and the whole point is that no link between the two types exists."
+            },
+            {
+              "text": "It has a `Write([]byte) (int, error)` method, which is everything `io.Writer` asks for — and the interface is defined by the consumer, `io`, not by the type",
+              "correct": true,
+              "why": "`io.Writer` is one method. That is why files, sockets, HTTP response writers, gzip compressors, hashes and `os.Stdout` all satisfy it, and why redirecting output from the network to a string is a one-line change in Go. The smallness is the feature: as Rob Pike put it, the bigger the interface, the weaker the abstraction."
+            },
+            {
+              "text": "The `io` package registers known writer types, and `strings.Builder` is on the list",
+              "correct": false,
+              "why": "No list exists — and if it did, your own types could never join it, which would destroy the property that makes the design worth having."
+            },
+            {
+              "text": "`fmt.Fprintf` uses reflection to find a suitable method at runtime",
+              "correct": false,
+              "why": "The check is entirely static, made when the argument is converted to the interface. `fmt` does use reflection for formatting the *values*, but not to decide whether something is a Writer."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "What does the line `var _ Greeter = English{}` accomplish, given that it stores nothing and is never referenced?",
+          "options": [
+            {
+              "text": "It silences the unused-variable error for the `Greeter` type",
+              "correct": false,
+              "why": "Types are not subject to the unused rule — only variables and imports are, and only inside function bodies for variables. This line is at package level and is there purely for the type check."
+            },
+            {
+              "text": "It makes the compiler verify that `English` still satisfies `Greeter`, failing the build with the missing method named if the fit ever breaks",
+              "correct": true,
+              "why": "Because nothing declares intent, nothing normally tells you that you *meant* to satisfy an interface and got the signature subtly wrong — `Str()` for `String()`, or a value receiver where a pointer was needed. This line costs nothing at runtime and turns that silence into a build error naming the missing method."
+            },
+            {
+              "text": "It registers `English` as an implementation so the runtime can find it",
+              "correct": false,
+              "why": "There is no registry and nothing to find. Interface satisfaction is resolved statically at each assignment."
+            },
+            {
+              "text": "It creates a default `Greeter` used when no other value is supplied",
+              "correct": false,
+              "why": "Assigning to the blank identifier stores nothing anywhere — the value is discarded immediately. Nothing can later retrieve it."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Build a tiny shape library and then discover that you already implemented a standard\nlibrary interface without trying.\n\n1. Define a `Rect` struct with width and height, and a `Circle` with a radius.\n2. Give each an `Area() float64` method. Choose value or pointer receivers deliberately\n   and write a one-line comment saying why.\n3. Define `type Shape interface { Area() float64 }`, put both into a `[]Shape`, and loop\n   over it printing each area. Note that neither struct mentions `Shape`.\n4. Add a `Scale(f float64)` method that actually modifies the receiver. Get it wrong on\n   purpose first — value receiver — observe nothing happening, then fix it.\n5. Give `Rect` a `String() string` method, then print a `Rect` with `fmt.Println` and\n   watch the output change without you calling `String` yourself. Work out which\n   interface you just satisfied by accident.\n6. Add the `var _ Shape = ...` assertion for both types, then break one signature on\n   purpose and record the error.",
+        "files": [
+          "go/day04/shapes.go"
+        ],
+        "compile": "go run go/day04/shapes.go",
+        "checklist": [
+          "two types with the same method, collected in one slice of an interface type",
+          "neither type names the interface anywhere",
+          "a value receiver observed failing to modify, then fixed with a pointer receiver",
+          "`fmt.Println` output changed by adding a `String()` method",
+          "a compile-time interface assertion added, broken on purpose, and the error recorded"
+        ]
+      }
+    },
+    {
+      "id": "go-day-05",
+      "day": 5,
+      "title": "Errors are values, and defer is your destructor",
+      "estMinutes": 30,
+      "teaser": "No exceptions anywhere in the language, and one verb that decides whether the cause survives",
+      "teachBack": "Explain what `%w` does that `%v` does not, given that both produce identical text. Then say what that buys a caller ten frames up the stack, and what it costs the package that wrapped the error.",
+      "slug": "errors-defer",
+      "status": "available",
+      "theoryMarkdown": "Go has no exceptions. None. No `try`, no `catch`, no `throw`, no stack unwinding you can\nhook into. This is the single most argued-about decision in the language, and today is\nabout living with it — plus `defer`, the feature that fills the hole where a C++\ndestructor would go.\n\n### Errors come back like any other value\n\n```go order\nf, err := os.Open(\"/no/such/file\")\nif err != nil {\n\treturn err\n}\ndefer f.Close()\n```\n\nGo functions can return more than one value, and the convention — enforced by nothing but\nfollowed by everyone — is that the last one is an `error`. `nil` means it worked.\n\n```\nerr: open /no/such/file: no such file or directory\n```\n\n`error` is not a special language construct. It is an ordinary one-method interface, and\nyou have already met its shape:\n\n```go\ntype error interface {\n\tError() string\n}\n```\n\nThat is the entire type. Anything with an `Error() string` method is an error, which\nmeans you write your own error types the same way you write anything else.\n\nYes, you will type `if err != nil` a great deal. Roughly one line in twenty of real Go is\nthat line. People find this either honest or unbearable and there is not much middle\nground. The argument in its favour: an exception is an invisible second control-flow graph\nthrough your program, and every call is a potential jump to somewhere you cannot see. Go\nmakes the unhappy path the same size on the page as the happy path, because at 3am the\nunhappy path is the one you are reading. The argument against: it is a lot of typing, it\nis easy to `return err` without adding context, and unlike an exception, an error is\ntrivially *ignorable* — `f, _ := os.Open(...)` compiles fine.\n\n### Wrapping: keep the cause, add the context\n\nReturning a bare `err` upward is how you end up with `no such file or directory` and no\nidea which file. Wrap it with `%w`:\n\n```go order\n_, err := os.Open(\"/no/such/file\")\nwrapped := fmt.Errorf(\"loading config: %w\", err)\nfmt.Println(wrapped)\nfmt.Println(errors.Is(wrapped, os.ErrNotExist))\n```\n\n```\nloading config: open /no/such/file: no such file or directory\ntrue\n```\n\n`%w` is `%v` plus a hidden link back to the original error. That link is what\n`errors.Is` follows — so a caller ten frames up can still ask \"was this ultimately a\nfile-not-found?\" and get `true`, without string matching and without caring how many\nlayers added context on the way. `errors.As` does the same for extracting a specific\nerror *type*.\n\nSwap the verb and watch the link vanish:\n\n```\nwith %w: true\nwith %v: false\n```\n\nSame message text either way — only the machine-readable link differs. Use `%w` when the\ncaller might reasonably want to inspect the cause; use plain `%v` when you are\ndeliberately hiding the internals. Wrapping everything makes your internal error\ntypes part of your public API, which is a real cost.\n\n### defer: run this on the way out, whatever happens\n\n```go\ndefer fmt.Println(\"third\")\ndefer fmt.Println(\"second\")\ndefer fmt.Println(\"first\")\nfmt.Println(\"body\")\n```\n\n```\nbody\nfirst\nsecond\nthird\n```\n\nDeferred calls run when the surrounding **function** returns — not at the end of the\nblock, which is a genuine difference from a C++ destructor and the source of the classic\n\"I deferred `f.Close()` inside a loop and ran out of file descriptors\" bug. They run in\n**LIFO** order, which is exactly right: the thing you acquired last is the thing you\nrelease first.\n\nThis is Go's answer to RAII, and it is a worse answer in one specific way and a better one\nin another. Worse: it is opt-in and manual, so forgetting `defer f.Close()` leaks, where a\nC++ destructor could not be forgotten. Better: it is *visible at the call site*. You can\nsee the cleanup on the line after the acquisition, rather than having to know what some\ntype's destructor does.\n\nCrucially, deferred calls still run when the function panics, which is what makes them\ntrustworthy for unlocking mutexes:\n\n```go\nmu.Lock()\ndefer mu.Unlock()\n```\n\n### The defer gotcha: arguments evaluate now, the call happens later\n\n```go order\ni := 1\ndefer fmt.Println(\"deferred saw i =\", i)\ni = 99\nfmt.Println(\"at the end i =\", i)\n```\n\n```\nat the end i = 99\ndeferred saw i = 1\n```\n\nThe arguments were evaluated the moment the `defer` statement ran; only the *call* was\npostponed. If you want the late value, defer a closure instead — `defer func() {\nfmt.Println(i) }()` — which captures the variable rather than its value.\n\n### panic exists, and is not for errors\n\n`panic` unwinds the stack running deferred functions, and `recover` inside a deferred\nfunction stops it. It looks like exceptions and is not meant to be used like them: panic\nis for genuinely unrecoverable programmer error — index out of range, nil dereference, an\ninvariant you thought was impossible. A library that panics on a bad input is considered\nbadly behaved; it should return an error. The main legitimate use of `recover` is at the\ntop of a server's request handler, so one broken request doesn't take down the process.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "What is the `error` type in Go, exactly — what makes a value an error?",
+          "options": [
+            {
+              "text": "A special type recognised by the compiler, which enforces that it is checked",
+              "correct": false,
+              "why": "The compiler enforces nothing here — `f, _ := os.Open(...)` compiles happily. That ignorability is the strongest argument *against* Go's design, and it is worth knowing it is real rather than assuming the compiler has your back."
+            },
+            {
+              "text": "An ordinary one-method interface: anything with an `Error() string` method is an error, with no special language support involved",
+              "correct": true,
+              "why": "The whole declaration is two lines in `builtin.go`. Because it is a plain interface, your own error types are written the way you write anything else, and `nil` — the zero value of an interface — is the natural way to say \"no error\". There is no exception machinery anywhere in the language for it to hook into."
+            },
+            {
+              "text": "A built-in struct the runtime creates when something fails",
+              "correct": false,
+              "why": "Nothing is created for you and there is no built-in struct. Errors are ordinary values that ordinary code constructs and returns, which is exactly the property that lets you compare them, wrap them and store them."
+            },
+            {
+              "text": "An alias for `string`, which is why errors print directly",
+              "correct": false,
+              "why": "It is an interface, not a string. Errors print nicely because `fmt` calls the `Error()` method, the same way it calls `String()` on a `fmt.Stringer`."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "What is the difference between wrapping an error with `%w` and formatting it with `%v`, and what does the difference make possible for a caller?",
+          "options": [
+            {
+              "text": "`%w` is for warnings and `%v` for values; both flatten the cause",
+              "correct": false,
+              "why": "There is no warning concept in the `fmt` verbs. `%w` stands for wrap, and it is the only verb that preserves the chain."
+            },
+            {
+              "text": "They are identical; `%w` is just the newer spelling",
+              "correct": false,
+              "why": "They produce identical *text*, which is what makes this trap easy to fall into, but `errors.Is` returns true through one and false through the other."
+            },
+            {
+              "text": "`%w` keeps a machine-readable link to the original, so `errors.Is` and `errors.As` can still find the cause however many layers were added",
+              "correct": true,
+              "why": "The printed text is identical either way; only the link differs. With `%w` a caller ten frames up can ask `errors.Is(err, os.ErrNotExist)` and get true without string matching. With `%v` the same check returns false, because the cause was flattened into text. The cost of `%w` is that your internal error types become part of your public API."
+            },
+            {
+              "text": "`%w` prints the full stack trace, where `%v` prints only the message",
+              "correct": false,
+              "why": "Neither verb captures a stack trace — Go errors carry no stack by default, which is a common complaint and the reason third-party error packages exist. `%w` adds a link to another error, not a trace."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "When exactly does a deferred call run in Go, and in what order relative to other defers in the same function?",
+          "options": [
+            {
+              "text": "When the surrounding function returns — including when it panics — and in LIFO order, last deferred first",
+              "correct": true,
+              "why": "Function scope, not block scope, which is the difference from a C++ destructor and the cause of the classic bug where `defer f.Close()` inside a loop holds every file open until the whole function ends. LIFO is the right order because the thing acquired last should be released first, and running on panic is what makes `defer mu.Unlock()` trustworthy."
+            },
+            {
+              "text": "At the end of the enclosing block, in LIFO order, like a C++ destructor",
+              "correct": false,
+              "why": "The LIFO half is right and the scope half is wrong, which is the most expensive way to be half right — it is precisely the assumption that produces the file-descriptor leak in a loop."
+            },
+            {
+              "text": "When the function returns, in the order the defers were written",
+              "correct": false,
+              "why": "The timing is right but the order is reversed. FIFO would release things in the order they were acquired, which would tear down a resource before whatever depends on it."
+            },
+            {
+              "text": "Only on a normal return; a panic skips deferred calls and unwinds directly",
+              "correct": false,
+              "why": "Backwards, and dangerously — deferred calls are exactly what a panic runs as it unwinds. If they were skipped, `defer mu.Unlock()` would leave a mutex locked forever, and `recover` could not exist, since it only works inside a deferred function."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "`i := 1; defer fmt.Println(i); i = 99`. What does the deferred line print when the function returns, and why?",
+          "options": [
+            {
+              "text": "It depends on whether `i` escapes to the heap",
+              "correct": false,
+              "why": "Escape analysis changes where a value is stored, never when arguments are evaluated. The rule is the same in both cases."
+            },
+            {
+              "text": "1 — the arguments were evaluated when the `defer` statement ran, and only the call itself was postponed",
+              "correct": true,
+              "why": "`defer` captures the argument values immediately; it is the invocation that waits. This bites hardest when deferring something like `f.Close()` on a variable you later reassign. When you want the value as of return time, defer a closure instead — `defer func(){ fmt.Println(i) }()` — which captures the variable rather than its value."
+            },
+            {
+              "text": "99 — deferred calls read the current value at the moment they run",
+              "correct": false,
+              "why": "That is what the closure form does, and assuming it is the default is the gotcha. A plain `defer f(x)` freezes `x` at the point of the defer statement."
+            },
+            {
+              "text": "Nothing — the reassignment cancels the pending defer",
+              "correct": false,
+              "why": "Nothing cancels a defer once it has been scheduled; short of the process dying, the call will happen."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "When is `panic` the right choice in Go rather than returning an error, and where is `recover` legitimately used?",
+          "options": [
+            {
+              "text": "Whenever an error would be tedious to thread upward — panic is Go's exception mechanism",
+              "correct": false,
+              "why": "It resembles one and is deliberately not used as one. Treating panic as exceptions gives you an invisible second control-flow path, which is the exact thing Go's error design exists to avoid."
+            },
+            {
+              "text": "Never — `panic` is a legacy feature and `recover` should not be used",
+              "correct": false,
+              "why": "Too strong. The runtime itself panics on nil dereference and out-of-range indexing, and boundary recovery in servers is standard practice — `net/http` does it for every handler it runs."
+            },
+            {
+              "text": "For any error a caller cannot fix, so it reaches `main` reliably",
+              "correct": false,
+              "why": "Errors a caller cannot fix are still returned; the caller decides whether to log, retry or exit. Panicking takes that decision away from every caller above you."
+            },
+            {
+              "text": "For genuinely unrecoverable programmer error — a broken invariant — while `recover` belongs at a boundary such as a server's request handler, so one bad request cannot kill the process",
+              "correct": true,
+              "why": "Panic is for \"this cannot happen and if it did the program is already wrong\", not for expected failure. A library that panics on bad input is considered badly behaved and should return an error. `recover` only works inside a deferred function, and its honest use is containment at a boundary rather than general-purpose exception handling."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Write a small function that can fail, and make the failure informative.\n\n1. Write `func readConfig(path string) ([]byte, error)` that opens a file, reads it, and\n   returns the bytes. Handle every error rather than ignoring it.\n2. Call it with a path that does not exist. Print the error and record it.\n3. Wrap the error with `%w` and some context of your own, print it again, and confirm\n   with `errors.Is(err, os.ErrNotExist)` that the cause survives the wrap.\n4. Change the `%w` to `%v` and show `errors.Is` now returning false. That contrast is the\n   point of the exercise.\n5. Add a `defer` that closes the file, plus two more defers that print, so you can observe\n   the LIFO order for yourself.\n6. Reproduce the argument-evaluation gotcha: defer a print of a variable, change the\n   variable, and see which value appears. Then fix it with a closure.",
+        "files": [
+          "go/day05/config.go"
+        ],
+        "compile": "go run go/day05/config.go",
+        "checklist": [
+          "a function returning `([]byte, error)` with every error handled",
+          "an error wrapped with `%w`, and `errors.Is` finding the cause through the wrap",
+          "the same check failing once `%w` becomes `%v`",
+          "three defers observed running in LIFO order",
+          "the deferred-argument gotcha reproduced, then fixed with a closure"
+        ]
+      }
+    },
+    {
+      "id": "go-day-06",
+      "day": 6,
+      "title": "Goroutines and channels",
+      "estMinutes": 30,
+      "teaser": "100,000 of them on four OS threads, and a runtime that tells you when they all fall asleep",
+      "teachBack": "The runtime reports \"all goroutines are asleep - deadlock!\" only when every goroutine is blocked. Explain what that check can and cannot see, and why the case it misses is the one that actually shows up in production.",
+      "slug": "goroutines",
+      "status": "available",
+      "theoryMarkdown": "This is the day Go earns its reputation. Concurrency is not a library here — it is\nsyntax, it is cheap enough to be boring, and the runtime will tell you when you have\ndeadlocked.\n\n### `go` in front of a call, and that's it\n\n```go order\ndone := make(chan string)\ngo func() {\n\tdone <- \"worker finished\"\n}()\nfmt.Println(<-done)\n```\n\n```\nworker finished\n```\n\n`go f()` runs `f` concurrently and returns immediately. The thing that starts is a\n**goroutine**, and it is not an OS thread. The Go runtime multiplexes many goroutines\nonto a small pool of real threads — an **M:N scheduler** — so the cost of starting one is\nan allocation, not a system call.\n\nHow cheap, concretely? Start a hundred thousand of them and ask the runtime what it is\nholding:\n\n```\ngoroutines: 100001\ntotal stack in use: 200352 KB, per goroutine: ~2051 bytes\nOS threads in use: 4\n```\n\n**About 2 KB each**, one hundred thousand of them alive at once, running on four OS\nthreads. A pthread's default stack is 8 MB of reserved address space — four thousand\ntimes more — which is why C and C++ servers grew thread pools, work queues, and eventually\n`epoll` loops with hand-rolled state machines. Go's answer is \"just start a goroutine per\nconnection\", and at these numbers that is a real answer rather than a naive one.\n\nThe stacks start small and **grow**: the runtime allocates 2 KB, and when a function\nwould overflow it, it allocates a bigger stack, copies the frames across and fixes up the\npointers. You cannot do that in C, where a pointer to a local must stay valid at a fixed\naddress — which is exactly why C stacks must be reserved large and up front.\n\n### Channels: a typed pipe with a lock built in\n\n```go\nch := make(chan int)      // unbuffered\nch := make(chan int, 10)  // buffered, capacity 10\nch <- 42                  // send\nv := <-ch                 // receive\nclose(ch)                 // no more sends\n```\n\nAn **unbuffered** channel is a rendezvous: the sender blocks until a receiver is ready,\nand vice versa. That blocking is a synchronisation primitive — you get \"handoff happened\"\nfor free, without a mutex or a condition variable. A **buffered** channel lets the sender\nrun ahead until the buffer fills.\n\nReceiving has a two-value form that tells you whether the channel is closed, and `range`\nover a channel loops until it is:\n\n```go order\nch := make(chan int, 3)\nch <- 1\nclose(ch)\nv, ok := <-ch\nfmt.Println(v, ok)\n```\n\nReading from a closed channel yields the zero value with `ok == false` — it does not\nblock and does not panic. *Sending* to a closed channel panics, which is why the rule is\nthat **the sender closes**, never the receiver.\n\n> [!NOTE]\n> **\"Don't communicate by sharing memory; share memory by communicating.\"** The most\n> quoted Go proverb, and it is doing more work than it looks. The usual model is a shared\n> variable plus a mutex, where the data sits still and the ownership is implied by whoever\n> holds the lock. The channel model passes the *data* between goroutines, so at any moment\n> exactly one of them has it, and ownership is a fact rather than a convention. It is not\n> a rule that you must never use a mutex — the standard library is full of them, and\n> `sync.Mutex` is often the simpler answer for guarding one counter. It is a claim about\n> which model to reach for first.\n\n### The runtime notices when everyone is asleep\n\n```go\nfunc main() {\n\tch := make(chan int)\n\t<-ch\n}\n```\n\n```\nfatal error: all goroutines are asleep - deadlock!\n\ngoroutine 1 [chan receive]:\nmain.main()\n\t/path/dead.go:5 +0x25\nexit status 2\n```\n\nNothing can ever send on that channel, so nothing can ever wake `main`. The scheduler\nnotices that *every* goroutine is blocked, declares deadlock, and prints where each one is\nstuck. Anyone who has attached gdb to a hung C++ process to work out which thread is\nholding what will appreciate getting this for free.\n\nThe honest caveat: it only fires when **all** goroutines are asleep. One goroutine stuck\nforever while the rest of the program hums along is not a deadlock the runtime can detect,\nand that is the most common real leak in production Go — a goroutine blocked on a channel\nnobody will ever write to, holding its stack and everything it references, forever.\n\n### Waiting for a group of them\n\n```go order\nvar wg sync.WaitGroup\nwg.Add(1)\ngo func() {\n\tdefer wg.Done()\n\tfmt.Println(\"working\")\n}()\nwg.Wait()\n```\n\n`Add` before you start, `Done` on the way out — via `defer`, so a panic still counts —\nand `Wait` blocks until the counter hits zero.\n\n### The race detector, which you should just use\n\nConcurrency bugs are not deterministic, which is what makes them awful. Here is a thousand\ngoroutines each doing `total++`:\n\n```\ntotal: 963\ntotal: 985\ntotal: 953\n```\n\nThree runs, three wrong answers, no crash, no error. `total++` is read-modify-write, and\nthe increments interleave. Now build with `-race`:\n\n```\n$ go run -race race.go\n==================\nWARNING: DATA RACE\nRead at 0x00c00009a078 by goroutine 10:\n  main.main.func1()\n      race.go:15 +0x84\n\nPrevious write at 0x00c00009a078 by goroutine 7:\n  main.main.func1()\n      race.go:15 +0x96\n```\n\nIt names the address, both goroutines, and both source lines. It is not a static check —\nit instruments memory access at runtime and only reports races that actually happen, so it\nfinds nothing in code you don't exercise. Run your tests with `-race` in CI and you will\ncatch things that would otherwise surface once a month in production. It is not free — on a lock-heavy\nloop doing 1.6 million increments, the same binary took 107 ms normally and 750 ms under\n`-race`, about **7x** — which is why it is a flag rather than the default. Measure it on\nyour own workload before assuming a number; the overhead tracks how much memory traffic\nyou do, not how long the program runs.\n\nThe fixes here are a `sync.Mutex` around the increment, `atomic.AddInt64`, or having each\ngoroutine send its result down a channel and summing in one place.",
+      "quiz": [
+        {
+          "id": "q1",
+          "prompt": "What is a goroutine, and how does it differ from an OS thread in cost and in what schedules it?",
+          "options": [
+            {
+              "text": "A coroutine that only switches at explicit yield points you write",
+              "correct": false,
+              "why": "You never write a yield. The runtime switches at function calls, channel operations and system calls, and since Go 1.14 it can preempt a goroutine asynchronously — so a tight loop with no calls in it no longer starves everything else."
+            },
+            {
+              "text": "A runtime-scheduled task multiplexed M:N onto a small pool of OS threads, costing about 2 KB of growable stack rather than the 8 MB an OS thread reserves",
+              "correct": true,
+              "why": "The numbers are the argument: 100,000 goroutines alive at once used roughly 2 KB of stack each on four OS threads. A pthread's default stack on Linux is 8 MB — four thousand times more — which is why C and C++ servers end up with thread pools and hand-rolled event loops, and why \"one goroutine per connection\" is a real design in Go rather than a naive one."
+            },
+            {
+              "text": "A green thread with a fixed small stack, which is why deep recursion fails early",
+              "correct": false,
+              "why": "The stack starts small but *grows*: the runtime allocates a bigger one, copies the frames and fixes up the pointers. That is only possible because Go can find and rewrite pointers to stack data — precisely what C cannot do, and why C stacks must be reserved large up front."
+            },
+            {
+              "text": "A lightweight OS thread created with `clone()`, scheduled by the kernel",
+              "correct": false,
+              "why": "Starting one is an allocation, not a system call, and the kernel never sees it. If the kernel scheduled them, 100,000 of them would mean 100,000 schedulable entities rather than the four threads actually in use."
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "prompt": "What is the difference between an unbuffered and a buffered Go channel, and what synchronisation does an unbuffered one give you for free?",
+          "options": [
+            {
+              "text": "Unbuffered channels can hold one value; buffered ones hold many",
+              "correct": false,
+              "why": "An unbuffered channel holds nothing at all. There is no slot — the value passes directly from sender to receiver, which is what makes it a rendezvous rather than a queue of size one."
+            },
+            {
+              "text": "Unbuffered is a rendezvous — sender and receiver both block until the other arrives — so a completed send proves the handoff happened, with no mutex needed",
+              "correct": true,
+              "why": "The blocking *is* the synchronisation. A buffered channel breaks that guarantee deliberately: the sender may run ahead until the buffer fills, so a completed send proves only that there was room, not that anyone received. Choosing between them is choosing whether you need the handoff or the slack."
+            },
+            {
+              "text": "Unbuffered channels are faster because they skip the queue",
+              "correct": false,
+              "why": "Usually the opposite: an unbuffered send must wait for a receiver, so throughput is often lower. You choose unbuffered for the guarantee, not the speed."
+            },
+            {
+              "text": "Buffered channels are safe for concurrent use; unbuffered ones need a mutex",
+              "correct": false,
+              "why": "Both are safe for concurrent use by any number of goroutines — that is the point of the type. Neither needs an external lock."
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "prompt": "In Go, who is supposed to close a channel, and what happens if you send on one that is already closed?",
+          "options": [
+            {
+              "text": "Either may close; sending afterwards is simply a no-op",
+              "correct": false,
+              "why": "It is not a no-op — it panics, and a panic in a goroutine with no recover takes the whole process down."
+            },
+            {
+              "text": "Channels must always be closed, or the program leaks",
+              "correct": false,
+              "why": "Closing is optional. A channel nobody references is garbage collected like anything else; close is a *signal* to receivers, not a resource release. The real leak is a goroutine blocked forever on a channel, not an unclosed channel."
+            },
+            {
+              "text": "The sender closes; sending on a closed channel panics, while receiving from one yields the zero value immediately with `ok == false`",
+              "correct": true,
+              "why": "The asymmetry is what forces the convention. A receiver cannot safely close, because a sender might still be about to send and would panic. A closed channel is perfectly usable for reading — `v, ok := <-ch` gives `0, false`, and `range` over it simply ends — so closing is how you say \"no more values are coming\"."
+            },
+            {
+              "text": "The receiver closes, to signal it has stopped listening",
+              "correct": false,
+              "why": "That is exactly the mistake the panic exists to punish. To tell a sender to stop, you use a second channel or a `context`, not a close on the channel it is writing to."
+            }
+          ]
+        },
+        {
+          "id": "q4",
+          "prompt": "The Go runtime reports `all goroutines are asleep - deadlock!`. What condition triggers that, and which very common concurrency bug does it fail to catch?",
+          "options": [
+            {
+              "text": "Two goroutines each holding a lock the other wants; it misses single-goroutine deadlocks",
+              "correct": false,
+              "why": "The runtime makes no attempt at lock-order analysis — it does not know what a cycle is. It only observes that nothing is runnable. A single goroutine receiving from an empty channel in `main` triggers it perfectly well."
+            },
+            {
+              "text": "Every single goroutine is blocked with nothing able to wake any of them — so it misses the far more common case of one goroutine stuck forever while the rest of the program runs on",
+              "correct": true,
+              "why": "The check is global, which makes it both reliable and limited. One goroutine blocked on a channel nobody will ever write to is invisible to it, and that is the most common real leak in production Go: the goroutine holds its stack and everything it references, forever, while the service looks perfectly healthy."
+            },
+            {
+              "text": "Any goroutine blocking for more than a few seconds; it misses fast deadlocks",
+              "correct": false,
+              "why": "There is no timeout involved. Blocking for hours is completely normal and reported as nothing, so long as something somewhere is still runnable."
+            },
+            {
+              "text": "A goroutine blocked on a mutex; it misses channel deadlocks",
+              "correct": false,
+              "why": "Backwards on both halves — the classic demonstration is a channel receive, and channel operations are exactly what the scheduler tracks."
+            }
+          ]
+        },
+        {
+          "id": "q5",
+          "prompt": "A Go program with 1000 goroutines each doing `total++` on a shared variable prints a different wrong number every run and never crashes. What is happening, and what finds it?",
+          "options": [
+            {
+              "text": "`total++` is a read-modify-write whose steps interleave, losing increments — and `go run -race` instruments memory accesses at runtime and names both conflicting lines",
+              "correct": true,
+              "why": "Three runs gave 963, 985 and 953 out of 1000. Nothing crashes because nothing is corrupt in a way the hardware objects to; increments are simply lost. The race detector reports the address, both goroutines and both source lines. It is dynamic, not static, so it only sees races on code you actually execute — which is the argument for running your test suite under it in CI."
+            },
+            {
+              "text": "The compiler optimised the increment; building with `-N` fixes it",
+              "correct": false,
+              "why": "Disabling optimisation changes nothing here: the race is between goroutines, not an artefact of codegen. The fixes are a mutex, an atomic add, or sending each contribution down a channel and summing in one place."
+            },
+            {
+              "text": "The goroutines have not finished; adding a `WaitGroup` fixes the count",
+              "correct": false,
+              "why": "A tempting misreading, and worth ruling out deliberately: the demonstration already waits for every goroutine. Waiting correctly and still getting 963 is what proves the problem is the increment itself."
+            },
+            {
+              "text": "Go's memory model allows stale reads until a channel operation synchronises; `-race` cannot see it",
+              "correct": false,
+              "why": "The first clause gestures at something real — the memory model does define visibility in terms of happens-before edges — but the conclusion is wrong. This is exactly what the race detector is built to find, and it finds it immediately."
+            }
+          ]
+        }
+      ],
+      "task": {
+        "markdown": "Start some goroutines, then break them on purpose.\n\n1. Start a goroutine that sends a string down a channel, and receive it in `main`. Then\n   delete the receive and observe what happens to the goroutine's output — this is the\n   \"main exits and takes everyone with it\" lesson.\n2. Start ten goroutines that each send a number, and collect all ten. Use a\n   `sync.WaitGroup` for a version that doesn't send anything back.\n3. Cause a deadlock deliberately — receive from a channel nobody sends to — and record\n   the runtime's message.\n4. Write the counter race: N goroutines incrementing one shared variable. Run it several\n   times and record the different answers.\n5. Run the same program with `go run -race` and record what it tells you.\n6. Fix it twice: once with a `sync.Mutex`, once by having each goroutine send its\n   contribution down a channel. Note which one you find easier to read.",
+        "files": [
+          "go/day06/concurrent.go"
+        ],
+        "compile": "go run -race go/day06/concurrent.go",
+        "checklist": [
+          "a goroutine's result received over a channel",
+          "a `sync.WaitGroup` used to wait for several goroutines",
+          "a deliberate deadlock triggered and the runtime's message recorded",
+          "the counter race reproduced, with at least three different wrong totals recorded",
+          "`-race` output captured, naming both conflicting lines",
+          "the race fixed two different ways"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,179 @@
+# Answer key for Go day 05. Question text lives in the .md; the reasoning lives here.
+questions:
+  - id: q1
+    prompt: >
+      What is the `error` type in Go, exactly — what makes a value an error?
+    options:
+      - text: >
+          An ordinary one-method interface: anything with an `Error() string` method is an
+          error, with no special language support involved
+        correct: true
+        why: >
+          The whole declaration is two lines in `builtin.go`. Because it is a plain
+          interface, your own error types are written the way you write anything else, and
+          `nil` — the zero value of an interface — is the natural way to say "no error".
+          There is no exception machinery anywhere in the language for it to hook into.
+      - text: A built-in struct the runtime creates when something fails
+        correct: false
+        why: >
+          Nothing is created for you and there is no built-in struct. Errors are ordinary
+          values that ordinary code constructs and returns, which is exactly the property
+          that lets you compare them, wrap them and store them.
+      - text: >
+          A special type recognised by the compiler, which enforces that it is checked
+        correct: false
+        why: >
+          The compiler enforces nothing here — `f, _ := os.Open(...)` compiles happily.
+          That ignorability is the strongest argument *against* Go's design, and it is
+          worth knowing it is real rather than assuming the compiler has your back.
+      - text: >
+          An alias for `string`, which is why errors print directly
+        correct: false
+        why: >
+          It is an interface, not a string. Errors print nicely because `fmt` calls the
+          `Error()` method, the same way it calls `String()` on a `fmt.Stringer`.
+
+  - id: q2
+    prompt: >
+      What is the difference between wrapping an error with `%w` and formatting it with
+      `%v`, and what does the difference make possible for a caller?
+    options:
+      - text: >
+          `%w` keeps a machine-readable link to the original, so `errors.Is` and
+          `errors.As` can still find the cause however many layers were added
+        correct: true
+        why: >
+          The printed text is identical either way; only the link differs. With `%w` a
+          caller ten frames up can ask `errors.Is(err, os.ErrNotExist)` and get true
+          without string matching. With `%v` the same check returns false, because the
+          cause was flattened into text. The cost of `%w` is that your internal error
+          types become part of your public API.
+      - text: >
+          `%w` prints the full stack trace, where `%v` prints only the message
+        correct: false
+        why: >
+          Neither verb captures a stack trace — Go errors carry no stack by default, which
+          is a common complaint and the reason third-party error packages exist. `%w`
+          adds a link to another error, not a trace.
+      - text: >
+          `%w` is for warnings and `%v` for values; both flatten the cause
+        correct: false
+        why: >
+          There is no warning concept in the `fmt` verbs. `%w` stands for wrap, and it is
+          the only verb that preserves the chain.
+      - text: >
+          They are identical; `%w` is just the newer spelling
+        correct: false
+        why: >
+          They produce identical *text*, which is what makes this trap easy to fall into,
+          but `errors.Is` returns true through one and false through the other.
+
+  - id: q3
+    prompt: >
+      When exactly does a deferred call run in Go, and in what order relative to other
+      defers in the same function?
+    options:
+      - text: >
+          When the surrounding function returns — including when it panics — and in LIFO
+          order, last deferred first
+        correct: true
+        why: >
+          Function scope, not block scope, which is the difference from a C++ destructor
+          and the cause of the classic bug where `defer f.Close()` inside a loop holds
+          every file open until the whole function ends. LIFO is the right order because
+          the thing acquired last should be released first, and running on panic is what
+          makes `defer mu.Unlock()` trustworthy.
+      - text: >
+          At the end of the enclosing block, in LIFO order, like a C++ destructor
+        correct: false
+        why: >
+          The LIFO half is right and the scope half is wrong, which is the most expensive
+          way to be half right — it is precisely the assumption that produces the
+          file-descriptor leak in a loop.
+      - text: >
+          When the function returns, in the order the defers were written
+        correct: false
+        why: >
+          The timing is right but the order is reversed. FIFO would release things in the
+          order they were acquired, which would tear down a resource before whatever
+          depends on it.
+      - text: >
+          Only on a normal return; a panic skips deferred calls and unwinds directly
+        correct: false
+        why: >
+          Backwards, and dangerously — deferred calls are exactly what a panic runs as it
+          unwinds. If they were skipped, `defer mu.Unlock()` would leave a mutex locked
+          forever, and `recover` could not exist, since it only works inside a deferred
+          function.
+
+  - id: q4
+    prompt: >
+      `i := 1; defer fmt.Println(i); i = 99`. What does the deferred line print when the
+      function returns, and why?
+    options:
+      - text: >
+          1 — the arguments were evaluated when the `defer` statement ran, and only the
+          call itself was postponed
+        correct: true
+        why: >
+          `defer` captures the argument values immediately; it is the invocation that
+          waits. This bites hardest when deferring something like `f.Close()` on a
+          variable you later reassign. When you want the value as of return time, defer a
+          closure instead — `defer func(){ fmt.Println(i) }()` — which captures the
+          variable rather than its value.
+      - text: >
+          99 — deferred calls read the current value at the moment they run
+        correct: false
+        why: >
+          That is what the closure form does, and assuming it is the default is the
+          gotcha. A plain `defer f(x)` freezes `x` at the point of the defer statement.
+      - text: >
+          Nothing — the reassignment cancels the pending defer
+        correct: false
+        why: >
+          Nothing cancels a defer once it has been scheduled; short of the process dying,
+          the call will happen.
+      - text: >
+          It depends on whether `i` escapes to the heap
+        correct: false
+        why: >
+          Escape analysis changes where a value is stored, never when arguments are
+          evaluated. The rule is the same in both cases.
+
+  - id: q5
+    prompt: >
+      When is `panic` the right choice in Go rather than returning an error, and where is
+      `recover` legitimately used?
+    options:
+      - text: >
+          For genuinely unrecoverable programmer error — a broken invariant — while
+          `recover` belongs at a boundary such as a server's request handler, so one bad
+          request cannot kill the process
+        correct: true
+        why: >
+          Panic is for "this cannot happen and if it did the program is already wrong",
+          not for expected failure. A library that panics on bad input is considered badly
+          behaved and should return an error. `recover` only works inside a deferred
+          function, and its honest use is containment at a boundary rather than
+          general-purpose exception handling.
+      - text: >
+          Whenever an error would be tedious to thread upward — panic is Go's exception
+          mechanism
+        correct: false
+        why: >
+          It resembles one and is deliberately not used as one. Treating panic as
+          exceptions gives you an invisible second control-flow path, which is the exact
+          thing Go's error design exists to avoid.
+      - text: >
+          For any error a caller cannot fix, so it reaches `main` reliably
+        correct: false
+        why: >
+          Errors a caller cannot fix are still returned; the caller decides whether to log,
+          retry or exit. Panicking takes that decision away from every caller above you.
+      - text: >
+          Never — `panic` is a legacy feature and `recover` should not be used
+        correct: false
+        why: >
+          Too strong. The runtime itself panics on nil dereference and out-of-range
+          indexing, and boundary recovery in servers is standard practice — `net/http`
+          does it for every handler it runs.

@@ -3,6 +3,7 @@ import hljs from 'highlight.js/lib/core';
 import cpp from 'highlight.js/lib/languages/cpp';
 import bash from 'highlight.js/lib/languages/bash';
 import sql from 'highlight.js/lib/languages/sql';
+import go from 'highlight.js/lib/languages/go';
 import plaintext from 'highlight.js/lib/languages/plaintext';
 import { deLatex } from './latex';
 
@@ -11,6 +12,7 @@ import { deLatex } from './latex';
 hljs.registerLanguage('cpp', cpp);
 hljs.registerLanguage('c', cpp);
 hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('go', go);
 hljs.registerLanguage('bash', bash);
 hljs.registerLanguage('sh', bash);
 hljs.registerLanguage('plaintext', plaintext);

@@ -1,0 +1,82 @@
+# Week manifest for the Go track. Same shape as the other weeks; `track` is what puts it
+# on its own side of the switcher.
+#
+# Day ids are prefixed because they must be unique across *every* week in the repo, not
+# just within one: progress, review cards and mentor chat threads are all flat maps keyed
+# by day id. build-content.mjs fails the build if two weeks ever collide.
+#
+# Teasers are hooks, not tables of contents. "slices, len, cap, append" says nothing the
+# title doesn't; "the append that silently rewrites a slice you never passed in" does.
+id: week-go-01
+title: Go, From Zero
+milestone: go-01-from-zero
+track: go
+intro: >
+  Go is a small language built almost entirely out of arguments about what to leave out.
+  This week goes from an empty file to goroutines, stopping at the three or four places
+  where Go behaves differently from what your instincts predict — and explaining why it
+  was designed that way, because the reason is usually the part worth remembering.
+  Everything here runs with nothing but the Go toolchain installed.
+
+days:
+  - id: go-day-01
+    day: 1
+    title: Hello, and a compiler that says no
+    estMinutes: 25
+    teaser: An unused variable is a build error, and the rule everyone calls a language rule technically isn't one
+    teachBack: >
+      Go refuses to compile a program containing an unused variable or an unused import.
+      Give both of the separate motives behind that decision — one about your bugs, one
+      about everybody's build times — and explain why the escape hatch was deliberately
+      made ugly rather than convenient.
+
+  - id: go-day-02
+    day: 2
+    title: Zero values, and the walrus that bites
+    estMinutes: 30
+    teaser: Why the same three lines can leave your variable untouched and never warn you
+    teachBack: >
+      Explain what shadowing is in Go, using the `data, err := reload()` shape inside an
+      `if` block. Say precisely which variables are new, what happens to the outer ones,
+      and why `go vet` was deliberately left unable to warn about it.
+
+  - id: go-day-03
+    day: 3
+    title: Slices are not arrays
+    estMinutes: 30
+    teaser: The append that silently rewrites a slice you never passed in
+    teachBack: >
+      A slice header has three fields. Use them to explain why `append` to a two-element
+      sub-slice of a five-element slice can overwrite the original's data without
+      allocating — and what the third index in `full[:2:2]` changes about that.
+
+  - id: go-day-04
+    day: 4
+    title: Methods, and interfaces you never declare
+    estMinutes: 30
+    teaser: strings.Builder has never heard of io.Writer, and satisfies it anyway
+    teachBack: >
+      In Go a type implements an interface without ever naming it. Explain who decides
+      what an interface contains under that arrangement versus a language with an
+      `implements` keyword, and why that inversion is what makes one-method interfaces
+      like `io.Writer` so widely satisfied.
+
+  - id: go-day-05
+    day: 5
+    title: Errors are values, and defer is your destructor
+    estMinutes: 30
+    teaser: No exceptions anywhere in the language, and one verb that decides whether the cause survives
+    teachBack: >
+      Explain what `%w` does that `%v` does not, given that both produce identical text.
+      Then say what that buys a caller ten frames up the stack, and what it costs the
+      package that wrapped the error.
+
+  - id: go-day-06
+    day: 6
+    title: Goroutines and channels
+    estMinutes: 30
+    teaser: 100,000 of them on four OS threads, and a runtime that tells you when they all fall asleep
+    teachBack: >
+      The runtime reports "all goroutines are asleep - deadlock!" only when every
+      goroutine is blocked. Explain what that check can and cannot see, and why the case
+      it misses is the one that actually shows up in production.

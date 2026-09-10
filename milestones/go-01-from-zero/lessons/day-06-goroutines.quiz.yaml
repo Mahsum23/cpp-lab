@@ -1,0 +1,185 @@
+# Answer key for Go day 06. Question text lives in the .md; the reasoning lives here.
+questions:
+  - id: q1
+    prompt: >
+      What is a goroutine, and how does it differ from an OS thread in cost and in what
+      schedules it?
+    options:
+      - text: >
+          A runtime-scheduled task multiplexed M:N onto a small pool of OS threads, costing
+          about 2 KB of growable stack rather than the 8 MB an OS thread reserves
+        correct: true
+        why: >
+          The numbers are the argument: 100,000 goroutines alive at once used roughly
+          2 KB of stack each on four OS threads. A pthread's default stack on Linux is
+          8 MB — four thousand times more — which is why C and C++ servers end up with
+          thread pools and hand-rolled event loops, and why "one goroutine per connection"
+          is a real design in Go rather than a naive one.
+      - text: >
+          A lightweight OS thread created with `clone()`, scheduled by the kernel
+        correct: false
+        why: >
+          Starting one is an allocation, not a system call, and the kernel never sees it.
+          If the kernel scheduled them, 100,000 of them would mean 100,000 schedulable
+          entities rather than the four threads actually in use.
+      - text: >
+          A coroutine that only switches at explicit yield points you write
+        correct: false
+        why: >
+          You never write a yield. The runtime switches at function calls, channel
+          operations and system calls, and since Go 1.14 it can preempt a goroutine
+          asynchronously — so a tight loop with no calls in it no longer starves everything
+          else.
+      - text: >
+          A green thread with a fixed small stack, which is why deep recursion fails early
+        correct: false
+        why: >
+          The stack starts small but *grows*: the runtime allocates a bigger one, copies
+          the frames and fixes up the pointers. That is only possible because Go can find
+          and rewrite pointers to stack data — precisely what C cannot do, and why C stacks
+          must be reserved large up front.
+
+  - id: q2
+    prompt: >
+      What is the difference between an unbuffered and a buffered Go channel, and what
+      synchronisation does an unbuffered one give you for free?
+    options:
+      - text: >
+          Unbuffered is a rendezvous — sender and receiver both block until the other
+          arrives — so a completed send proves the handoff happened, with no mutex needed
+        correct: true
+        why: >
+          The blocking *is* the synchronisation. A buffered channel breaks that guarantee
+          deliberately: the sender may run ahead until the buffer fills, so a completed
+          send proves only that there was room, not that anyone received. Choosing between
+          them is choosing whether you need the handoff or the slack.
+      - text: >
+          Unbuffered channels can hold one value; buffered ones hold many
+        correct: false
+        why: >
+          An unbuffered channel holds nothing at all. There is no slot — the value passes
+          directly from sender to receiver, which is what makes it a rendezvous rather
+          than a queue of size one.
+      - text: >
+          Unbuffered channels are faster because they skip the queue
+        correct: false
+        why: >
+          Usually the opposite: an unbuffered send must wait for a receiver, so throughput
+          is often lower. You choose unbuffered for the guarantee, not the speed.
+      - text: >
+          Buffered channels are safe for concurrent use; unbuffered ones need a mutex
+        correct: false
+        why: >
+          Both are safe for concurrent use by any number of goroutines — that is the
+          point of the type. Neither needs an external lock.
+
+  - id: q3
+    prompt: >
+      In Go, who is supposed to close a channel, and what happens if you send on one that
+      is already closed?
+    options:
+      - text: >
+          The sender closes; sending on a closed channel panics, while receiving from one
+          yields the zero value immediately with `ok == false`
+        correct: true
+        why: >
+          The asymmetry is what forces the convention. A receiver cannot safely close,
+          because a sender might still be about to send and would panic. A closed channel
+          is perfectly usable for reading — `v, ok := <-ch` gives `0, false`, and `range`
+          over it simply ends — so closing is how you say "no more values are coming".
+      - text: >
+          The receiver closes, to signal it has stopped listening
+        correct: false
+        why: >
+          That is exactly the mistake the panic exists to punish. To tell a sender to stop,
+          you use a second channel or a `context`, not a close on the channel it is
+          writing to.
+      - text: >
+          Either may close; sending afterwards is simply a no-op
+        correct: false
+        why: >
+          It is not a no-op — it panics, and a panic in a goroutine with no recover takes
+          the whole process down.
+      - text: >
+          Channels must always be closed, or the program leaks
+        correct: false
+        why: >
+          Closing is optional. A channel nobody references is garbage collected like
+          anything else; close is a *signal* to receivers, not a resource release. The real
+          leak is a goroutine blocked forever on a channel, not an unclosed channel.
+
+  - id: q4
+    prompt: >
+      The Go runtime reports `all goroutines are asleep - deadlock!`. What condition
+      triggers that, and which very common concurrency bug does it fail to catch?
+    options:
+      - text: >
+          Every single goroutine is blocked with nothing able to wake any of them — so it
+          misses the far more common case of one goroutine stuck forever while the rest of
+          the program runs on
+        correct: true
+        why: >
+          The check is global, which makes it both reliable and limited. One goroutine
+          blocked on a channel nobody will ever write to is invisible to it, and that is
+          the most common real leak in production Go: the goroutine holds its stack and
+          everything it references, forever, while the service looks perfectly healthy.
+      - text: >
+          Two goroutines each holding a lock the other wants; it misses single-goroutine
+          deadlocks
+        correct: false
+        why: >
+          The runtime makes no attempt at lock-order analysis — it does not know what a
+          cycle is. It only observes that nothing is runnable. A single goroutine
+          receiving from an empty channel in `main` triggers it perfectly well.
+      - text: >
+          Any goroutine blocking for more than a few seconds; it misses fast deadlocks
+        correct: false
+        why: >
+          There is no timeout involved. Blocking for hours is completely normal and
+          reported as nothing, so long as something somewhere is still runnable.
+      - text: >
+          A goroutine blocked on a mutex; it misses channel deadlocks
+        correct: false
+        why: >
+          Backwards on both halves — the classic demonstration is a channel receive, and
+          channel operations are exactly what the scheduler tracks.
+
+  - id: q5
+    prompt: >
+      A Go program with 1000 goroutines each doing `total++` on a shared variable prints a
+      different wrong number every run and never crashes. What is happening, and what
+      finds it?
+    options:
+      - text: >
+          `total++` is a read-modify-write whose steps interleave, losing increments — and
+          `go run -race` instruments memory accesses at runtime and names both conflicting
+          lines
+        correct: true
+        why: >
+          Three runs gave 963, 985 and 953 out of 1000. Nothing crashes because nothing is
+          corrupt in a way the hardware objects to; increments are simply lost. The race
+          detector reports the address, both goroutines and both source lines. It is
+          dynamic, not static, so it only sees races on code you actually execute — which
+          is the argument for running your test suite under it in CI.
+      - text: >
+          The goroutines have not finished; adding a `WaitGroup` fixes the count
+        correct: false
+        why: >
+          A tempting misreading, and worth ruling out deliberately: the demonstration
+          already waits for every goroutine. Waiting correctly and still getting 963 is
+          what proves the problem is the increment itself.
+      - text: >
+          Go's memory model allows stale reads until a channel operation synchronises;
+          `-race` cannot see it
+        correct: false
+        why: >
+          The first clause gestures at something real — the memory model does define
+          visibility in terms of happens-before edges — but the conclusion is wrong. This
+          is exactly what the race detector is built to find, and it finds it immediately.
+      - text: >
+          The compiler optimised the increment; building with `-N` fixes it
+        correct: false
+        why: >
+          Disabling optimisation changes nothing here: the race is between goroutines, not
+          an artefact of codegen. The fixes are a mutex, an atomic add, or sending each
+          contribution down a channel and summing in one place.

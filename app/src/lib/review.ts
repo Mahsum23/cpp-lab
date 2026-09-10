@@ -185,6 +185,7 @@ export function cardsFor(day: Day, progress: DayProgress | undefined, lang = 'cp
 const LANG_ALIASES: Record<string, Set<string>> = {
   cpp: new Set(['cpp', 'c']),
   sql: new Set(['sql']),
+  go: new Set(['go']),
 };
 
 /** The word after the language that opts a block in. */

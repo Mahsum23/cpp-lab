@@ -363,6 +363,22 @@ one-liner a stranger can run (`docker run --rm -e POSTGRES_PASSWORD=x -p 5432:54
 postgres:16`), and lean on the things Postgres will show you that others won't: `ctid`,
 `xmin`/`xmax`, `EXPLAIN (ANALYZE, BUFFERS)`, `pageinspect`, `pg_stat_*`.
 
+## The Go track is a beginner track, and stays one
+
+Go is being learned from the beginning, so lessons assume general programming competence
+— types, pointers, loops, functions — and assume nothing about Go itself. The hook that
+makes it interesting rather than remedial is *why*: Go's designers left unusually good
+records of their reasoning, and a beginner who knows the reason for a refusal remembers
+the refusal. Lead with the mechanism, then the argument behind it.
+
+Comparisons to C and C++ are welcome and wanted — an unused variable being a hard error
+lands better next to `-Wunused-variable`, a slice next to `std::span`, `defer` next to a
+destructor, a 2 KB goroutine stack next to an 8 MB pthread. Frame them as "if you have
+written C++..." so a reader who hasn't still follows; never assume any particular second
+language. Everything is verified against a real toolchain (1.24 at time of writing), and
+every exercise stays a single file run with `go run` — no modules, no dependencies, no
+services.
+
 ## Curriculum
 
 Full curriculum and current milestone specs are in `README.md` and
