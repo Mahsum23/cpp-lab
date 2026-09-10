@@ -173,45 +173,70 @@ ok('an early miss still pulls the card back', e.due === today(at(1)) && e.interv
 ok('an early miss still costs ease', e.ease < rested.ease);
 ok('a normal hit is unaffected by the flag being absent', grade(rested, 'good', NOW, mid).due !== rested.due);
 
-console.log('\n— code blocks become Parsons cards —');
+console.log('\n— marked code blocks become Parsons cards —');
 const theory = [
-  '# Day', '', 'Some prose.', '', '```cpp',
+  '# Day', '', 'Some prose.', '', '```cpp order',
   'int fd = socket(AF_INET, SOCK_STREAM, 0);',
   'if (fd < 0) return 1;',
   'close(fd);',
   '```', '',
-  'More prose, then one too short to bother with:', '',
-  '```cpp', 'int x = 1;', '```', '',
-  '```bash', 'ss -ltn', 'echo done', 'true', '```',
+  'An unmarked block of the same size — a table of signatures, not a sequence:', '',
+  '```cpp', 'int a();', 'int b();', 'int c();', '```', '',
+  'And one too short to bother with:', '',
+  '```cpp order', 'int x = 1;', '```', '',
+  '```bash order', 'ss -ltn', 'echo done', 'true', '```',
 ].join('\n');
 const withCode = { ...day, theoryMarkdown: theory };
 let blocks = codeBlocksFor(withCode);
-ok('a real block is found', blocks.length === 1, JSON.stringify(blocks));
-ok('its lines are in source order', blocks[0][0].includes('socket(') && blocks[0][2].includes('close('), JSON.stringify(blocks[0]));
-ok('a one-line block is skipped', !blocks.some((b) => b.length < 3));
-ok('a non-C++ fence is skipped', !blocks.some((b) => b.join().includes('ss -ltn')));
+ok('a marked block is found', blocks.length === 1, JSON.stringify(blocks));
+ok('its lines are in source order',
+  blocks[0].lines[0].includes('socket(') && blocks[0].lines[2].includes('close('), JSON.stringify(blocks[0]));
+
+/**
+ * The defect this marker exists for. Every 3-12 line block used to be harvested, which
+ * dealt cards made of four function signatures, a struct definition, and two contrasting
+ * printf calls — none of which have an order to recover. No heuristic separates "these
+ * ran in this order" from "these are a list", so the block has to say.
+ */
+ok('an unmarked block of qualifying size is NOT a card',
+  !blocks.some((b) => b.lines.some((l) => l.includes('int a();'))), JSON.stringify(blocks));
+ok('a one-line block is skipped', !blocks.some((b) => b.lines.length < 3));
+ok('a marked fence in another language is skipped', !blocks.some((b) => b.lines.join().includes('ss -ltn')));
 ok('no theory means no blocks', codeBlocksFor({ ...day, theoryMarkdown: null }).length === 0);
 
 // The bug that shipped a card made of three sentences and a heading: a closing fence
 // paired with the next opening one, capturing the prose between two blocks.
 const twoBlocks = [
-  '```cpp', 'int a = 1;', 'int b = 2;', 'int c = 3;', '```',
+  '```cpp order', 'int a = 1;', 'int b = 2;', 'int c = 3;', '```',
   '', 'Prose between them.', 'More prose that is not code at all.', '### A heading', '',
-  '```cpp', 'x();', 'y();', 'z();', '```',
+  '```cpp order', 'x();', 'y();', 'z();', '```',
 ].join('\n');
 const pair = codeBlocksFor({ ...day, theoryMarkdown: twoBlocks });
 ok('both real blocks are found', pair.length === 2, JSON.stringify(pair));
 ok('the prose between them is not one of them',
-  !pair.some((bk) => bk.some((l) => l.includes('Prose') || l.startsWith('###'))), JSON.stringify(pair));
+  !pair.some((bk) => bk.lines.some((l) => l.includes('Prose') || l.startsWith('###'))), JSON.stringify(pair));
 
 // Duplicate lines would have more than one correct order, so marking one wrong lies.
-const dupes = ['```cpp', 'a();', 'b();', 'a();', '```'].join('\n');
+const dupes = ['```cpp order', 'a();', 'b();', 'a();', '```'].join('\n');
 ok('a block with repeated lines is rejected', codeBlocksFor({ ...day, theoryMarkdown: dupes }).length === 0);
 
+console.log('\n— card ids follow the block, not its position —');
+const keyed = codeBlocksFor(withCode)[0].key;
+ok('the key is stable across calls', codeBlocksFor(withCode)[0].key === keyed);
+// Prepending another marked block used to renumber everything after it, quietly handing
+// one block's ease and interval to a different block.
+const shifted = ['```cpp order', 'p();', 'q();', 'r();', '```', '', theory].join('\n');
+const after = codeBlocksFor({ ...day, theoryMarkdown: shifted });
+ok('inserting a block ahead of it does not change its key',
+  after.some((b) => b.key === keyed), JSON.stringify(after.map((b) => b.key)));
+ok('a different block gets a different key', new Set(after.map((b) => b.key)).size === after.length);
+ok('editing a block changes its key',
+  codeBlocksFor({ ...day, theoryMarkdown: theory.replace('close(fd);', 'close(fd);  // done') })[0].key !== keyed);
+
 let pcards = cardsFor(withCode, answered);
-ok('each block earns a card', pcards.filter((x) => x.kind === 'parsons').length === 1, JSON.stringify(pcards.map((x) => x.id)));
-ok('the block index rides along', pcards.find((x) => x.kind === 'parsons').questionId === '0');
-ok('a parsons id round-trips', parseCardId('parsons:day-01:0').kind === 'parsons');
+ok('each marked block earns a card', pcards.filter((x) => x.kind === 'parsons').length === 1, JSON.stringify(pcards.map((x) => x.id)));
+ok('the block key rides along', pcards.find((x) => x.kind === 'parsons').questionId === keyed);
+ok('a parsons id round-trips', parseCardId(`parsons:day-01:${keyed}`).questionId === keyed);
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all review cases pass');
 process.exit(fails ? 1 : 0);

@@ -8,7 +8,7 @@
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 ```
 
-```cpp
+```cpp order
 sockaddr_in peer{};
 socklen_t len = sizeof(peer);          // must be initialised — see below
 int conn = accept(listen_fd, reinterpret_cast<sockaddr *>(&peer), &len);
@@ -71,7 +71,7 @@ const char *inet_ntop(int af, const void *restrict src,
                        char *restrict dst, socklen_t size);
 ```
 
-```cpp
+```cpp order
 char ip[INET_ADDRSTRLEN];
 inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
 std::printf("client %s:%u\n", ip, ntohs(peer.sin_port));

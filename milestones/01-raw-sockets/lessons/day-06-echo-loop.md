@@ -54,7 +54,7 @@ send(conn, buf, n, 0);      // wrong: ignores the return value
 
 and this is the correct shape:
 
-```cpp
+```cpp order
 size_t sent = 0;
 while (sent < n) {
     ssize_t k = send(conn, buf + sent, n - sent, 0);

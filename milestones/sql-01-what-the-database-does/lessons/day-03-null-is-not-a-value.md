@@ -48,7 +48,7 @@ CREATE TABLE users(id int, name text);
 INSERT INTO users VALUES (1, 'ana'), (2, 'bo'), (3, 'cy');
 ```
 
-```sql
+```sql order
 CREATE TABLE orders(id int, user_id int);
 INSERT INTO orders VALUES (10, 1), (11, NULL);
 SELECT name FROM users WHERE id NOT IN (SELECT user_id FROM orders);
@@ -122,7 +122,7 @@ argument — is the standard defence.
 Aggregates go the other way and **skip NULLs entirely**, which is the source of a whole
 second family of quiet wrongness:
 
-```sql
+```sql order
 CREATE TABLE n(v int);
 INSERT INTO n VALUES (1), (2), (NULL);
 SELECT count(*), count(v), sum(v), avg(v) FROM n;
@@ -186,7 +186,7 @@ is *good*. You have to write queries in it anyway.
 
 A `UNIQUE` constraint is defined in terms of equality, and NULLs are never equal, so:
 
-```sql
+```sql order
 CREATE TABLE u(v int UNIQUE);
 INSERT INTO u VALUES (NULL), (NULL), (NULL);
 SELECT count(*) FROM u;

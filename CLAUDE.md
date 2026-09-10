@@ -229,12 +229,26 @@ weeks both calling a day `day-01` merges them into a single record — finishing
 finishes the other. Prefix a new track's ids (`sql-day-01`). `build-content.mjs` fails
 the build if it ever happens again.
 
-**Theory code blocks become Parsons cards, so write them to be reorderable.** Any
-```cpp block of 3–12 lines in a lesson is dealt back later with its lines shuffled, to
-be tapped back into order (`DESIGN.md` §8.7). Two consequences when writing theory: a
-block whose lines could legitimately run in more than one order makes a card with no
-right answer, and a block with a repeated line is silently dropped. Snippets that
-demonstrate a *sequence* — open, check, use, close — are the ones worth writing.
+**A code block becomes a Parsons card only if you mark it.** Tag the fence
+```` ```cpp order ```` (or ```` ```sql order ````) and that block is dealt back later
+with its lines shuffled, to be tapped back into order (`DESIGN.md` §8.7). Unmarked
+blocks are never dealt.
+
+The marker is opt-in because an earlier version harvested *every* block of 3–12 lines,
+and most code in a lesson is not a sequence: four function signatures listed together, a
+struct definition, two contrasting calls shown side by side, three alternative flag
+values. Shuffling any of those produces a puzzle with no correct answer, which is worse
+than no puzzle at all — and no heuristic can tell "these ran in this order" from "these
+are a table", so the block has to say.
+
+Before marking one, check it honestly: if any two lines could swap and the code would
+still be correct, it is not a sequence. `sockaddr_in addr{}` followed by three field
+assignments fails this — only the first line is pinned. Open, check, use, close passes.
+A block with a repeated line is dropped even when marked, since more than one order
+would be right. Never let a line be a bare comment continuation; it is not a step.
+
+Card ids are a hash of the block's own text, so editing a lesson never hands one block's
+review schedule to another.
 
 **Quiz questions and `teachBack` prompts are also review cards, so write them to
 survive being asked cold.** Every finished day feeds a spaced-repetition deck (`app/`,

@@ -61,7 +61,12 @@ marked.use({
       return escapeHtml(text);
     },
     code({ text, lang }) {
-      const language = hljs.getLanguage(lang ?? '') ? (lang as string) : 'cpp';
+      // A fence's info string can carry more than the language — `cpp order` marks a
+      // block as a reorder card (see review.ts). Only the first word is the language;
+      // passing the whole string to highlight.js silently fails its lookup and lands
+      // every marked block on the C++ fallback, which would paint SQL as C++.
+      const name = (lang ?? '').trim().split(/\s+/)[0];
+      const language = hljs.getLanguage(name) ? name : 'cpp';
       const html = hljs.highlight(text, { language, ignoreIllegals: true }).value;
       return `<pre class="code"><code class="hljs language-${language}">${html}</code></pre>`;
     },

@@ -79,7 +79,7 @@ number into something readable is one call:
 char *strerror(int errnum);
 ```
 
-```cpp
+```cpp order
 int fd = socket(AF_INET, SOCK_STREAM, 0);
 if (fd < 0) {
     std::fprintf(stderr, "socket: %s\n", std::strerror(errno));  // e.g. "Too many open files"

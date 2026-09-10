@@ -103,6 +103,50 @@ function parseTask(taskMd) {
 }
 
 /** How many numbered questions the human-facing `## Quiz` section advertises. */
+/**
+ * Parsons markers, checked at build time rather than discovered on a phone.
+ *
+ * ```` ```cpp order ```` opts a block into the review deck as a reorder card. Two ways
+ * that goes wrong, and neither shows up until the card is dealt weeks later:
+ *
+ *  - a marked block the app will silently drop (wrong size, or a repeated line, which
+ *    would mean more than one correct order) — the author thinks there is a card and
+ *    there is not;
+ *  - a marked block containing a line that is only a comment, which is never a step in
+ *    a sequence and produces exactly the nonsense this check was written after.
+ */
+function checkOrderMarkers(dayId, mdName, theory, warn) {
+  if (!theory) return;
+  const lines = theory.split('\n');
+  let open = null;
+  for (const line of lines) {
+    const fence = /^[ \t]*```(.*)$/.exec(line);
+    if (fence) {
+      if (open) {
+        const body = open.lines.filter((l) => l.trim());
+        if (open.marked) {
+          const first = body[0]?.slice(0, 46) ?? '(empty)';
+          if (body.length < 3 || body.length > 12) {
+            warn(`${dayId}: ${mdName} marks a ${body.length}-line block "order" — only 3–12 become cards ("${first}")`);
+          } else if (new Set(body).size !== body.length) {
+            warn(`${dayId}: ${mdName} marks a block with a repeated line "order" — it will be dropped ("${first}")`);
+          }
+          const comment = body.find((l) => /^\s*(\/\/|--|#)/.test(l));
+          if (comment) {
+            warn(`${dayId}: ${mdName} marks a block whose line "${comment.trim().slice(0, 40)}" is only a comment — not a step`);
+          }
+        }
+        open = null;
+      } else {
+        const info = fence[1].trim().toLowerCase().split(/\s+/);
+        open = { marked: info.slice(1).includes('order'), lines: [] };
+      }
+      continue;
+    }
+    if (open) open.lines.push(line);
+  }
+}
+
 function countMdQuizQuestions(quizMd) {
   if (!quizMd) return 0;
   return (quizMd.match(/^\s*\d+\.\s+/gm) ?? []).length;
@@ -234,6 +278,7 @@ function buildWeek(milestone) {
     const quiz = loadQuiz(join(lessonsDir, mdName.replace(/\.md$/, '.quiz.yaml')), d.id);
 
     if (!sections.theory) warn(`${d.id}: ${mdName} has no "## Theory" section`);
+    checkOrderMarkers(d.id, mdName, sections.theory, warn);
     if (!quiz) warn(`${d.id}: no .quiz.yaml — the day will skip straight to the task`);
 
     const mdCount = countMdQuizQuestions(sections.quiz);

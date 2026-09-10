@@ -67,7 +67,7 @@ to zero the whole struct up front rather than set every field yourself:
 void *memset(void *s, int c, size_t n);
 ```
 
-```cpp
+```cpp order
 sockaddr_in addr;
 std::memset(&addr, 0, sizeof(addr));   // sin_zero handled; every other field about to be overwritten anyway
 addr.sin_family = AF_INET;
@@ -148,9 +148,8 @@ type is the trap: a `char *` into a **static buffer owned by the library** — n
 memory you allocated, and not memory that's yours alone.
 
 ```cpp
-printf("%s\n", inet_ntoa(a));                    // fine on its own
-printf("%s %s\n", inet_ntoa(a), inet_ntoa(b));   // prints the SAME text twice — whichever
-                                                  // call the compiler happened to run last
+printf("%s\n", inet_ntoa(a));                   // fine on its own
+printf("%s %s\n", inet_ntoa(a), inet_ntoa(b));  // prints the SAME text twice
 ```
 
 Call it twice before using the first result and you get the same pointer back both
@@ -166,7 +165,7 @@ const char *inet_ntop(int af, const void *restrict src,
                        char *restrict dst, socklen_t size);
 ```
 
-```cpp
+```cpp order
 char text[INET_ADDRSTRLEN];               // 16 bytes — big enough for any IPv4 text form
 inet_ntop(AF_INET, &addr.sin_addr, text, sizeof(text));
 printf("%s\n", text);                     // yours; a second call elsewhere can't touch it

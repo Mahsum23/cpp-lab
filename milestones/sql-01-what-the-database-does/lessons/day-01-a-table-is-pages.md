@@ -44,7 +44,7 @@ when you only wanted one row.
 
 Watch the file grow in page-sized steps rather than row-sized ones:
 
-```sql
+```sql order
 CREATE TABLE t(id bigserial PRIMARY KEY, name text, note text);
 SELECT pg_relation_size('t') / 8192 AS pages;
 INSERT INTO t(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 2000) g;
@@ -134,7 +134,7 @@ consistent snapshot of a table being rewritten underneath it.
 
 The bill arrives as **bloat**:
 
-```sql
+```sql order
 SELECT pg_size_pretty(pg_relation_size('t')) AS before_updates;
 UPDATE t SET note = note || 'a';
 SELECT count(*) AS live_rows, pg_size_pretty(pg_relation_size('t')) AS file FROM t;
@@ -152,7 +152,7 @@ every row gets three new versions:
 Same 2000 rows, and the file went from 184 kB to 720 kB. Three updates of every row left
 three dead versions of every row lying in the heap. Now clean up:
 
-```sql
+```sql order
 VACUUM t;
 SELECT pg_size_pretty(pg_relation_size('t')) AS after_vacuum;
 VACUUM FULL t;
