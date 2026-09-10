@@ -144,13 +144,17 @@
   /** Shuffle a block's lines. A shuffle that changes nothing isn't a puzzle. */
   function setupParsons(ref: CardRef) {
     const day = findDay(ref.dayId);
-    const block = day ? codeBlocksFor(day, lang)[Number(ref.questionId ?? 0)] : undefined;
+    // Looked up by the block's own key rather than its position, so a card dealt before
+    // a lesson was edited still finds the block it was actually about — or finds nothing
+    // and is skipped, which is the honest outcome once that block is gone.
+    const block = day ? codeBlocksFor(day, lang).find((b) => b.key === ref.questionId) : undefined;
     if (!block) return;
-    solution = block;
+    const lines = block.lines;
+    solution = lines;
     built = [];
-    let shuffled = block;
-    for (let i = 0; i < 8 && shuffled.join('\n') === block.join('\n'); i++) {
-      shuffled = [...block].sort(() => Math.random() - 0.5);
+    let shuffled = lines;
+    for (let i = 0; i < 8 && shuffled.join('\n') === lines.join('\n'); i++) {
+      shuffled = [...lines].sort(() => Math.random() - 0.5);
     }
     bank = shuffled;
   }

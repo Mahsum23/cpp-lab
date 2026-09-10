@@ -45,7 +45,7 @@ reads.
 
 Every engine will tell you its plan. In Postgres:
 
-```sql
+```sql order
 CREATE TABLE s(id bigserial PRIMARY KEY, name text, note text);
 INSERT INTO s(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 50000) g;
 ANALYZE s;
@@ -61,7 +61,7 @@ EXPLAIN SELECT * FROM s WHERE name = 'name7';
 
 `Seq Scan` — every page, to find one row. Now build the index:
 
-```sql
+```sql order
 CREATE INDEX idx_name ON s(name);
 ANALYZE s;
 EXPLAIN SELECT * FROM s WHERE name = 'name7';
@@ -102,7 +102,7 @@ EXPLAIN SELECT * FROM s WHERE lower(name) = 'name7';
 `WHERE date(created_at) = '2026-01-01'`, and every `WHERE CAST(id AS text) = ?` written to
 make a type error go away. Postgres's answer is to let you index the expression itself:
 
-```sql
+```sql order
 CREATE INDEX idx_lower ON s(lower(name));
 ANALYZE s;
 EXPLAIN SELECT * FROM s WHERE lower(name) = 'name7';
@@ -190,7 +190,7 @@ range. Only the `C` collation, which compares byte by byte, guarantees it can.
 The trap is that `C.UTF-8` *looks* like `C` and is not. Prove it by declaring an index
 with the real thing:
 
-```sql
+```sql order
 CREATE INDEX idx_c ON s(name COLLATE "C");
 ANALYZE s;
 EXPLAIN SELECT * FROM s WHERE name LIKE 'name7%';

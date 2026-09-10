@@ -143,6 +143,18 @@ const SUBJECTS: Record<Track, { name: string; lang: string; audience: string; de
 
 export const subjectOf = (track: Track | undefined) => SUBJECTS[track ?? 'cpp'] ?? SUBJECTS.cpp;
 
+/**
+ * Appended to every prompt whose output the reader sees.
+ *
+ * Models reach for LaTeX in prose that contains no maths — `SYN $\rightarrow$ SYN-ACK`
+ * is the one that started this — and there is no maths renderer in the app, so it lands
+ * as source. markdown.ts strips what gets through, because asking is not the same as
+ * enforcing; this just makes it rare rather than routine.
+ */
+const NO_LATEX = `Markdown and plain text only, never LaTeX. No $...$, no \\(...\\), no
+\\text{} or \\rightarrow — write the arrow, the symbol or the word itself. Nothing here is
+typeset maths and there is no renderer for it, so LaTeX reaches the reader as source.`;
+
 const persona = (track: Track | undefined) => {
   const s = subjectOf(track);
   return `You are the mentor for cpp-lab, a deliberate-practice ${s.name} curriculum.
@@ -173,7 +185,9 @@ welcome wherever they're relevant. Keep the technical content exact; the persona
 wraps around it.
 
 Format: you're being read on a phone. Short paragraphs, few headings, code fenced with
-its language. Be concise unless they ask you to go deep — then go deep.`;
+its language. Be concise unless they ask you to go deep — then go deep.
+
+${NO_LATEX}`;
 };
 
 export function systemPrompt(context: { week: Week; day: Day } | null): string {
@@ -254,7 +268,9 @@ final line, exactly one of:
 
 "solid" means they could defend this to another engineer. "gaps" means something real was
 missing — say what, so they know where to go back to. Emit the marker only when you are
-finished examining; never in your opening reply, and never more than once.`;
+finished examining; never in your opening reply, and never more than once.
+
+${NO_LATEX}`;
 };
 
 /** The line the examiner ends on. Parsed by the UI, never shown to the learner. */
@@ -878,7 +894,9 @@ Rules:
 - Any code goes in a \`\`\`${s.lang} fence and stays under about eight lines.
 - Ask about something the material actually covered. Do not invent API behaviour.
 - Output the challenge only. No preamble, no answer, no hints, no "here is a
-  challenge" — the first character is the first word of the question.`;
+  challenge" — the first character is the first word of the question.
+
+${NO_LATEX}`;
 };
 
 /**
@@ -906,7 +924,9 @@ or
 [[VERDICT: gaps]]
 
 "solid" means they recalled it. "gaps" means they didn't, and it should come back
-sooner. Never emit the marker more than once.`;
+sooner. Never emit the marker more than once.
+
+${NO_LATEX}`;
 
 const materialFor = (context: { week: Week; day: Day }): string => {
   const { week, day } = context;

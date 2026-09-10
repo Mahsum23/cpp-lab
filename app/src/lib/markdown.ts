@@ -4,6 +4,7 @@ import cpp from 'highlight.js/lib/languages/cpp';
 import bash from 'highlight.js/lib/languages/bash';
 import sql from 'highlight.js/lib/languages/sql';
 import plaintext from 'highlight.js/lib/languages/plaintext';
+import { deLatex } from './latex';
 
 // Only the languages this curriculum actually uses. Registering all of
 // highlight.js would be ~900KB for the sake of showing off.
@@ -32,6 +33,20 @@ function safeHref(href: string): string {
 }
 
 marked.use({
+  /**
+   * Strip the LaTeX a model sometimes emits, before anything is rendered.
+   *
+   * Done per token rather than over the whole string, because `$` is a real character
+   * here: `$PATH`, `$1`, and the `$` of a shell prompt all appear in this curriculum.
+   * Walking tokens means fenced code and inline code spans are excluded *structurally* —
+   * they are `code` and `codespan` tokens, never `text` — so no heuristic has to guess
+   * whether a given dollar sign was meant literally.
+   */
+  walkTokens(token) {
+    if (token.type !== 'text' && token.type !== 'escape') return;
+    const next = deLatex(token.text);
+    if (next !== token.text) token.text = next;
+  },
   renderer: {
     /**
      * Raw HTML is escaped rather than emitted — for every source, deliberately.
@@ -46,7 +61,12 @@ marked.use({
       return escapeHtml(text);
     },
     code({ text, lang }) {
-      const language = hljs.getLanguage(lang ?? '') ? (lang as string) : 'cpp';
+      // A fence's info string can carry more than the language — `cpp order` marks a
+      // block as a reorder card (see review.ts). Only the first word is the language;
+      // passing the whole string to highlight.js silently fails its lookup and lands
+      // every marked block on the C++ fallback, which would paint SQL as C++.
+      const name = (lang ?? '').trim().split(/\s+/)[0];
+      const language = hljs.getLanguage(name) ? name : 'cpp';
       const html = hljs.highlight(text, { language, ignoreIllegals: true }).value;
       return `<pre class="code"><code class="hljs language-${language}">${html}</code></pre>`;
     },

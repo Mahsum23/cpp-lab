@@ -59,7 +59,7 @@ from the network into the receive buffer whether or not your process ever calls
 You can prove this in two lines with a flag most people never learn, `MSG_PEEK`, which
 copies without consuming:
 
-```cpp
+```cpp order
 recv(fd, buf, sizeof(buf), MSG_PEEK);   // look
 recv(fd, buf, sizeof(buf), MSG_PEEK);   // look again — identical bytes
 recv(fd, buf, sizeof(buf), 0);          // now actually take them

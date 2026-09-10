@@ -151,23 +151,34 @@ export function cardsFor(day: Day, progress: DayProgress | undefined, lang = 'cp
   if (progress.theoryDone && day.theoryMarkdown) {
     cards.push({ id: cardId('forge', day.id), kind: 'forge', dayId: day.id });
   }
-  // One per code block the lesson actually contains, indexed by position so the id is
-  // stable as long as the block is.
-  codeBlocksFor(day, lang).forEach((_, i) => {
-    cards.push({ id: cardId('parsons', day.id, String(i)), kind: 'parsons', dayId: day.id, questionId: String(i) });
-  });
+  // One per block the lesson marked as a sequence. Keyed by a hash of the block's own
+  // text, not by its position: a card carries scheduling state, and if ids were
+  // positional then editing a lesson would silently hand block 5's ease and interval to
+  // whatever moved into slot 5.
+  for (const block of codeBlocksFor(day, lang)) {
+    cards.push({ id: cardId('parsons', day.id, block.key), kind: 'parsons', dayId: day.id, questionId: block.key });
+  }
   return cards;
 }
 
 /**
- * The fenced code blocks in a day's theory, as line arrays.
+ * The code blocks a day has marked as reorderable, as line arrays.
  *
  * These are what the Parsons cards are built from, and they come from content the app
  * already has — so a card that asks you to reconstruct a program needs no model, no
  * network, and no compiler. That is the whole reason this card kind exists: it is the
  * only form of real code practice that survives being on a train with a phone.
  *
- * Blocks are filtered to a size worth reordering. Two lines is not a puzzle, and
+ * A block has to opt in, by tagging its fence ```` ```cpp order ````. That is deliberate
+ * and it replaces an earlier version that harvested *every* code block of the right
+ * size. Most code in a lesson is not a sequence — four function signatures listed
+ * together, a struct definition, two contrasting calls shown side by side, three
+ * alternative flag values — and shuffling any of those produces a puzzle with no correct
+ * answer, which is worse than no puzzle at all. No heuristic can tell the difference
+ * between "these lines ran in this order" and "these lines are a table"; the author can,
+ * so the author says.
+ *
+ * Blocks are still filtered to a size worth reordering. Two lines is not a puzzle, and
  * anything past a dozen is a scrolling exercise on a phone rather than a recall one.
  */
 /** Fence tags that count as "this week's language". */
@@ -176,34 +187,61 @@ const LANG_ALIASES: Record<string, Set<string>> = {
   sql: new Set(['sql']),
 };
 
-export function codeBlocksFor(day: Day, lang = 'cpp', min = 3, max = 12): string[][] {
+/** The word after the language that opts a block in. */
+const ORDER_MARKER = 'order';
+
+export interface CodeBlock {
+  /** Stable id for this block, derived from its text. */
+  key: string;
+  lines: string[];
+}
+
+/**
+ * A short, stable id for a block's contents.
+ *
+ * Only has to survive being compared with itself: two different blocks colliding would
+ * merge their review history, which is why it is 32 bits of FNV rather than 8.
+ */
+function keyOf(lines: string[]): string {
+  let h = 0x811c9dc5;
+  const text = lines.join('\n');
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+export function codeBlocksFor(day: Day, lang = 'cpp', min = 3, max = 12): CodeBlock[] {
   const md = day.theoryMarkdown;
   if (!md) return [];
 
-  const blocks: string[][] = [];
+  const blocks: CodeBlock[] = [];
   // Scanned line by line rather than matched with one regex. A regex that treats
   // ``` as both an opener and a closer will happily pair a *closing* fence with the
   // next *opening* one and hand you the prose in between, which is how the first
   // version of this dealt a card made of three sentences and a heading.
-  let open: { lang: string; lines: string[] } | null = null;
+  let open: { lang: string; marked: boolean; lines: string[] } | null = null;
   for (const line of md.split('\n')) {
-    const fence = /^[ \t]*```(\w*)/.exec(line);
+    const fence = /^[ \t]*```(.*)$/.exec(line);
     if (fence) {
       if (open) {
         const lines = open.lines.filter((l) => l.trim());
         // Repeated lines mean more than one correct order exists, and marking one of
         // them wrong would be a lie.
         if (
+          open.marked &&
           LANG_ALIASES[lang]?.has(open.lang) &&
           lines.length >= min &&
           lines.length <= max &&
           new Set(lines).size === lines.length
         ) {
-          blocks.push(lines);
+          blocks.push({ key: keyOf(lines), lines });
         }
         open = null;
       } else {
-        open = { lang: fence[1].toLowerCase(), lines: [] };
+        const info = fence[1].trim().toLowerCase().split(/\s+/);
+        open = { lang: info[0] ?? '', marked: info.slice(1).includes(ORDER_MARKER), lines: [] };
       }
       continue;
     }
