@@ -1,0 +1,170 @@
+# Answer key for Go day 03. Question text lives in the .md; the reasoning lives here.
+questions:
+  - id: q1
+    prompt: >
+      `a := [3]int{1,2,3}; b := a; b[0] = 99`. What is `a[0]` afterwards, and what would
+      have happened if both had been slices instead?
+    options:
+      - text: >
+          `a[0]` is still 1, because assigning an array copies every element — with slices
+          both would read 99, because assigning a slice copies only the header
+        correct: true
+        why: >
+          This is the whole distinction. `[3]int` is a value type whose length is part of
+          the type, so assignment is a full copy. `[]int` is a three-word header — pointer,
+          length, capacity — and copying it leaves two headers pointing at one backing
+          array. Nearly every Go surprise involving slices comes back to this.
+      - text: >
+          `a[0]` is 99 in both cases; Go assigns by reference like Java or Python
+        correct: false
+        why: >
+          Go has no reference assignment. Everything is copied — the question is only ever
+          *what* gets copied, and for a slice that is the header rather than the elements.
+      - text: >
+          `a[0]` is 1 in both cases, since Go copies on assignment everywhere
+        correct: false
+        why: >
+          Right about arrays, wrong about slices. The copy is real for both, but copying
+          a slice's header duplicates a pointer, and both copies then address the same
+          elements.
+      - text: >
+          It depends on whether the array escapes to the heap
+        correct: false
+        why: >
+          Escape analysis decides *where* a value lives, never what assignment means.
+          Copy semantics are the same on the stack and the heap.
+
+  - id: q2
+    prompt: >
+      What are the three fields of a Go slice header, and which of them does copying a
+      slice copy?
+    options:
+      - text: >
+          A pointer to a backing array, a length and a capacity — and copying duplicates
+          all three, which duplicates the pointer rather than the elements
+        correct: true
+        why: >
+          Three machine words. Because the pointer is duplicated rather than the array,
+          two slices can disagree about length while addressing identical memory — which
+          is exactly the situation the append trap exploits.
+      - text: A pointer, a length, and a type tag; copying duplicates the pointer only
+        correct: false
+        why: >
+          There is no type tag in a slice header — the element type is static and known at
+          compile time. The third word is capacity, and it is the one that decides whether
+          an append allocates.
+      - text: >
+          A pointer and a length; capacity is computed from the backing array when needed
+        correct: false
+        why: >
+          Capacity is stored, not computed — a slice has no way to ask an array how big it
+          is, since the pointer may address the middle of one. `cap()` is a field read.
+      - text: >
+          The elements, the length and the capacity; copying duplicates all the elements
+        correct: false
+        why: >
+          That describes an array, and it is the behaviour slices exist to avoid. Passing
+          a large slice to a function costs three words, not the data.
+
+  - id: q3
+    prompt: >
+      Why must you write `s = append(s, x)` in Go rather than just `append(s, x)`?
+    options:
+      - text: >
+          Because when there is no spare capacity, append allocates a new array and returns
+          a slice pointing at it — your old header would still address the abandoned one
+        correct: true
+        why: >
+          Append cannot modify your header in place; it only has a copy of it. When it
+          grows the array, the only way to hand you the result is the return value.
+          Discarding it is caught by the compiler — `append(s, 2) (value of type []int) is
+          not used` — which is yesterday's unused-value rule earning its keep.
+      - text: >
+          Because append is a pure function and Go forbids side effects in builtins
+        correct: false
+        why: >
+          Append is not pure at all — when there *is* spare capacity it writes straight
+          into the existing backing array, which is visible to every other slice sharing
+          it. That is precisely what makes the aliasing trap possible.
+      - text: >
+          Purely stylistic; `append(s, x)` works but reads badly
+        correct: false
+        why: >
+          It does not work, and it does not compile. Even if it did, it would lose the
+          element whenever the array had to grow.
+      - text: >
+          Because append may return an error alongside the slice
+        correct: false
+        why: >
+          Append returns exactly one value, the slice. It has no error case — it panics
+          only if allocation itself fails, which takes the process with it.
+
+  - id: q4
+    prompt: >
+      `head := full[:2]` where `full` has five elements. What is `cap(head)`, and what
+      does `append(head, 99)` do to `full`?
+    options:
+      - text: >
+          `cap(head)` is 5, so append finds spare room and overwrites `full[2]` in place —
+          `full` becomes [1 2 99 4 5]
+        correct: true
+        why: >
+          A sub-slice inherits capacity all the way to the end of the backing array, so
+          `head` can see memory it does not appear to own. No allocation happens, so the
+          write lands in the original. A function handed `head` can corrupt data it was
+          never shown, silently.
+      - text: >
+          `cap(head)` is 2, so append allocates and `full` is unaffected
+        correct: false
+        why: >
+          That is what `full[:2:2]` gives you — the three-index form that sets capacity
+          explicitly. Plain `full[:2]` leaves capacity running to the end of the array,
+          which is what makes this a trap rather than a footnote.
+      - text: >
+          `cap(head)` is 5, and append allocates anyway because len is less than cap
+        correct: false
+        why: >
+          Backwards: append allocates only when len *equals* cap. Room to spare is exactly
+          the condition for writing in place.
+      - text: >
+          It panics, because appending past a sub-slice's length is out of bounds
+        correct: false
+        why: >
+          Append never panics for this reason — extending beyond length is its entire job.
+          Indexing past length panics; appending past it does not.
+
+  - id: q5
+    prompt: >
+      You read a 500 MB file into memory and keep a 60-byte slice of it in a cache. How
+      much memory stays reachable, and what is the fix?
+    options:
+      - text: >
+          All 500 MB, because the slice's pointer keeps the whole backing array alive —
+          fixed by copying the 60 bytes into a fresh slice, e.g. `slices.Clone`
+        correct: true
+        why: >
+          The garbage collector frees arrays, not ranges. One live pointer into an array
+          keeps every byte of it reachable, so a 60-byte view pins half a gigabyte. This
+          is how you leak memory in a garbage-collected language with no missing free, and
+          along with goroutines that never exit it is the most common cause of a Go
+          service growing without explanation.
+      - text: >
+          60 bytes — the collector frees the rest of the array once nothing indexes it
+        correct: false
+        why: >
+          There is no partial collection of an array. The allocation is the unit, and it
+          survives entirely or not at all.
+      - text: >
+          All 500 MB, and the only fix is to call `runtime.GC()` after slicing
+        correct: false
+        why: >
+          Right about the leak, wrong about the remedy — and this is a trap worth avoiding
+          on its own. Forcing a collection cannot free memory that is still reachable, and
+          the slice makes it reachable. You have to break the pointer, not nudge the
+          collector.
+      - text: >
+          60 bytes, because slicing copies in Go
+        correct: false
+        why: >
+          Slicing never copies; that is the property that makes it cheap. Copying is the
+          thing you have to ask for explicitly, which is what the fix does.

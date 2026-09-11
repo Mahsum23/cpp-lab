@@ -139,6 +139,20 @@ const SUBJECTS: Record<Track, { name: string; lang: string; audience: string; de
       ' reads, in what order, and why the planner chose that. An answer that only' +
       ' restates the syntax has missed the point of this track.',
   },
+  go: {
+    name: 'Go',
+    lang: 'go',
+    audience:
+      'a developer who already programs in some other compiled language and is learning' +
+      ' Go from the beginning. Assume they understand types, pointers, functions and' +
+      ' loops in general; what they lack is Go specifically, and the reasons it differs' +
+      ' from what they are used to.',
+    depth:
+      'Explain not just what Go does but why it was designed that way — the language has' +
+      ' unusually well-documented reasoning behind its refusals, and a beginner who knows' +
+      ' the reason remembers the rule. Comparisons to C, C++ or Java are welcome when' +
+      ' they illuminate the difference; do not assume they know any one of those.',
+  },
 };
 
 export const subjectOf = (track: Track | undefined) => SUBJECTS[track ?? 'cpp'] ?? SUBJECTS.cpp;

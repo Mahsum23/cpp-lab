@@ -1,0 +1,176 @@
+# Answer key for Go day 02. Question text lives in the .md; the reasoning lives here.
+questions:
+  - id: q1
+    prompt: >
+      In Go, what is the value of `var count int` before you assign anything to it, and
+      how does that differ from `int count;` inside a function in C?
+    options:
+      - text: >
+          Exactly 0, guaranteed — where C leaves it indeterminate, and reading it is
+          undefined behaviour rather than merely a garbage number
+        correct: true
+        why: >
+          Every Go type has a zero value and every declaration without an initialiser
+          gets it. The C difference is sharper than "you get junk": undefined behaviour
+          licenses the optimiser to assume the read never happens, which is how it
+          deletes surrounding checks. Go pays one unavoidable memory write to remove the
+          entire category.
+      - text: Undefined, exactly as in C — Go simply zeroes it in practice on most platforms
+        correct: false
+        why: >
+          It is specified, not incidental. The zero value is part of the language, so you
+          may rely on it across every compiler and platform — which is precisely what you
+          may not do in C.
+      - text: >
+          Whatever was previously on the stack, which is why Go encourages `:=`
+        correct: false
+        why: >
+          That describes C. In Go the memory is zeroed regardless of what was there
+          before, and `:=` is preferred for brevity, not safety.
+      - text: It is an error to declare a variable without initialising it
+        correct: false
+        why: >
+          `var count int` is perfectly legal and extremely common. The error Go does
+          raise is for a variable you never *use*, which is a different rule.
+
+  - id: q2
+    prompt: >
+      Name two zero values deliberately chosen so the zero value is immediately usable,
+      and say what you can do with them without initialising anything.
+    options:
+      - text: >
+          A nil slice, which has length 0 and can be appended to; and a `sync.Mutex`,
+          whose zero value is an unlocked mutex ready to lock
+        correct: true
+        why: >
+          This is the "make the zero value useful" design rule, and it is why Go can get
+          away with having no constructors at all. `var s []int` then `append(s, 1)`
+          works; `var mu sync.Mutex` then `mu.Lock()` works. A type whose zero value is
+          broken is considered a design smell in Go.
+      - text: >
+          A nil map, which can be written to; and a nil pointer, which can be dereferenced
+          safely
+        correct: false
+        why: >
+          Both halves are wrong, and dangerously so. Writing to a nil map panics — maps
+          are the notable exception to the useful-zero-value rule and must be made with
+          `make`. Dereferencing a nil pointer panics too.
+      - text: >
+          An int, which is 0; and a string, which is empty
+        correct: false
+        why: >
+          True but trivial — those are just the arithmetic identities, not cases where a
+          designer chose the representation so that no initialisation step is needed. The
+          interesting examples are the composite types.
+      - text: >
+          A nil channel, which can be sent on; and a nil interface, on which methods can
+          be called
+        correct: false
+        why: >
+          A send on a nil channel blocks forever, and calling a method on a nil interface
+          panics. Both are the opposite of usable — though the blocking nil channel is
+          genuinely exploited in some select-loop idioms.
+
+  - id: q3
+    prompt: >
+      You write `count := 2` inside an `if` block when `count` already exists outside it.
+      What happens to the outer variable, and what is this mistake called?
+    options:
+      - text: >
+          Nothing — a new variable is created that hides the outer one until the closing
+          brace, which is shadowing
+        correct: true
+        why: >
+          `:=` always declares. The outer variable is untouched, the inner one dies at the
+          brace, and nothing warns you. It is the most common way a Go program silently
+          does nothing, and it is nastiest in the `data, err := reload()` shape inside an
+          `if`, where there is no obviously suspicious inner scope to look at.
+      - text: The outer variable is assigned 2, since `:=` falls back to assignment
+        correct: false
+        why: >
+          There is a fallback, but it does not cross scopes: within *one* scope, `:=` will
+          assign to existing variables as long as at least one name on the left is new.
+          Cross a brace and every name is new again.
+      - text: It fails to compile, because the name is already taken in an enclosing scope
+        correct: false
+        why: >
+          Shadowing is legal and often deliberate — that is exactly why the compiler stays
+          quiet and why the shadow analyzer is kept out of the default `go vet` suite.
+      - text: >
+          The outer variable becomes nil until the block exits
+        correct: false
+        why: >
+          Nothing happens to the outer variable at all, and `nil` is not a value an `int`
+          can hold.
+
+  - id: q4
+    prompt: >
+      Go refuses to compile `a + b` where `a` is `int` and `b` is `int64`, even on a
+      machine where both are 64 bits wide. Why, and what class of C bug does it prevent?
+    options:
+      - text: >
+          They are distinct types and Go performs no implicit numeric conversion at all —
+          which removes C's promotion rules, where a signed/unsigned comparison silently
+          converts one side
+        correct: true
+        why: >
+          Identical width does not mean identical type. The C bug being designed out is
+          the signed-versus-unsigned comparison: compare an `int` loop counter with a
+          `size_t` and the int is converted to unsigned, making `i >= 0` permanently true.
+          C's conversion rules are a lattice you memorise; Go's rule is that there are
+          none, and the `int(b)` you must write sits exactly where the danger was.
+      - text: >
+          `int` is 32 bits on some platforms, so the addition could overflow
+        correct: false
+        why: >
+          Go's `int` is platform-dependent in size, but that is not the reason — the
+          compiler rejects this even where it can prove both are 64 bits. The rule is
+          about type identity, not representable range.
+      - text: >
+          Because `+` is not defined for `int64`, only for `int`
+        correct: false
+        why: >
+          `+` works fine on `int64`; `b + b` compiles. What fails is mixing two different
+          types in one operation.
+      - text: >
+          Go requires explicit conversion only when precision could be lost
+        correct: false
+        why: >
+          There is no such exemption. Widening conversions that could not possibly lose
+          anything still have to be written out, which is the point: one rule, no
+          exceptions to remember.
+
+  - id: q5
+    prompt: >
+      Why can `const huge = (1 << 62) * 4` compile in Go when no Go integer type can hold
+      that value?
+    options:
+      - text: >
+          Untyped constants are evaluated at arbitrary precision during compilation and
+          only take a machine type when used somewhere that needs one
+        correct: true
+        why: >
+          The constant exists as an exact mathematical value until context forces a type
+          on it, so `float64(huge)` is fine while `var x int64 = huge` fails at compile
+          time with the computed value quoted back at you. It is also why a Pi constant
+          can carry more digits than any type holds and still be correct for whichever
+          type eventually receives it.
+      - text: It silently wraps around, as unsigned arithmetic does at runtime
+        correct: false
+        why: >
+          No wrapping happens — that is the behaviour being avoided. Ask for it in a type
+          too small and you get a compile error, not a wrapped value.
+      - text: >
+          It is stored as a float64, which has the range even if it loses precision
+        correct: false
+        why: >
+          Constants are not secretly floats; integer constants stay exact integers. If
+          they were float64 the compiler could not report the precise value 18446744073709551616
+          in its overflow message.
+      - text: >
+          The compiler promotes it to `uint64`, which is large enough
+        correct: false
+        why: >
+          `uint64`'s maximum is 18446744073709551615, one less than this value — so even
+          the widest integer type does not hold it, and that is exactly what makes the
+          example worth showing.

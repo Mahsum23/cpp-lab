@@ -1,0 +1,171 @@
+# Answer key for Go day 04. Question text lives in the .md; the reasoning lives here.
+questions:
+  - id: q1
+    prompt: >
+      What is a receiver in Go, and where does it appear in a method declaration?
+    options:
+      - text: >
+          The parameter written in parentheses before the method name — `func (c *Counter)
+          Bump()` — making it an ordinary parameter that happens to sit in front
+        correct: true
+        why: >
+          There is no class body to be inside. Methods are declared at package level like
+          any function, and the receiver is what binds one to a type. Because it is just a
+          parameter, all the normal rules about copying apply to it, which is the whole
+          of the next question.
+      - text: The implicit `this` pointer, available inside every method
+        correct: false
+        why: >
+          Go has no implicit `this` and no implicit anything. You name the receiver
+          yourself, and by convention give it a one- or two-letter name rather than
+          `self` — precisely so it reads as the parameter it is.
+      - text: The interface a method belongs to, declared before the method name
+        correct: false
+        why: >
+          Methods are attached to concrete types, never to interfaces. An interface only
+          lists signatures; it never contains a method body or claims one.
+      - text: The return type, written before the name as in C
+        correct: false
+        why: >
+          Go puts return types after the parameter list. The parenthesised thing before
+          the name is the receiver, and it is a syntax Go uses nowhere else.
+
+  - id: q2
+    prompt: >
+      A Go method with a value receiver increments a field of its receiver. Why does the
+      caller's value not change, and why is there no warning?
+    options:
+      - text: >
+          The method got a copy, incremented the copy, and discarded it — and incrementing
+          a local variable is perfectly legal, so there is nothing for the compiler to
+          object to
+        correct: true
+        why: >
+          A value receiver is passed by value like any parameter. The mutation is real, it
+          just happens to something about to be thrown away. This compiles cleanly and
+          does nothing, which is why the guidance is to pick pointer receivers for any
+          type with mutating methods and then use pointers for *all* of that type's
+          methods, so the behaviour never depends on which one you happen to call.
+      - text: >
+          Value receivers are immutable, so the assignment is silently ignored
+        correct: false
+        why: >
+          Nothing is ignored — the copy really is modified, and you can print it inside
+          the method to watch it change. Immutability would at least be enforceable; this
+          is worse, because the write succeeds.
+      - text: >
+          Because the struct escaped to the heap and the method saw a stale copy
+        correct: false
+        why: >
+          Escape analysis is unrelated. The copy is made at the call, deterministically,
+          whether the original lives on the stack or the heap.
+      - text: >
+          It does change, unless the struct contains a pointer field
+        correct: false
+        why: >
+          The caller's value never changes through a value receiver. A pointer *field*
+          would let you reach shared data through the copy, but the receiver's own fields
+          are still a copy.
+
+  - id: q3
+    prompt: >
+      What does a Go type have to write in order to implement an interface?
+    options:
+      - text: >
+          Nothing — having methods with the right names and signatures is the whole
+          requirement
+        correct: true
+        why: >
+          This is structural typing, and it inverts who is in charge. In a nominal system
+          the author of a type decides which interfaces it implements, so if they never
+          heard of yours you write an adapter. In Go the consumer declares the interface,
+          and every type that already fits — including ones written years earlier — is
+          instantly compatible.
+      - text: An `implements` clause naming the interface
+        correct: false
+        why: >
+          No such clause exists in Go. The nearest thing is the voluntary
+          `var _ Iface = Type{}` assertion, which exists only so *you* find out at compile
+          time when you break the fit.
+      - text: >
+          Embed the interface in the struct, so its method set is inherited
+        correct: false
+        why: >
+          Embedding an interface in a struct is legal but does something else entirely: it
+          promotes the methods of whatever value you store there, and leaves you with a
+          type that panics when that value is nil. It is not how implementing works.
+      - text: >
+          Register the type with the interface at init time
+        correct: false
+        why: >
+          Nothing is registered and there is no runtime bookkeeping to opt into. The check
+          happens at compile time, at the point where a value is assigned to the interface.
+
+  - id: q4
+    prompt: >
+      `strings.Builder` never mentions `io.Writer` anywhere, yet `fmt.Fprintf` accepts a
+      pointer to one. Explain how, and say who defines the interface in that arrangement.
+    options:
+      - text: >
+          It has a `Write([]byte) (int, error)` method, which is everything `io.Writer`
+          asks for — and the interface is defined by the consumer, `io`, not by the type
+        correct: true
+        why: >
+          `io.Writer` is one method. That is why files, sockets, HTTP response writers,
+          gzip compressors, hashes and `os.Stdout` all satisfy it, and why redirecting
+          output from the network to a string is a one-line change in Go. The smallness is
+          the feature: as Rob Pike put it, the bigger the interface, the weaker the
+          abstraction.
+      - text: >
+          `strings.Builder` embeds `io.Writer` internally, which is why it fits
+        correct: false
+        why: >
+          It embeds nothing of the sort. If it did, it would need something to delegate to,
+          and the whole point is that no link between the two types exists.
+      - text: >
+          `fmt.Fprintf` uses reflection to find a suitable method at runtime
+        correct: false
+        why: >
+          The check is entirely static, made when the argument is converted to the
+          interface. `fmt` does use reflection for formatting the *values*, but not to
+          decide whether something is a Writer.
+      - text: >
+          The `io` package registers known writer types, and `strings.Builder` is on the list
+        correct: false
+        why: >
+          No list exists — and if it did, your own types could never join it, which would
+          destroy the property that makes the design worth having.
+
+  - id: q5
+    prompt: >
+      What does the line `var _ Greeter = English{}` accomplish, given that it stores
+      nothing and is never referenced?
+    options:
+      - text: >
+          It makes the compiler verify that `English` still satisfies `Greeter`, failing
+          the build with the missing method named if the fit ever breaks
+        correct: true
+        why: >
+          Because nothing declares intent, nothing normally tells you that you *meant* to
+          satisfy an interface and got the signature subtly wrong — `Str()` for
+          `String()`, or a value receiver where a pointer was needed. This line costs
+          nothing at runtime and turns that silence into a build error naming the missing
+          method.
+      - text: It registers `English` as an implementation so the runtime can find it
+        correct: false
+        why: >
+          There is no registry and nothing to find. Interface satisfaction is resolved
+          statically at each assignment.
+      - text: >
+          It creates a default `Greeter` used when no other value is supplied
+        correct: false
+        why: >
+          Assigning to the blank identifier stores nothing anywhere — the value is
+          discarded immediately. Nothing can later retrieve it.
+      - text: >
+          It silences the unused-variable error for the `Greeter` type
+        correct: false
+        why: >
+          Types are not subject to the unused rule — only variables and imports are, and
+          only inside function bodies for variables. This line is at package level and is
+          there purely for the type check.

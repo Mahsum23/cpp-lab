@@ -1,0 +1,174 @@
+# Answer key for Go day 01. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      `go run hello.go` executes your program immediately, the way `python script.py`
+      does. What is it actually doing underneath, and how does that differ from an
+      interpreter?
+    options:
+      - text: >
+          Compiling to a real machine-code binary in a temporary directory and then
+          executing it — the convenience is a wrapper, not interpretation
+        correct: true
+        why: >
+          Go is compiled, always. `go run` just hides the build step and throws the
+          binary away afterwards. This is why it feels like scripting and still produces
+          native-speed code, and why a warm build of a small file takes about a third of
+          a second rather than the minutes a comparable C++ translation unit can.
+      - text: It interprets the source directly, like CPython does with bytecode
+        correct: false
+        why: >
+          There is no Go interpreter in the standard toolchain. If it were interpreting,
+          `go build` could not produce a standalone executable that runs on a machine
+          with no Go installed — and it does exactly that.
+      - text: It JIT-compiles the hot paths while running, like the JVM
+        correct: false
+        why: >
+          No JIT. Everything is compiled ahead of time, before a single line runs. Go
+          deliberately has no VM to warm up, which is why a Go process reaches full speed
+          on its first request rather than its thousandth.
+      - text: >
+          It compiles to bytecode that the Go runtime executes
+        correct: false
+        why: >
+          The Go runtime is real — it carries the scheduler and garbage collector — but
+          it is linked *into* your native binary, not a bytecode interpreter running
+          above it.
+
+  - id: q2
+    prompt: >
+      Your Go build fails with `"os" imported and not used`. Give two separate reasons
+      the language designers made this an error rather than a warning.
+    options:
+      - text: >
+          An unused import is usually the fingerprint of a real bug, and every import is
+          a dependency that costs compile time for everyone who builds the package
+        correct: true
+        why: >
+          Two independent motives, which is why the rule survived the complaints. The
+          first is correctness — you imported it for a call you have since deleted or
+          misspelled. The second is the one people forget: Go's compile speed is a
+          design goal, not a happy accident, and unused dependencies are a tax on it.
+      - text: >
+          Unused imports would make the binary larger, and Go binaries are already large
+        correct: false
+        why: >
+          Half a reason at best. The linker drops code nothing reaches, so an unused
+          import costs little in the final binary — the cost is in *compiling* it, which
+          the linker cannot undo.
+      - text: >
+          Go has no linker, so every import must be reachable
+        correct: false
+        why: >
+          Go very much has a linker, and it does dead-code elimination. The rule is a
+          front-end policy, enforced long before linking.
+      - text: >
+          It prevents name collisions between packages
+        correct: false
+        why: >
+          Collisions are handled separately, by qualifying every use with the package
+          name and by letting you rename an import. An unused import cannot collide with
+          anything precisely because nothing refers to it.
+
+  - id: q3
+    prompt: >
+      A Go "hello world" binary is around 2 MB where the C equivalent is a few kilobytes.
+      What is in there, and what do you get in exchange for the size?
+    options:
+      - text: >
+          The Go runtime — scheduler, garbage collector, type information — all statically
+          linked, so the binary has no shared-library dependencies at all
+        correct: true
+        why: >
+          `ldd` on it reports "not a dynamic executable". That property is why Go took
+          over container tooling: you can copy the binary into an empty image and it
+          runs, with no libc version to match and no runtime to install. Docker,
+          Kubernetes and Terraform are all downstream of this trade.
+      - text: Debug symbols, which is why release builds are small
+        correct: false
+        why: >
+          Symbols are part of it and you can strip them with `-ldflags="-s -w"`, but that
+          saves a fraction. The bulk is runtime and library code that is genuinely being
+          shipped.
+      - text: >
+          The source code, embedded so the runtime can recompile hot paths
+        correct: false
+        why: >
+          Nothing recompiles at runtime; there is no JIT. The source is not shipped
+          inside the binary.
+      - text: >
+          A copy of the standard library in full, since Go cannot tell which parts you use
+        correct: false
+        why: >
+          The linker does eliminate unreached code — a hello world does not carry
+          `net/http`. What it cannot eliminate is the runtime itself, which every Go
+          program needs from its first instruction.
+
+  - id: q4
+    prompt: >
+      You are mid-debug, you commented out the only line using a variable, and Go now
+      refuses to compile. What is the one-line escape hatch, and why is it written to be
+      slightly ugly?
+    options:
+      - text: >
+          Assign it to the blank identifier — `_ = count` — and the ugliness is the point,
+          so it does not survive code review by accident
+        correct: true
+        why: >
+          `_` is Go's write-only variable: assignments to it are discarded and it counts
+          as a use. It is deliberately conspicuous, because a silent way to disable the
+          check would defeat the check. The same identifier does duty everywhere you want
+          to ignore something, including discarding one of several return values.
+      - text: A `//go:nolint` comment above the declaration
+        correct: false
+        why: >
+          That family of directives is for third-party linters, not the compiler. No
+          comment turns off a compile error in Go — the toolchain deliberately offers no
+          pragma for this.
+      - text: Building with a flag such as `go build -allow-unused`
+        correct: false
+        why: >
+          No such flag exists, and its absence is intentional: a project-wide switch would
+          be turned on once and never turned off.
+      - text: Declaring it with `var` instead of `:=`
+        correct: false
+        why: >
+          The rule is about use, not about which declaration syntax produced it. A `var`
+          declared inside a function and never used fails exactly the same way.
+
+  - id: q5
+    prompt: >
+      What does `import _ "net/http/pprof"` do, given that the blank identifier means you
+      never refer to the package by name?
+    options:
+      - text: >
+          Imports it purely for its side effects — its init function runs, registering
+          profiling handlers on the default HTTP mux
+        correct: true
+        why: >
+          A package's `init` runs on import whether or not you call anything in it, and
+          the blank import says "I want exactly that and nothing else". For pprof it
+          means a running server gains live CPU, heap and goroutine profiling endpoints
+          for one line of code. Database drivers register themselves the same way.
+      - text: >
+          Imports it lazily, so it is only loaded if something needs it at runtime
+        correct: false
+        why: >
+          There is no lazy import in Go — linking happens at build time and init runs at
+          startup. The blank import changes what you may *name*, not when it loads.
+      - text: >
+          Silences the unused-import error while leaving the package genuinely unused
+        correct: false
+        why: >
+          It does silence the error, but "genuinely unused" is wrong and that is the
+          whole point: the package is doing work through its init function. Using a blank
+          import on a package with no side effects accomplishes nothing.
+      - text: Imports every exported name into the current namespace, like a wildcard
+        correct: false
+        why: >
+          That is `import . "pkg"`, the dot import, which is discouraged precisely because
+          it makes it impossible to see where a name came from. The blank identifier is
+          the opposite: no names at all.

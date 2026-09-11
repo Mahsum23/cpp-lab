@@ -147,7 +147,10 @@ class AppStore {
     const found = new Set<Track>([this.track]);
     for (const w of this.curriculum?.weeks ?? []) if (isTrack(w.track)) found.add(w.track);
     for (const w of this.weeks) if (isTrack(w.track)) found.add(w.track);
-    return (['cpp', 'sql'] as Track[]).filter((t) => found.has(t));
+    // Order comes from TRACKS itself rather than a second list kept in step by hand —
+    // a hardcoded ['cpp', 'sql'] here silently filtered out a third track that was
+    // otherwise fully wired up, and nothing failed except the switcher not showing it.
+    return (Object.keys(TRACKS) as Track[]).filter((t) => found.has(t));
   }
 
   /** Weeks of the subject being studied. `weeks` stays the full set: a review card

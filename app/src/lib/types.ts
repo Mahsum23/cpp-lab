@@ -54,14 +54,15 @@ export interface Day {
  * Not a cosmetic label: it decides which day the app offers next, which cards the
  * review deck deals, and which language a code fence is highlighted and reordered as.
  */
-export type Track = 'cpp' | 'sql';
+export type Track = 'cpp' | 'sql' | 'go';
 
 export const TRACKS: Record<Track, { label: string; lang: string; blurb: string }> = {
   cpp: { label: 'C++', lang: 'cpp', blurb: 'Systems programming, from raw sockets up' },
   sql: { label: 'SQL', lang: 'sql', blurb: 'What the database is actually doing' },
+  go: { label: 'Go', lang: 'go', blurb: 'A small language with strong opinions' },
 };
 
-export const isTrack = (v: unknown): v is Track => v === 'cpp' || v === 'sql';
+export const isTrack = (v: unknown): v is Track => v === 'cpp' || v === 'sql' || v === 'go';
 
 export interface Week {
   schemaVersion: number;

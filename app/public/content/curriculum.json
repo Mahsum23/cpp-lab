@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "title": "cpp-lab",
-  "generatedAt": "2026-09-10T14:32:32.365Z",
+  "generatedAt": "2026-09-10T17:02:04.788Z",
   "weeks": [
     {
       "id": "week-01",
@@ -12,6 +12,17 @@
       "availableDays": 8,
       "url": "content/weeks/week-01.json",
       "contentHash": "sha256:3d58d98f9b9df27fa06d217283356dc2",
+      "available": true
+    },
+    {
+      "id": "week-go-01",
+      "title": "Go, From Zero",
+      "milestone": "go-01-from-zero",
+      "track": "go",
+      "days": 6,
+      "availableDays": 6,
+      "url": "content/weeks/week-go-01.json",
+      "contentHash": "sha256:185f9f438439d64f4f8df8dcfe3a850b",
       "available": true
     },
     {
