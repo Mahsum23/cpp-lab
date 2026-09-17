@@ -1,0 +1,84 @@
+# The phone half of day 04. Every output below came from running the program.
+steps:
+  - id: d1
+    kind: predict
+    prompt: What does this print?
+    code: |
+      type Box struct{ n int }
+
+      func (b Box) Fill()  { b.n = 7 }
+      func (b *Box) Real() { b.n = 7 }
+
+      func main() {
+      	var b Box
+      	b.Fill()
+      	fmt.Print(b.n, " ")
+      	b.Real()
+      	fmt.Println(b.n)
+      }
+    options:
+      - text: "`0 7`"
+        correct: true
+        why: >
+          `Fill` has a value receiver, so it got a copy, set the copy's field, and threw
+          the copy away — legal, silent, and useless. `Real` has a pointer receiver and
+          modifies the real thing. Note you never wrote `(&b).Real()`: when the value is
+          addressable Go inserts the `&` for you, which is why the two calls look
+          identical at the call site and behave completely differently.
+      - text: "`7 7`"
+        correct: false
+        why: >
+          That would need `Fill` to reach the original, and it cannot — the receiver is an
+          ordinary parameter and ordinary parameters are copies. This is the single most
+          common Go beginner bug precisely because nothing warns you.
+      - text: "`0 0`"
+        correct: false
+        why: >
+          The pointer receiver really does work. If neither did, methods could never
+          mutate anything and the value/pointer distinction would not exist.
+      - text: It fails to build — you cannot mix value and pointer receivers on one type
+        correct: false
+        why: >
+          You can, and this compiles. It is nonetheless discouraged: a type whose method
+          set is half values and half pointers behaves differently depending on which
+          method you happen to call, so the guidance is to pick pointers for all of them
+          once any method mutates.
+
+  - id: d2
+    kind: predict
+    prompt: >
+      `Temp` has a `String() string` method. Nothing here calls it. What comes out?
+    code: |
+      type Temp float64
+
+      func (t Temp) String() string { return fmt.Sprintf("%.1f degrees", float64(t)) }
+
+      func main() {
+      	fmt.Println(Temp(21.5))
+      	fmt.Println([]Temp{1, 2})
+      }
+    options:
+      - text: "`21.5 degrees` then `[1.0 degrees 2.0 degrees]`"
+        correct: true
+        why: >
+          By having that method you satisfied `fmt.Stringer` without ever naming it, and
+          `fmt` looks for it on every value it prints — including each element inside a
+          slice. This is structural typing doing something useful by accident, and it is
+          also the trap: write `String()` in terms of the value itself with `%v` and you
+          get infinite recursion, which is why the conversion to `float64` is there.
+      - text: "`21.5` then `[1 2]`"
+        correct: false
+        why: >
+          That is what you get without the method. Adding it changes the output of code
+          you did not touch — which is the point of the exercise, and worth remembering
+          before you add `String()` to a type other people print.
+      - text: "`21.5 degrees` then `[1 2]`"
+        correct: false
+        why: >
+          Half right. `fmt` does not stop at the top level — it formats each element with
+          the same rules, so a slice of Stringers prints as a list of their strings.
+      - text: It fails to build — `String` collides with the built-in
+        correct: false
+        why: >
+          There is no built-in called `String` to collide with, and the name is not
+          reserved. It is load-bearing only because `fmt` looks for exactly that spelling.

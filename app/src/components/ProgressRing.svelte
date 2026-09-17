@@ -13,8 +13,19 @@
   const R = 17;
   const C = 2 * Math.PI * R;
   const GAP = 7;
-  const seg = C / 3 - GAP;
+
+  /**
+   * How many arcs there are is whatever the caller passed, not three.
+   *
+   * This used to be hardcoded, from when every day had exactly theory/quiz/task. Once
+   * days started carrying a teach-back the fourth arc was drawn at three-arc spacing —
+   * so it landed on top of the first one — and the counter underneath said "/3" no
+   * matter what. A day could sit at 4/3 and look broken while being complete.
+   */
+  const n = $derived(Math.max(segments.length, 1));
+  const seg = $derived(C / n - GAP);
   const done = $derived(segments.filter(Boolean).length);
+  const names = $derived(labels.slice(0, n));
 </script>
 
 <div class="ring" style:width="{size}px" style:height="{size}px">
@@ -26,7 +37,7 @@
         cy="20"
         r={R}
         stroke-dasharray="{seg} {C - seg}"
-        stroke-dashoffset={-((i * C) / 3)}
+        stroke-dashoffset={-((i * C) / n)}
       />
       <circle
         class="fill"
@@ -35,13 +46,13 @@
         cy="20"
         r={R}
         stroke-dasharray="{seg} {C - seg}"
-        stroke-dashoffset={-((i * C) / 3)}
+        stroke-dashoffset={-((i * C) / n)}
       />
     {/each}
   </svg>
-  <span class="count numeral" style:font-size="{size * 0.29}px">{done}<em>/3</em></span>
+  <span class="count numeral" style:font-size="{size * 0.29}px">{done}<em>/{n}</em></span>
 </div>
-<span class="sr">{done} of 3 steps done: {labels.join(', ')}</span>
+<span class="sr">{done} of {n} steps done: {names.join(', ')}</span>
 
 <style>
   .ring {

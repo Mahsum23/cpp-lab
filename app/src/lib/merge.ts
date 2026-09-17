@@ -12,7 +12,7 @@
  */
 import {
   emptyDayProgress, emptyReview,
-  type DayProgress, type Progress, type ReviewCard, type ReviewState, type StreakState, type TaskState,
+  type DayProgress, type Progress, type ReviewCard, type ReviewState, type StreakState, type TaskState, type QuizState,
 } from './types';
 import { deriveXp } from './xp';
 
@@ -41,23 +41,31 @@ function mergeDay(local: DayProgress, remote: DayProgress): DayProgress {
 
   // Answers and their verdicts move as a pair. Taking the answer from one record and
   // the verdict from the other is how you end up scoring a question nobody answered.
-  const answers = { ...remote.quiz.answers };
-  const correct = { ...remote.quiz.correct };
-  for (const [qid, index] of Object.entries(local.quiz.answers)) {
-    answers[qid] = index;
-    if (qid in local.quiz.correct) correct[qid] = local.quiz.correct[qid];
-    else delete correct[qid];
-  }
+  const mergeAnswers = (l: QuizState, r: QuizState): QuizState => {
+    const answers = { ...r.answers };
+    const correct = { ...r.correct };
+    for (const [qid, index] of Object.entries(l.answers)) {
+      answers[qid] = index;
+      if (qid in l.correct) correct[qid] = l.correct[qid];
+      else delete correct[qid];
+    }
+    return {
+      answers,
+      correct,
+      completedAt: earliest(l.completedAt, r.completedAt),
+      cleanSweep: l.cleanSweep || r.cleanSweep,
+    };
+  };
+
+  // A record written before drills existed has no drill state at all — a device that
+  // has not updated yet still syncs the old shape, so this cannot assume the field.
+  const blank: QuizState = { answers: {}, correct: {}, completedAt: null, cleanSweep: false };
 
   return {
     weekId: local.weekId || remote.weekId,
     theoryDone: local.theoryDone || remote.theoryDone,
-    quiz: {
-      answers,
-      correct,
-      completedAt: earliest(local.quiz.completedAt, remote.quiz.completedAt),
-      cleanSweep: local.quiz.cleanSweep || remote.quiz.cleanSweep,
-    },
+    quiz: mergeAnswers(local.quiz, remote.quiz),
+    drill: mergeAnswers(local.drill ?? blank, remote.drill ?? blank),
     task: TASK_RANK[local.task] >= TASK_RANK[remote.task] ? local.task : remote.task,
     checklist: Array.from({ length: width }, (_, i) => Boolean(local.checklist[i]) || Boolean(remote.checklist[i])),
     notes: mergeNotes(local.notes, remote.notes),

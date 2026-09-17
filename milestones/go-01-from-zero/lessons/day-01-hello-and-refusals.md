@@ -186,6 +186,15 @@ an unreasonably high-value hour, and Go's is short enough to make that realistic
 5. What does `import _ "net/http/pprof"` do, given that the underscore means you never
    reference the package by name?
 
+## Drill
+
+No machine needed for these.
+
+1. A complete file imports `fmt` and `os` but only calls `fmt.Println`. Does it build?
+2. `var count int`, then `count++`, then print it. What comes out?
+3. You commented out the only line using a variable and the build broke. What is the
+   one-line way to get it building again without deleting anything?
+
 ## Task
 
 Get Go on your machine and make the compiler shout at you on purpose. The refusals are

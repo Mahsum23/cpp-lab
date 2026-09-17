@@ -112,7 +112,9 @@
         <div>
           <p class="eyebrow">Day {current.day.day}</p>
           <h2>{current.day.title}</h2>
-          <p class="meta">~{current.day.estMinutes} min · theory · quiz · task</p>
+          <p class="meta">
+            ~{current.day.estMinutes} min · theory · quiz · {current.day.drill?.length ? 'drill' : 'task'}
+          </p>
         </div>
         <ProgressRing segments={segs} />
       </div>
@@ -142,21 +144,38 @@
   {/if}
 
 
-  <!-- The gap this feature exists for: theory and quiz are done, the task needs a
-       machine that isn't in your pocket, and the phone would otherwise have nothing
-       to offer for the rest of the day. -->
-  {#if app.ready && !app.ambush && (app.taskParked || app.deck.length)}
+  <!-- The counterweight to letting a day's ring close from a phone. Lab work stopped
+       gating the day, so it has to be visible somewhere you cannot miss it. -->
+  {#if app.ready && app.labQueue.length}
+    <button
+      class="lab"
+      onclick={() => router.go(sessionPath(app.labQueue[0].week.id, app.labQueue[0].day.id, 2))}
+    >
+      <span class="labcount numeral">{app.labQueue.length}</span>
+      <span class="labtext">
+        <strong>
+          {app.labQueue.length === 1 ? 'One task' : `${app.labQueue.length} tasks`} waiting for a machine
+        </strong>
+        <em>./lab in the repo opens the oldest — {app.labQueue[0].day.title}</em>
+      </span>
+    </button>
+  {/if}
+
+  {#if app.ready && !app.ambush && app.deck.length}
     <button
       class="strip"
-      class:parked={app.taskParked || app.dueNow.length > 0}
+      class:parked={app.dueNow.length > 0}
       onclick={() => router.go(app.dueNow.length ? '/review' : '/review/practice')}
     >
       <span class="lines">
+        <!-- This strip used to lead with "Task's waiting on a compiler", from when a
+             parked task was the only thing the phone could tell you about. The lab
+             queue above says that now, and better, so this one is about review again. -->
         <strong>
-          {#if app.taskParked}Task's waiting on a compiler{:else if app.dueNow.length === 1}1 card due{:else if app.dueNow.length}{app.dueNow.length} cards due{:else}Nothing due — practise anyway{/if}
+          {#if app.dueNow.length === 1}1 card due{:else if app.dueNow.length}{app.dueNow.length} cards due{:else}Nothing due — practise anyway{/if}
         </strong>
         <em>
-          {#if app.taskParked && app.dueNow.length}Review {app.dueNow.length} from earlier days while you wait{:else if app.taskParked}Review something from an earlier day while you wait{:else if app.dueNow.length}From days you finished a while ago{:else}Answering early can't push a card further out{/if}
+          {#if app.dueNow.length}From days you finished a while ago{:else}Answering early can't push a card further out{/if}
         </em>
       </span>
       <svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>
@@ -187,6 +206,57 @@
 </div>
 
 <style>
+  /* Deliberately quieter than the review strip: a reminder, not a reprimand. */
+  .lab {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border-radius: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+
+  .lab:active {
+    background: var(--surface-2);
+  }
+
+  .labcount {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .labtext {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .labtext strong {
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .labtext em {
+    font-style: normal;
+    font-size: 12.5px;
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* Sits above everything: which subject you're on changes what the whole screen means. */
   .tracks {
     display: flex;

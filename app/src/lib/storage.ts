@@ -180,7 +180,15 @@ function migrate(p: Progress): Progress {
   };
   for (const [id, d] of Object.entries(p.days ?? {})) {
     const blank = emptyDayProgress(d.weekId);
-    const day = { ...blank, ...d, quiz: { ...blank.quiz, ...d.quiz } };
+    // `drill` arrived after people had progress on disk, so a spread of the stored
+    // record leaves it undefined and every read of day.drill.answers throws. Filled from
+    // the blank rather than migrated: an old day simply has no drill answers yet.
+    const day = {
+      ...blank,
+      ...d,
+      quiz: { ...blank.quiz, ...d.quiz },
+      drill: { ...blank.drill, ...d.drill },
+    };
 
     // Records written before `quiz.correct` existed only know their answers as
     // indices into content that may since have been reshuffled. A clean sweep is

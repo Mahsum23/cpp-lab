@@ -1,0 +1,77 @@
+# The phone half of day 03. Every output below came from running the program.
+steps:
+  - id: d1
+    kind: predict
+    prompt: What are the two slices after this runs?
+    code: |
+      xs := []int{1, 2, 3, 4}
+      ys := xs[:2]
+      ys = append(ys, 99)
+      fmt.Println(xs, ys)
+    options:
+      - text: "`[1 2 99 4] [1 2 99]`"
+        correct: true
+        why: >
+          `ys` looks like a two-element slice but its capacity runs to the end of the
+          backing array — `cap(ys)` is 4. So `append` finds spare room, writes in place,
+          and 99 lands on top of `xs[2]`. A function handed `ys` can corrupt data it was
+          never shown. The fix is a three-index slice, `xs[:2:2]`, which caps the capacity
+          and forces a fresh allocation.
+      - text: "`[1 2 3 4] [1 2 99]`"
+        correct: false
+        why: >
+          This is the intuition Go breaks. It would be right only if `append` had
+          allocated a new array — which it does exactly when there is no spare capacity,
+          and here there is.
+      - text: "`[1 2 99 4] [1 2 99 4]`"
+        correct: false
+        why: >
+          The backing array is shared, but the two slices have different *lengths*: `ys`
+          was created with length 2 and append took it to 3. It cannot see the 4 that is
+          sitting past its own end.
+      - text: "`[1 2 3 4 99] [1 2 99]`"
+        correct: false
+        why: >
+          Nothing appends to `xs` — its header is never reassigned, so its length cannot
+          change. What changes is a byte inside the array both slices point at.
+
+  - id: d2
+    kind: predict
+    prompt: >
+      `grow` appends to the slice it was given, and there is spare capacity for it.
+      What does main print?
+    code: |
+      func grow(s []int) { s = append(s, 4) }
+
+      func main() {
+      	xs := make([]int, 0, 8)
+      	xs = append(xs, 1, 2, 3)
+      	grow(xs)
+      	fmt.Println(xs, len(xs), cap(xs))
+      }
+    options:
+      - text: "`[1 2 3] 3 8`"
+        correct: true
+        why: >
+          The 4 really was written into the backing array — but `grow` only had a *copy*
+          of the header, and the length lives in the header. The caller's `xs` still says
+          length 3, so the 4 sits at index 3 invisible and will be overwritten by the next
+          append. This is why `append` returns the slice and why the caller must assign
+          the result: it is the only way the new length gets back.
+      - text: "`[1 2 3 4] 4 8`"
+        correct: false
+        why: >
+          That would require `grow` to change the caller's header, and it cannot — a slice
+          is passed by value like everything else in Go. It would need `*[]int`, or to
+          return the slice.
+      - text: "`[1 2 3] 3 4`"
+        correct: false
+        why: >
+          Capacity was fixed at 8 by the `make` and nothing here reallocates, so it cannot
+          shrink. Only a fresh allocation changes capacity.
+      - text: It fails to build — `grow` discards the result of `append`
+        correct: false
+        why: >
+          It assigns the result to `s`, which counts as a use, so the compiler is
+          satisfied. The value is then thrown away when the function returns, which is the
+          bug the compiler cannot see.
