@@ -1,0 +1,3 @@
+#!/bin/sh
+# One command from a cold terminal to editing the right file. See tools/lab.mjs.
+exec node "$(dirname "$0")/tools/lab.mjs" "$@"

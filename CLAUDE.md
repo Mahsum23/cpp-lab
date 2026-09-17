@@ -353,6 +353,16 @@ that cannot end. When writing a `teachBack` question, make it something he can g
 in an interesting way: "what is the backlog a queue of, and who puts things in it" beats
 "explain listen()".
 
+## Getting to a task must stay a single command
+
+The friction that stops a task getting done is preparation, not coding — so `./lab`
+exists to collapse it: it scaffolds the day's file at the path the lesson names, with the
+checklist as a comment header, and prints the run command. This has a consequence for
+authoring. A task's `- File:` and `- Run:` lines are not decoration; they are what the
+launcher builds from, so every task needs them and they must be exactly right. A day that
+genuinely has no single file (the sockets week's server-and-client days) is fine — the
+launcher says so and still offers the run command — but that should be the exception.
+
 ## The SQL track is PostgreSQL-first
 
 He said plainly that Postgres is the database he wants to learn first, so the SQL track
