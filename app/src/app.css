@@ -408,3 +408,133 @@ h4 {
     transition-duration: 0.001ms !important;
   }
 }
+
+
+/* --- Answer options -------------------------------------------------------
+   Shared by the quiz and the drill, which are the same interaction: a prompt,
+   two to four options, one tap, then every option explained. Global rather
+   than duplicated per component so the two can never drift apart visually. */
+.options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 15px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  font-size: 15.5px;
+  line-height: 1.45;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.option:active:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.option.correct {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.option.wrong {
+  border-color: var(--bad);
+  background: var(--bad-soft);
+}
+
+/* Options he didn't pick and weren't right recede, but stay readable — the
+   wrong ones are real misconceptions and worth re-reading. */
+.option.dim {
+  opacity: 0.5;
+}
+
+.option:disabled {
+  cursor: default;
+}
+
+.mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  display: grid;
+  place-items: center;
+}
+
+.correct .mark {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.wrong .mark {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.mark svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.whys {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  animation: reveal 0.28s ease;
+}
+
+.why {
+  padding: 13px 15px;
+  border-radius: 14px;
+  font-size: 15px;
+  line-height: 1.55;
+  background: var(--surface-2);
+}
+
+.why p {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.why .lbl {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+
+.why.ok .lbl {
+  color: var(--ok);
+}
+
+.why.bad .lbl {
+  color: var(--bad);
+}
+
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}

@@ -224,10 +224,22 @@ class AppStore {
     return this.progress.days[dayId] ?? emptyDayProgress(weekId);
   }
 
-  /** Segments closed on the day ring: theory, quiz, task. */
+  /**
+   * Segments closed on the day ring: theory, quiz, practice.
+   *
+   * The third arc closes on the *drill* — the half of the practice you can do with
+   * thumbs — not on the lab task. That is deliberate. A day that stalls at 2/4 because
+   * you were on a train without a laptop is a day that reads as failure, and enough of
+   * those is how the habit dies. The lab task has not vanished: it lands in `labQueue`
+   * and stays visible until it is done. Days written before drills existed keep their
+   * old meaning and close this arc on the task.
+   */
   segments(day: Day, weekId: string): boolean[] {
     const p = this.dayProgress(day.id, weekId);
-    const base = [p.theoryDone, Boolean(p.quiz.completedAt) || !day.quiz?.length, p.task === 'done'];
+    const practised = day.drill?.length
+      ? Boolean(p.drill.completedAt) || p.task === 'done'
+      : p.task === 'done';
+    const base = [p.theoryDone, Boolean(p.quiz.completedAt) || !day.quiz?.length, practised];
     // Only days that actually pose a teach-back get the fourth arc, so a day without
     // one still reads as complete at three.
     return day.teachBack ? [...base, p.teachBackDone] : base;
@@ -405,6 +417,58 @@ class AppStore {
     };
   }
 
+  /** One shot per step — the answer is recorded on first tap, then explained. */
+  async answerDrill(day: Day, weekId: string, stepId: string, optionIndex: number) {
+    const p = this.mutable(day.id, weekId);
+    if (stepId in p.drill.answers) return;
+    p.drill.answers[stepId] = optionIndex;
+    const step = day.drill?.find((q) => q.id === stepId);
+    p.drill.correct[stepId] = Boolean(step?.options[optionIndex]?.correct);
+    await this.persist();
+  }
+
+  async finishDrill(day: Day, weekId: string) {
+    const p = this.mutable(day.id, weekId);
+    const steps = day.drill ?? [];
+    p.drill.cleanSweep ||=
+      steps.length > 0 && steps.every((q) => p.drill.correct[q.id] === true);
+    p.drill.completedAt = new Date().toISOString();
+    await this.persist();
+  }
+
+  /** Clear the answers so the drill can be worked again. Same contract as retakeQuiz:
+   *  what was earned stays earned, so practising can never cost anything. */
+  async retakeDrill(day: Day, weekId: string) {
+    const p = this.mutable(day.id, weekId);
+    p.drill = { ...p.drill, answers: {}, correct: {} };
+    await this.persist();
+  }
+
+  drillScore(day: Day, weekId: string): { correct: number; total: number } {
+    const p = this.dayProgress(day.id, weekId);
+    const steps = day.drill ?? [];
+    return {
+      correct: steps.filter((q) => p.drill.correct[q.id] === true).length,
+      total: steps.length,
+    };
+  }
+
+  /**
+   * Days whose lab task is still outstanding, oldest first.
+   *
+   * The counterweight to letting the ring close without it. Lab work is the part that
+   * actually builds the skill, so the moment it stopped gating the day it had to become
+   * visible somewhere else, with a count you can see rather than a thing you might
+   * remember.
+   */
+  get labQueue(): { week: Week; day: Day }[] {
+    return this.availableDays.filter(({ week, day }) => {
+      if (!day.task) return false;
+      const p = this.dayProgress(day.id, week.id);
+      return p.task !== 'done' && (Boolean(p.drill.completedAt) || Boolean(p.completedAt));
+    });
+  }
+
   async setTaskState(day: Day, weekId: string, state: TaskState) {
     this.mutable(day.id, weekId).task = state;
     await this.persist();
@@ -435,7 +499,9 @@ class AppStore {
 
     p.completedAt = new Date().toISOString();
     p.theoryDone = true;
-    p.task = 'done';
+    // `p.task = 'done'` used to live here, which was a lie the moment the day could be
+    // finished from a phone. Finishing a day says you did the day's practice; whether
+    // the lab half happened is a separate fact, and labQueue is where it is tracked.
     // teachBackDone is deliberately NOT set here. It's the examiner's ruling, and a
     // day can be finished without passing it — that's the honest outcome, and the
     // ring should keep showing the open arc until he goes back and earns it.

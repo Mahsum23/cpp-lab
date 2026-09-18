@@ -38,7 +38,7 @@
     [
       { at: 0, label: 'Theory' },
       ...(hasQuiz ? [{ at: 1, label: 'Quiz' }] : []),
-      { at: 2, label: 'Task' },
+      { at: 2, label: 'Practice' },
       ...(hasTeachBack ? [{ at: 3, label: 'Explain' }] : []),
     ].filter((c) => c.at < steps),
   );

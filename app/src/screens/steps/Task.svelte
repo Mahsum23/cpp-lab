@@ -7,6 +7,8 @@
   import MentorSheet from '../../components/MentorSheet.svelte';
   import SelectionAsk from '../../components/SelectionAsk.svelte';
   import { today } from '../../lib/date';
+  import Drill from '../../components/Drill.svelte';
+  import { TRACKS, type Track } from '../../lib/types';
 
   interface Props {
     day: Day;
@@ -17,11 +19,28 @@
 
   const dp = $derived(app.dayProgress(day.id, weekId));
   const task = $derived(day.task);
+
   const score = $derived(app.quizScore(day, weekId));
 
   let asking = $state(false);
   let ask = $state<string | null>(null);
   const week = $derived(app.findDay(weekId, day.id)?.week ?? null);
+
+  /**
+   * The day's practice comes in two halves, and the phone half goes first.
+   *
+   * Not cosmetic ordering: the drill is the part that can be finished right now, and
+   * putting the lab task above it opens every phone-only session on a wall.
+   *
+   * Which half is showing is derived from stored progress rather than held in a local
+   * flag, so it survives leaving the screen and coming back — `reopened` is only the
+   * deliberate "let me work that again", and it clears itself when the drill is
+   * finished a second time.
+   */
+  const drill = $derived(day.drill ?? []);
+  const lang = $derived(TRACKS[((week?.track ?? 'cpp') as Track)].lang);
+  let reopened = $state(false);
+  const showDrill = $derived(drill.length > 0 && (!dp.drill.completedAt || reopened));
 
   // Openers for someone mid-attempt. None of them ask for the implementation — the
   // mentor refuses that anyway, and a starter that invites it would just teach the
@@ -87,8 +106,27 @@
   }
 </script>
 
-<p class="eyebrow">Your task</p>
-<h1>{day.title}</h1>
+{#if showDrill}
+  <Drill {day} {weekId} {lang} ondone={() => { reopened = false; scrollTo({ top: 0 }); }} />
+{/if}
+
+{#if !showDrill}
+  {#if drill.length}
+    <div class="handoff">
+      <p class="lbl">Drill done{#if app.drillScore(day, weekId).total}&nbsp;— {app.drillScore(day, weekId).correct}/{app.drillScore(day, weekId).total}{/if}</p>
+      <p>The rest of this needs a machine. It keeps until you have one.</p>
+      <button class="again" onclick={() => { reopened = true; scrollTo({ top: 0 }); }}>Back to the drill</button>
+    </div>
+  {/if}
+
+  <p class="eyebrow">At a machine</p>
+  <h1>{day.title}</h1>
+
+  {#if task?.files.length || task?.compile}
+    <p class="oneliner">
+      Or from a terminal in the repo: <code>./lab</code> scaffolds the file and prints this checklist.
+    </p>
+  {/if}
 
 {#if task}
   <SelectionAsk onask={(text) => { ask = explainPrompt(text); asking = true; }}>
@@ -141,6 +179,7 @@
 {:else}
   <p class="none">No task spec for this day.</p>
 {/if}
+{/if}
 
 <div class="block">
   <p class="lbl">What confused me</p>
@@ -176,6 +215,50 @@
 {/if}
 
 <style>
+  /* The seam between the two halves. It exists to say "you finished something" before
+     showing the part that needs hardware, so a phone-only session ends on a result. */
+  .handoff {
+    padding: 13px 15px;
+    border-radius: 14px;
+    background: var(--ok-soft);
+    margin-bottom: 26px;
+  }
+
+  .handoff p {
+    margin: 0;
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .handoff .lbl {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ok);
+    margin-bottom: 5px;
+  }
+
+  .handoff .again {
+    margin-top: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-faint);
+    text-decoration: underline;
+  }
+
+  .oneliner {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--text-faint);
+    margin: -6px 0 18px;
+  }
+
+  .oneliner code {
+    font-size: 12.5px;
+  }
+
   h1 {
     font-size: 24px;
     letter-spacing: -0.022em;

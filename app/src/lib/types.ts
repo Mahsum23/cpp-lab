@@ -45,8 +45,43 @@ export interface Day {
   slug?: string;
   theoryMarkdown: string | null;
   quiz: QuizQuestion[] | null;
+  /**
+   * The half of the day's work you can do with thumbs.
+   *
+   * A task needs a machine, and not having one is the most common reason a day stalls
+   * half-finished. So every day also carries a drill: two or three exercises that are
+   * real work on the day's concept — predict what this prints, find the line that is
+   * wrong, say which of these is the actual cause — and need nothing but the phone in
+   * your hand. Each one is checked against output that was really produced, not
+   * against a claim about what the code would do.
+   */
+  drill: DrillStep[] | null;
   task: DayTask | null;
 }
+
+/**
+ * One drill exercise: a quiz question with a piece of code to reason about.
+ *
+ * Deliberately the same shape as a quiz question, because it is the same interaction and
+ * it keeps one set of authoring rules, one renderer and one review-card kind. The code
+ * block is what makes it a drill rather than a recall question — you are reading a
+ * program and predicting it, not remembering a sentence.
+ */
+export interface DrillStep extends QuizQuestion {
+  /** Shown above the options, highlighted in the week's language. Optional: some
+   *  drills are a pure judgement call with no listing to show. */
+  code: string | null;
+  /** What the exercise is asking of you, used as the eyebrow. */
+  kind: DrillKind;
+}
+
+export type DrillKind = 'predict' | 'find' | 'choose';
+
+export const DRILL_KINDS: Record<DrillKind, string> = {
+  predict: 'Predict the output',
+  find: 'Find the problem',
+  choose: 'Make the call',
+};
 
 /**
  * A subject. Weeks belong to one, and you study one at a time.
@@ -119,6 +154,8 @@ export interface DayProgress {
   weekId: string;
   theoryDone: boolean;
   quiz: QuizState;
+  /** Same shape as the quiz, because a drill is answered the same way. */
+  drill: QuizState;
   task: TaskState;
   /** Per-item state of the task checklist, by index. */
   checklist: boolean[];
@@ -230,6 +267,7 @@ export function emptyDayProgress(weekId: string): DayProgress {
     weekId,
     theoryDone: false,
     quiz: { answers: {}, correct: {}, completedAt: null, cleanSweep: false },
+    drill: { answers: {}, correct: {}, completedAt: null, cleanSweep: false },
     task: 'todo',
     checklist: [],
     notes: '',

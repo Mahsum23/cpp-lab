@@ -1,0 +1,74 @@
+# The phone half of day 02. Every output below came from running the program.
+steps:
+  - id: d1
+    kind: predict
+    prompt: What does this print?
+    code: |
+      total := 1
+      if total > 0 {
+      	total := 2
+      	total++
+      	_ = total
+      }
+      fmt.Println(total)
+    options:
+      - text: "`1`"
+        correct: true
+        why: >
+          The inner `total := 2` declares a *new* variable that shadows the outer one for
+          the rest of the block. Everything inside — including the increment — happens to
+          the inner one, which dies at the closing brace. The outer `total` was never
+          touched. This compiles without a murmur, and it is the most common way a Go
+          program silently does nothing.
+      - text: "`3`"
+        correct: false
+        why: >
+          That would be the answer if `:=` assigned to the existing variable. It never
+          does — `:=` always declares. Within one scope it will assign to names that
+          already exist as long as at least one on the left is new, but a brace ends that.
+      - text: "`2`"
+        correct: false
+        why: >
+          Close, but it misses the increment: even if the inner variable were the outer
+          one, `total++` would have taken it to 3. The real answer is that neither
+          statement reached the outer variable at all.
+      - text: It fails to build — `total` is redeclared in the same function
+        correct: false
+        why: >
+          Shadowing is legal, and often deliberate. That is exactly why the compiler stays
+          quiet and why the `shadow` analyzer is deliberately left out of the default
+          `go vet` suite: on idiomatic Go it fires constantly on shadowing that was meant.
+
+  - id: d2
+    kind: find
+    prompt: Both values are numbers and both are 64 bits wide. What happens here?
+    code: |
+      var n int = 5
+      var f float64 = 2
+      fmt.Println(n / f)
+    options:
+      - text: >
+          It fails: `invalid operation: n / f (mismatched types int and float64)`
+        correct: true
+        why: >
+          Go performs no implicit numeric conversion at all — not even a widening one that
+          could not lose anything. You write `float64(n) / f` and mean it. The rule
+          exists to remove C's promotion lattice, where comparing a signed `int` with an
+          unsigned `size_t` silently converts one side and makes `i >= 0` permanently true.
+      - text: It prints `2.5`
+        correct: false
+        why: >
+          That is what almost every other language does, and the assumption this drill
+          exists to break. Go will not choose a common type for you; the conversion has to
+          be written where the danger is.
+      - text: It prints `2`, because integer division wins
+        correct: false
+        why: >
+          No shared type is chosen at all, so there is no contest for which rule applies.
+          Integer division would only be a question if both operands were integers.
+      - text: >
+          It builds with a warning about mixing types
+        correct: false
+        why: >
+          There is no warning level here — Go's compiler refuses rather than grumbles. If
+          it compiled, the conversion would be invisible, which is the thing being avoided.

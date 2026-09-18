@@ -353,6 +353,34 @@ that cannot end. When writing a `teachBack` question, make it something he can g
 in an interesting way: "what is the backlog a queue of, and who puts things in it" beats
 "explain listen()".
 
+## Every day has two halves, and the phone half is not optional
+
+A task needs a machine, and not having one is the most common reason a day stalls
+half-finished — which is how the habit dies. So every day carries a **drill** as well as a
+task: two to four exercises in `day-NN-<slug>.drill.yaml`, same answer-key shape as the
+quiz, with a `code` block to reason about and a `kind` of `predict`, `find` or `choose`.
+The `.md` gets a short `## Drill` section with the prompts only, exactly as `## Quiz`
+does. `build-content.mjs` warns on any day without one.
+
+The day ring closes on the **drill**, not the task. A phone-only day is a real day and
+must read as one. The task has not vanished — it lands in `labQueue`, is visible on Today
+with a count, and `./lab` opens it — but it no longer gates the day.
+
+Write drills to be genuinely hard, not a lap of honour. A predict-the-output step whose
+answer is obvious from the theory teaches nothing; the good ones turn on the thing that
+surprised you when you ran it. And every expected output is real output, from actually
+running the program — that is the only thing that makes marking an answer wrong honest.
+
+## Getting to a task must stay a single command
+
+The friction that stops a task getting done is preparation, not coding — so `./lab`
+exists to collapse it: it scaffolds the day's file at the path the lesson names, with the
+checklist as a comment header, and prints the run command. This has a consequence for
+authoring. A task's `- File:` and `- Run:` lines are not decoration; they are what the
+launcher builds from, so every task needs them and they must be exactly right. A day that
+genuinely has no single file (the sockets week's server-and-client days) is fine — the
+launcher says so and still offers the run command — but that should be the exception.
+
 ## The SQL track is PostgreSQL-first
 
 He said plainly that Postgres is the database he wants to learn first, so the SQL track

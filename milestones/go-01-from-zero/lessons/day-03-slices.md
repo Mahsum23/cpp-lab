@@ -178,6 +178,15 @@ most common answer, along with goroutines that never exit — which is Day 6's p
 5. You read a 500 MB file and keep a 60-byte slice of it in a cache. How much memory stays
    reachable, and what is the fix?
 
+## Drill
+
+No machine needed for these.
+
+1. A four-element slice, a two-element sub-slice of it, one `append` to the sub-slice.
+   What are both slices afterwards?
+2. A function appends to the slice it was passed, and there is spare capacity for it.
+   What does the caller see?
+
 ## Task
 
 Reproduce the trap. This is not a puzzle you should take on faith — it is far more

@@ -154,6 +154,14 @@ top of a server's request handler, so one broken request doesn't take down the p
 5. When is `panic` the right choice rather than returning an error, and where is
    `recover` legitimately used?
 
+## Drill
+
+No machine needed for these.
+
+1. Three `defer`s inside a loop, then a print. What comes out, in what order?
+2. An error is wrapped with `%w`, then that result is wrapped again with `%v`. Why does
+   `errors.Is` return false against the original?
+
 ## Task
 
 Write a small function that can fail, and make the failure informative.

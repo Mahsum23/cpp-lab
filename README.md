@@ -92,6 +92,29 @@ Goal: the invisible skills. Starting from an empty directory, not from a refinem
 Modern C++ features get pulled in *where they naturally fit* — `std::expected`, ranges,
 deducing `this` — not studied as a separate track.
 
+## Doing a task: `./lab`
+
+The tasks need a machine, and the expensive part was never the coding — it was working
+out which day you were on, remembering what it asked, making a directory, making a file,
+and remembering the run command. Five small frictions, each one a chance to decide not to
+bother.
+
+```
+./lab                  open the current day: scaffold its files, print its checklist
+./lab check            run that day's build/run command
+./lab done             mark it finished, so the next ./lab moves on
+./lab list             where you are across every track
+./lab --day sql-day-02 jump to any day
+```
+
+`./lab` creates the file at exactly the path the lesson names, with the checklist in a
+comment header and a skeleton that already compiles, and never overwrites anything.
+
+It works offline with nothing installed. Which day you are on comes from the progress the
+app syncs, when `LAB_TOKEN` (a GitHub token with gists scope) is in your environment;
+otherwise from a local `.lab/state.json` that `./lab done` advances. It always tells you
+which source it used, so it is never quietly wrong.
+
 ## Build
 
 Milestone 01 is deliberately built by hand with a single compiler invocation.

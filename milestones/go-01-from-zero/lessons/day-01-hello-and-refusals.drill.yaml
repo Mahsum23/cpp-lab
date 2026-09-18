@@ -1,0 +1,117 @@
+# The phone half of day 01. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running the program, not predicted.
+# Option order is shuffled deterministically by build-content.mjs, so authoring the
+# correct one first is safe.
+steps:
+  - id: d1
+    kind: find
+    prompt: This is a complete file. Does it build, and if not, what stops it?
+    code: |
+      package main
+
+      import (
+      	"fmt"
+      	"os"
+      )
+
+      func main() {
+      	fmt.Println("starting")
+      }
+    options:
+      - text: >
+          It fails: `"os" imported and not used`
+        correct: true
+        why: >
+          An unused import is a compile error in Go, not a warning — the build stops.
+          Two motives: an import you never reference is usually a leftover from code you
+          deleted, and every dependency costs compile time for everyone building the
+          package. Silence it with a blank import, `_ "os"`, only when you actually want
+          the package's init side effects.
+      - text: It builds and prints `starting`, with a warning about `os`
+        correct: false
+        why: >
+          There is no warning level here. This is the thing that makes Go feel harsh in
+          week one: the compiler refuses rather than grumbles, and it refuses over
+          something most languages would let slide entirely.
+      - text: >
+          It fails, because `os` must be imported before `fmt` alphabetically
+        correct: false
+        why: >
+          Import order inside a block is a formatting matter, and gofmt sorts it for you
+          without complaint. Nothing about ordering can fail a build.
+      - text: >
+          It builds — unused imports are only an error inside a library package
+        correct: false
+        why: >
+          The rule has nothing to do with which package you are in. `package main` gets
+          exactly the same treatment.
+
+  - id: d2
+    kind: predict
+    prompt: What does this print?
+    code: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	var count int
+      	count++
+      	fmt.Println(count)
+      }
+    options:
+      - text: "`1`"
+        correct: true
+        why: >
+          `var count int` is guaranteed to start at 0 — every type in Go has a zero value
+          and every declaration without an initialiser gets it. So the increment lands on
+          0 and prints 1. In C the same declaration inside a function is indeterminate,
+          and reading it is undefined behaviour rather than merely a surprising number.
+      - text: Something unpredictable — `count` was never initialised
+        correct: false
+        why: >
+          That is the C answer, and unlearning it is most of the point of this drill. Go
+          specifies the zero value, so you may rely on it on every platform and compiler.
+      - text: >
+          It fails to build: `count` is declared and not used
+        correct: false
+        why: >
+          It is used — twice, by the increment and by the print. The unused-variable rule
+          only fires when nothing reads or writes the variable at all.
+      - text: "`0`, because `count++` is a post-increment and returns the old value"
+        correct: false
+        why: >
+          In Go `count++` is a *statement*, not an expression — it has no value to return
+          and you cannot write `x := count++`. The increment has definitely happened by
+          the time the next line runs.
+
+  - id: d3
+    kind: choose
+    prompt: >
+      You are mid-debug. You commented out the only line that used a variable, and now
+      the build fails. You want the build back without deleting your work. What do you
+      write?
+    options:
+      - text: "`_ = count`"
+        correct: true
+        why: >
+          The blank identifier is Go's write-only variable: assigning to it discards the
+          value and counts as a use. It is deliberately conspicuous, because a tidy way
+          to disable the check would defeat the check — you are meant to notice it in a
+          diff and take it out.
+      - text: A `//nolint` comment above the declaration
+        correct: false
+        why: >
+          Comment directives are for third-party linters. No comment can turn off a
+          compile error, and Go deliberately ships no pragma for this.
+      - text: Rebuild with `go build -allow-unused`
+        correct: false
+        why: >
+          No such flag, and its absence is the point: a project-wide switch would get
+          turned on once and never turned off again.
+      - text: Change `count := 0` to `var count int`
+        correct: false
+        why: >
+          The rule is about use, not about which spelling declared it. A `var` inside a
+          function that nothing reads fails in exactly the same way.

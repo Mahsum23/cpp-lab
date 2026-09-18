@@ -179,6 +179,15 @@ goroutine send its result down a channel and summing in one place.
 5. A program with 1000 goroutines doing `total++` prints a different wrong number each
    run and never crashes. What is happening, and what tool finds it?
 
+## Drill
+
+No machine needed for these.
+
+1. Three goroutines send their square down a buffered channel; a `WaitGroup` waits, the
+   channel is closed, then it is drained and summed. What prints?
+2. A service grows in memory with flat CPU and no failing requests. What do you suspect
+   first, given what the deadlock detector can and cannot see?
+
 ## Task
 
 Start some goroutines, then break them on purpose.

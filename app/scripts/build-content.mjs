@@ -247,6 +247,61 @@ function loadQuiz(path, dayId) {
   return placeOptions(parsed, dayId);
 }
 
+/**
+ * The drill: the half of a day's work that needs no machine.
+ *
+ * Same file convention and same answer-key shape as the quiz, on purpose — a drill is
+ * answered the same way, so it shares the authoring rules, the shuffling and the
+ * renderer. What it adds is `code`: a listing you reason about rather than a fact you
+ * recall. The `.md` carries only the question text, exactly as the quiz does, because
+ * that is the file open while the lesson is being done.
+ */
+const DRILL_KINDS = new Set(['predict', 'find', 'choose']);
+
+function loadDrill(path, dayId) {
+  if (!existsSync(path)) return null;
+  const doc = parseYaml(readFileSync(path, 'utf8'));
+  const steps = doc?.steps ?? [];
+  if (!Array.isArray(steps) || steps.length === 0) {
+    warn(`${dayId}: ${path} has no steps`);
+    return null;
+  }
+  if (steps.length > 4) {
+    warn(`${dayId}: ${steps.length} drill steps — this is the short half of the day, keep it to 2–4`);
+  }
+  const parsed = steps.map((q, qi) => {
+    const options = q.options ?? [];
+    const correctCount = options.filter((o) => o.correct).length;
+    if (correctCount !== 1) {
+      warn(`${dayId} drill ${qi + 1}: expected exactly 1 correct option, found ${correctCount}`);
+    }
+    if (options.length < 2 || options.length > 4) {
+      warn(`${dayId} drill ${qi + 1}: ${options.length} options — the app is designed for 2–4`);
+    }
+    for (const o of options) {
+      if (!o.why?.trim()) warn(`${dayId} drill ${qi + 1}: option "${o.text}" has no "why"`);
+    }
+    if (q.kind && !DRILL_KINDS.has(q.kind)) {
+      warn(`${dayId} drill ${qi + 1}: unknown kind "${q.kind}" — expected ${[...DRILL_KINDS].join(', ')}`);
+    }
+    return {
+      id: q.id ?? `d${qi + 1}`,
+      kind: DRILL_KINDS.has(q.kind) ? q.kind : 'choose',
+      code: q.code ? String(q.code).replace(/\n+$/, '') : null,
+      prompt: String(q.prompt ?? '').trim(),
+      options: options.map((o) => ({
+        text: String(o.text ?? '').trim(),
+        correct: Boolean(o.correct),
+        why: String(o.why ?? '').trim(),
+      })),
+    };
+  });
+
+  // Shuffled by the same deterministic placement the quiz uses, so the correct answer
+  // does not sit in the same slot every day and teach position instead of content.
+  return placeOptions(parsed, `${dayId}-drill`);
+}
+
 function buildWeek(milestone) {
   const lessonsDir = join(milestonesDir, milestone, 'lessons');
   const weekYaml = join(lessonsDir, 'week.yaml');
@@ -276,6 +331,8 @@ function buildWeek(milestone) {
     const slug = mdName.replace(/^day-\d+-/, '').replace(/\.md$/, '');
     const sections = splitSections(readFileSync(join(lessonsDir, mdName), 'utf8'));
     const quiz = loadQuiz(join(lessonsDir, mdName.replace(/\.md$/, '.quiz.yaml')), d.id);
+    const drill = loadDrill(join(lessonsDir, mdName.replace(/\.md$/, '.drill.yaml')), d.id);
+    if (!drill) warn(`${d.id}: no .drill.yaml — this day can only be done at a machine`);
 
     if (!sections.theory) warn(`${d.id}: ${mdName} has no "## Theory" section`);
     checkOrderMarkers(d.id, mdName, sections.theory, warn);
@@ -291,6 +348,7 @@ function buildWeek(milestone) {
       slug,
       status: 'available',
       theoryMarkdown: sections.theory ?? null,
+      drill,
       quiz,
       task: parseTask(sections.task),
     };

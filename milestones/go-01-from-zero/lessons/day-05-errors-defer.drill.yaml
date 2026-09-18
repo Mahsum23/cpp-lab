@@ -1,0 +1,83 @@
+# The phone half of day 05. Every output below came from running the program.
+steps:
+  - id: d1
+    kind: predict
+    prompt: What does this print, in order?
+    code: |
+      func main() {
+      	for i := 0; i < 3; i++ {
+      		defer fmt.Print(i, " ")
+      	}
+      	fmt.Print("end ")
+      }
+    options:
+      - text: "`end 2 1 0 `"
+        correct: true
+        why: >
+          Two things at once. Deferred calls run when the *function* returns, not at the
+          end of the loop body — so all three wait until after "end". And they run LIFO,
+          so the last one deferred goes first. The values are 2, 1, 0 rather than 3, 3, 3
+          because `defer` evaluates its arguments immediately and postpones only the call.
+      - text: "`end 0 1 2 `"
+        correct: false
+        why: >
+          Right about the timing, wrong about the order. Deferred calls are a stack, not a
+          queue — which is correct, because the thing acquired last should be released
+          first.
+      - text: "`0 1 2 end `"
+        correct: false
+        why: >
+          This assumes `defer` is scoped to the block, the way a C++ destructor is. It is
+          scoped to the function, and that difference is exactly why `defer f.Close()`
+          inside a loop holds every file open until the whole function ends.
+      - text: "`end 3 3 3 `"
+        correct: false
+        why: >
+          That is the closure version — `defer func() { fmt.Print(i) }()` captures the
+          variable and would see its final value. A plain `defer f(i)` freezes the
+          argument at the moment the defer statement runs.
+
+  - id: d2
+    kind: find
+    prompt: >
+      The inner error is wrapped with `%w`. Why does `errors.Is` still return false?
+    code: |
+      var ErrGone = errors.New("gone")
+
+      func main() {
+      	inner := fmt.Errorf("layer1: %w", ErrGone)
+      	e := fmt.Errorf("layer2: %v", inner)
+      	fmt.Println(e)
+      	fmt.Println(errors.Is(e, ErrGone))
+      }
+    options:
+      - text: >
+          The outer layer used `%v`, which flattens its argument to text — the chain is
+          only as strong as its weakest link
+        correct: true
+        why: >
+          `%w` on the inner call built a real link, and then `%v` on the outer one threw it
+          away, keeping only the message. The printed text is identical either way, which
+          is what makes this so easy to miss: `layer2: layer1: gone` looks perfectly
+          healthy while `errors.Is` reports false. One `%v` anywhere in the chain breaks
+          every check above it.
+      - text: >
+          `errors.Is` only looks one level deep, so it never reaches `ErrGone`
+        correct: false
+        why: >
+          `errors.Is` unwraps repeatedly until it runs out of links — depth is not the
+          limit. Replace the `%v` with `%w` and the same call finds it through both layers.
+      - text: >
+          `ErrGone` was made with `errors.New`, so each comparison is a different value
+        correct: false
+        why: >
+          `errors.New` returns a pointer, and `ErrGone` is one package-level variable, so
+          identity comparison works fine. That is exactly why sentinel errors are declared
+          once at package level.
+      - text: >
+          You need `errors.As` rather than `errors.Is` for wrapped errors
+        correct: false
+        why: >
+          `errors.As` is for extracting a specific error *type* into a variable. For
+          asking "is this ultimately that sentinel", `Is` is the right call — it is the
+          chain that is broken here, not the choice of function.

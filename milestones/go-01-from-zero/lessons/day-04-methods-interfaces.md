@@ -159,6 +159,15 @@ it is one of those things that looks like line noise until someone explains it o
 5. What does the line `var _ Greeter = English{}` accomplish, given that it stores nothing
    and is never referenced?
 
+## Drill
+
+No machine needed for these.
+
+1. One type, two methods — one with a value receiver and one with a pointer receiver —
+   both setting the same field. What does each leave behind?
+2. A named `float64` gains a `String() string` method that nothing calls. What changes
+   about `fmt.Println` on it, and on a slice of it?
+
 ## Task
 
 Build a tiny shape library and then discover that you already implemented a standard

@@ -163,6 +163,14 @@ can only get from a language that does its constant arithmetic before choosing a
 5. Why can `const huge = (1 << 62) * 4` compile when no Go integer type can hold that
    value?
 
+## Drill
+
+No machine needed for these.
+
+1. A variable is set to 1, then `total := 2` inside an `if` block increments it. What does
+   the outer variable print afterwards?
+2. An `int` divided by a `float64`, both 64 bits wide on the machine. What happens?
+
 ## Task
 
 Prove the zero values and then get shadowed on purpose, so that the day you meet it in

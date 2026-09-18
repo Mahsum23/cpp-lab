@@ -1,0 +1,81 @@
+# The phone half of day 06. Every output below came from running the program.
+steps:
+  - id: d1
+    kind: predict
+    prompt: What does this print?
+    code: |
+      var wg sync.WaitGroup
+      ch := make(chan int, 3)
+      for i := 1; i <= 3; i++ {
+      	wg.Add(1)
+      	go func(n int) { defer wg.Done(); ch <- n * n }(i)
+      }
+      wg.Wait()
+      close(ch)
+      sum := 0
+      for v := range ch {
+      	sum += v
+      }
+      fmt.Println(sum)
+    options:
+      - text: "`14`"
+        correct: true
+        why: >
+          1 + 4 + 9. The order the goroutines finish in is unpredictable and irrelevant —
+          addition does not care. What makes this safe is the shape: the channel is
+          buffered to 3 so no sender blocks, `Wait` guarantees every send happened before
+          the close, and ranging over a closed channel drains it and stops rather than
+          blocking forever.
+      - text: It deadlocks — nothing is receiving while the goroutines send
+        correct: false
+        why: >
+          It would, on an *unbuffered* channel: the senders would block waiting for a
+          receiver while main blocked in `Wait`, and the runtime would report "all
+          goroutines are asleep". The capacity of 3 is exactly what prevents it.
+      - text: A different number each run, because the goroutines race
+        correct: false
+        why: >
+          Channel sends are synchronised — that is the entire point of the type. There is
+          no shared variable being incremented here, so there is nothing to race on. Swap
+          the channel for `sum += n * n` in each goroutine and this answer becomes correct.
+      - text: It panics — you cannot close a channel that still has values in it
+        correct: false
+        why: >
+          Closing says "no more values are coming", not "this is empty". Buffered values
+          survive the close and `range` delivers every one before ending. What does panic
+          is *sending* on a closed channel, which is why the sender closes and never the
+          receiver.
+
+  - id: d2
+    kind: choose
+    prompt: >
+      A Go service in production slowly grows in memory. CPU is flat, there are no
+      obvious leaks, and every request completes normally. Which suspect would you check
+      first, given what the runtime can and cannot tell you?
+    options:
+      - text: >
+          Goroutines that never exit — blocked forever on a channel nothing will send to
+        correct: true
+        why: >
+          Each one holds its stack and everything it references, forever. The deadlock
+          detector cannot help: it only fires when *every* goroutine is asleep, and here
+          the rest of the service is running happily. `runtime.NumGoroutine()` climbing
+          over time is the tell, and the pprof goroutine profile names the exact line they
+          are all parked on.
+      - text: The garbage collector falling behind under load
+        correct: false
+        why: >
+          A collector behind on work shows up as CPU, and CPU is flat. It also reaches a
+          steady state rather than growing without bound — memory that keeps climbing
+          means something is still *reachable*, which is not a collector problem.
+      - text: A deadlock the runtime has not noticed yet
+        correct: false
+        why: >
+          There is no "not yet" — the check is instantaneous and global. If it has not
+          fired, at least one goroutine is runnable, which by definition is not a deadlock.
+      - text: Memory fragmentation in the allocator
+        correct: false
+        why: >
+          Possible in principle and far down the list in practice. Go's allocator is
+          size-classed, which makes classic fragmentation unlikely, and the far more
+          common causes are leaked goroutines and slices pinning arrays they barely use.

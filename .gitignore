@@ -1,7 +1,9 @@
-# binaries
-server
-client
-day[0-9]*
+# binaries, at the repo root where the compile commands drop them. Anchored with a
+# leading slash on purpose: a bare `day[0-9]*` also matched the go/day01/ work
+# directories, so every Go task file was silently unstageable.
+/server
+/client
+/day[0-9]*
 *.o
 *.out
 a.out
@@ -9,6 +11,9 @@ a.out
 # build dirs (phase 3)
 build/
 cmake-build-*/
+
+# ./lab's idea of which day you are on — local, per-machine, not shared
+.lab/
 
 # editor
 .vscode/
