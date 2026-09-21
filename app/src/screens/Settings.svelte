@@ -31,6 +31,8 @@
   let importText = $state('');
   let tokenInput = $state('');
   let keyInput = $state('');
+  let relayInput = $state(app.secrets.relayBase ?? '');
+  let savingRelay = $state(false);
   let connecting = $state(false);
   let savingKey = $state(false);
   let confirmDisconnect = $state(false);
@@ -124,6 +126,31 @@
       else flash('ok', `${provider.label} key saved. The Mentor tab is live.`);
     } finally {
       savingKey = false;
+    }
+  }
+
+  /**
+   * Save the relay and immediately prove it works, by asking the provider for its model
+   * list through it. That one call exercises DNS, TLS, CORS, the token and the upstream
+   * reach in a single round trip — which is exactly the set of things that goes wrong.
+   */
+  async function saveRelay() {
+    savingRelay = true;
+    try {
+      await app.setRelay(relayInput);
+      if (!app.secrets.relayBase) {
+        flash('ok', 'Relay cleared. Calls go straight to the provider again.');
+        return;
+      }
+      if (!app.mentorKey) {
+        flash('ok', 'Relay saved. Add a key and it will be used for every call.');
+        return;
+      }
+      await app.refreshMentorModels();
+      if (app.mentorModelsError) flash('bad', `Saved, but the relay did not answer: ${app.mentorModelsError}`);
+      else flash('ok', `Relay works — ${app.mentorModels.length} models came back through it.`);
+    } finally {
+      savingRelay = false;
     }
   }
 
@@ -293,6 +320,35 @@
     </div>
     <p class="hint fine">{provider.cost}</p>
 
+    <!-- Google geo-blocks this API in a number of countries, and the block is on the
+         network path rather than the key. A static site has no server of its own to
+         route around that, so the user supplies one. -->
+    <details class="relay" open={Boolean(app.secrets.relayBase)}>
+      <summary>Reach the API through a relay</summary>
+      <p class="hint fine">
+        If the provider is blocked where you are, run the small reverse proxy in
+        <code>deploy/</code> on a VPS somewhere it isn't, and put its URL here. Leave it
+        empty to call the provider directly. Stored on this device only — it never rides
+        along in sync.
+      </p>
+      <div class="row">
+        <input
+          type="url"
+          inputmode="url"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="https://host/your-token"
+          bind:value={relayInput}
+        />
+        <Button size="sm" onclick={saveRelay} disabled={savingRelay}>
+          {savingRelay ? 'Testing…' : 'Save'}
+        </Button>
+      </div>
+      {#if app.secrets.relayBase}
+        <p class="hint fine current">In use: <code>{app.secrets.relayBase}</code></p>
+      {/if}
+    </details>
+
     {#if app.mentorKey}
       <div class="status">
         <span class="dot ok"></span>
@@ -405,6 +461,37 @@
 </div>
 
 <style>
+  .relay {
+    margin-top: 14px;
+    padding: 12px 13px;
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+
+  .relay summary {
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-dim);
+  }
+
+  .relay .row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .relay input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .relay .current {
+    margin-top: 8px;
+    overflow-wrap: anywhere;
+  }
+
   h1 {
     font-size: 27px;
     letter-spacing: -0.025em;

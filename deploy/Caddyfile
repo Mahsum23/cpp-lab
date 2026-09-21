@@ -1,0 +1,102 @@
+# A relay for the model APIs, and nothing else.
+#
+# The app is a static site that calls Gemini and Anthropic straight from the browser.
+# That works everywhere those APIs are reachable, and nowhere they aren't — Google
+# geo-blocks the Generative Language API in a number of countries, on the network path
+# rather than on the key, so a perfectly good key just fails. This forwards two exact
+# paths from a VPS in a region that is served.
+#
+# Substitute before use:
+#   {$RELAY_HOST}   the hostname this is served on (must be a name, not a bare IP —
+#                   see PROXY.md for why, and for the free ways to get one)
+#   {$RELAY_TOKEN}  a random string. It is the whole of the access control, so that
+#                   this is not an open relay for anyone who portscans the box.
+#   {$APP_ORIGIN}   the exact origin the app is served from, e.g.
+#                   https://mahsum23.github.io — a browser will not accept a wildcard
+#                   here alongside credentials, and being precise costs nothing.
+#
+# No global options block on purpose: every `{$VAR}` in one is required at startup, and
+# an unset variable there takes the whole server down rather than degrading. Caddy gets
+# a Let's Encrypt certificate with no email configured; you lose expiry reminders for a
+# certificate that renews itself.
+#
+# Every variable carries a default, so an unset environment produces a server that
+# answers 404 on localhost rather than a parse error. Without one, an empty RELAY_HOST
+# turns `{$RELAY_HOST} {` into a bare `{` and Caddy reports an unrecognized global
+# option twenty lines away from the actual problem.
+
+{$RELAY_HOST:localhost} {
+	encode zstd gzip
+
+	# --- CORS ---------------------------------------------------------------
+	# One origin, stated exactly. The preflight has to name every non-simple header
+	# the app sends or the browser refuses before the request is ever made:
+	# Gemini needs x-goog-api-key; Anthropic needs x-api-key, anthropic-version and
+	# anthropic-dangerous-direct-browser-access.
+	@preflight method OPTIONS
+	handle @preflight {
+		header {
+			Access-Control-Allow-Origin "{$APP_ORIGIN:https://localhost}"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "content-type, x-goog-api-key, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access"
+			Access-Control-Max-Age "86400"
+			Vary "Origin"
+		}
+		respond 204
+	}
+
+	# --- Gemini -------------------------------------------------------------
+	handle /{$RELAY_TOKEN:unset-token}/gemini/* {
+		uri strip_prefix /{$RELAY_TOKEN:unset-token}/gemini
+		header {
+			Access-Control-Allow-Origin "{$APP_ORIGIN:https://localhost}"
+			Vary "Origin"
+			# The upstream's CORS headers would otherwise arrive alongside ours and the
+			# browser rejects a response carrying two.
+			-Access-Control-Allow-Credentials
+		}
+		reverse_proxy https://generativelanguage.googleapis.com {
+			header_up Host generativelanguage.googleapis.com
+			# Streaming: Caddy flushes text/event-stream as it arrives, but only if
+			# nothing upstream of it buffers. Being explicit costs nothing and this is
+			# the failure that looks like "the mentor hangs then dumps everything".
+			flush_interval -1
+			transport http {
+				tls
+				read_timeout 300s
+			}
+		}
+	}
+
+	# --- Anthropic ----------------------------------------------------------
+	handle /{$RELAY_TOKEN:unset-token}/anthropic/* {
+		uri strip_prefix /{$RELAY_TOKEN:unset-token}/anthropic
+		header {
+			Access-Control-Allow-Origin "{$APP_ORIGIN:https://localhost}"
+			Vary "Origin"
+			-Access-Control-Allow-Credentials
+		}
+		reverse_proxy https://api.anthropic.com {
+			header_up Host api.anthropic.com
+			flush_interval -1
+			transport http {
+				tls
+				read_timeout 300s
+			}
+		}
+	}
+
+	# Anything else — including a wrong or missing token — is not here. Deliberately
+	# the same answer either way, so probing cannot distinguish "bad token" from
+	# "nothing at this path".
+	handle {
+		respond "not found" 404
+	}
+
+	# The token rides in the path, so it would land in every access log line. Nothing
+	# needs those logs; turn them off rather than accumulating a file full of the one
+	# secret protecting this box.
+	log {
+		output discard
+	}
+}

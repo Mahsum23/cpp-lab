@@ -18,7 +18,7 @@ import {
 } from './review';
 import * as store from './storage';
 import * as cloud from './cloud';
-import { listModels, normalizeKey, PROVIDERS, type ModelChoice } from './mentor';
+import { listModels, normalizeKey, PROVIDERS, setRelay as applyRelay, type ModelChoice } from './mentor';
 import { mergeProgress } from './merge';
 import { fetchCurriculum, fetchWeek, SchemaTooNewError } from './content';
 import { completeDay as advanceStreak, displayedStreak, atRisk } from './streak';
@@ -272,6 +272,9 @@ class AppStore {
   async init() {
     this.progress = await store.loadProgress();
     this.secrets = await store.loadSecrets();
+    // Before anything can call a provider: an unset relay means "go direct", which is
+    // the behaviour every install had before relays existed.
+    applyRelay(this.secrets.relayBase);
     this.weeks = await store.loadAllWeeks();
     this.applyTheme();
     // Seeded, not fetched: the real list costs a round trip and is only ever looked
@@ -717,6 +720,19 @@ class AppStore {
         : { ...this.secrets, anthropicKey: value };
     await store.saveSecrets($state.snapshot(this.secrets));
     if (value && provider === this.mentorProvider) await this.refreshMentorModels();
+  }
+
+  /**
+   * Point the mentor at a relay, or back at the providers directly.
+   *
+   * Applied to the module immediately as well as stored, so the Settings screen's
+   * "test it" button exercises the value just typed rather than the one from boot.
+   */
+  async setRelay(base: string | null) {
+    const value = (base ?? '').trim().replace(/\/+$/, '') || null;
+    this.secrets = { ...this.secrets, relayBase: value };
+    applyRelay(value);
+    await store.saveSecrets($state.snapshot(this.secrets));
   }
 
   async setMentorProvider(provider: MentorProvider) {

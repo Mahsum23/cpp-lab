@@ -207,10 +207,20 @@ export interface Secrets {
   /** Anthropic API key — the prepaid mentor. Kept alongside rather than instead of
    *  the Gemini one, so switching providers doesn't mean re-pasting. */
   anthropicKey: string | null;
+  /**
+   * Base URL of a relay to reach the model APIs through, or null to call them direct.
+   *
+   * Exists because Google geo-blocks the Generative Language API in some countries, and
+   * a static site calling the API from the device has no server to route around it. It
+   * lives in `Secrets` rather than in settings because the URL usually carries a token,
+   * and because `Secrets` is the half that never rides along in the sync payload — a
+   * relay URL in a gist would be an open relay for anyone who found it.
+   */
+  relayBase: string | null;
 }
 
 export function emptySecrets(): Secrets {
-  return { githubToken: null, gistId: null, geminiKey: null, anthropicKey: null };
+  return { githubToken: null, gistId: null, geminiKey: null, anthropicKey: null, relayBase: null };
 }
 
 /**

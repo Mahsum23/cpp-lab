@@ -381,6 +381,19 @@ launcher builds from, so every task needs them and they must be exactly right. A
 genuinely has no single file (the sockets week's server-and-client days) is fine — the
 launcher says so and still offers the run command — but that should be the exception.
 
+## The model APIs are not reachable everywhere
+
+Google geo-blocks the Generative Language API in some countries, on the network path
+rather than on the key, so a working key simply fails. The app therefore supports a
+relay: `Secrets.relayBase`, set in Settings, and every provider call goes through it when
+one is configured. `deploy/` holds the Caddyfile, a setup script and PROXY.md.
+
+Two consequences when touching `mentor.ts`: never hardcode a provider URL again — go
+through `geminiBase()` / `anthropicUrl()` so a relay keeps working — and if a new
+provider or a new path is added, the Caddyfile needs a matching `handle` block and its
+non-simple request headers listed in the CORS preflight, or the browser will refuse the
+call before it is ever made.
+
 ## The SQL track is PostgreSQL-first
 
 He said plainly that Postgres is the database he wants to learn first, so the SQL track

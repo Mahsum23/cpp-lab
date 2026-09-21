@@ -521,7 +521,38 @@ async function* sseFrames(res: Response): AsyncGenerator<string> {
 
 // --- Gemini ----------------------------------------------------------------
 
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+/**
+ * Where the provider APIs actually live, which is not always where they live.
+ *
+ * Google geo-blocks the Generative Language API from a number of countries, and the
+ * block is on the *network path*, not the key — a perfectly good key returns 403 or
+ * simply fails to connect. The app is a static site calling the API straight from the
+ * device, so there is no server of ours to route around it.
+ *
+ * The answer is a relay the user runs themselves: one small reverse proxy on a VPS in a
+ * region Google serves, which forwards these two paths and nothing else. When one is
+ * configured every request goes through it; when it is not, nothing changes and the
+ * calls go direct. See deploy/PROXY.md.
+ *
+ * Module-level rather than threaded through every call signature: it is genuinely global
+ * configuration, it is read on every request, and defaulting to "direct" means an unset
+ * relay fails exactly the way today's code does rather than in some new way.
+ */
+let relayBase: string | null = null;
+
+/** Strip trailing slashes so joining paths can't produce a double slash. */
+export function setRelay(base: string | null | undefined): void {
+  const trimmed = (base ?? '').trim().replace(/\/+$/, '');
+  relayBase = trimmed ? trimmed : null;
+}
+
+export const relay = () => relayBase;
+
+const geminiBase = () =>
+  relayBase ? `${relayBase}/gemini/v1beta` : 'https://generativelanguage.googleapis.com/v1beta';
+
+const anthropicUrl = () =>
+  relayBase ? `${relayBase}/anthropic/v1/messages` : 'https://api.anthropic.com/v1/messages';
 
 /**
  * A model Google has retired 404s on generateContent while still appearing, in full
@@ -609,7 +640,7 @@ function rank(id: string): number {
 }
 
 async function listGeminiModels(key: string): Promise<ModelChoice[]> {
-  const res = await post(`${GEMINI_BASE}/models?pageSize=200`, {
+  const res = await post(`${geminiBase()}/models?pageSize=200`, {
     method: 'GET',
     headers: { 'x-goog-api-key': key },
   });
@@ -648,7 +679,7 @@ async function* attemptGemini(opts: {
   }));
 
   const res = await post(
-    `${GEMINI_BASE}/models/${encodeURIComponent(opts.model)}:streamGenerateContent?alt=sse`,
+    `${geminiBase()}/models/${encodeURIComponent(opts.model)}:streamGenerateContent?alt=sse`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.key },
@@ -777,7 +808,7 @@ async function* streamAnthropic(opts: {
   const messages = window_(opts.messages).map(({ role, content }) => ({ role, content }));
 
   const res = await post(
-    'https://api.anthropic.com/v1/messages',
+    anthropicUrl(),
     {
       method: 'POST',
       headers: {
