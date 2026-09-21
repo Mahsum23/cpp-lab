@@ -97,6 +97,32 @@ deleting `/etc/caddy/relay.token` and re-running the script.
 that deliberately never rides along in the gist sync — a relay URL in a synced payload
 would be an open relay for anyone who found the gist. Paste it once per device.
 
+## Checking it
+
+`check-relay.sh` works out *which* layer is broken rather than that something is. It is
+safe to run before `setup-relay.sh` — it checks the preconditions — and again after, when
+it also exercises the relay. It needs no API key: an unauthenticated request still proves
+whether the provider answered, which is the only thing being asked.
+
+```
+sh deploy/check-relay.sh
+
+RELAY_HOST=62-60-149-143.sslip.io sudo -E sh deploy/check-relay.sh
+```
+
+It checks, in order, so the first failure is the one to fix:
+
+1. **Outbound reach.** Whether this box can get an answer out of Gemini and Anthropic at
+   all. A 403 saying `unregistered callers` is a pass — that is Google replying. A 403
+   saying `User location is not supported` means the box is blocked too, and a relay here
+   would only relay the block.
+2. **Ports 80 and 443.** Caddy needs 443 to serve and 80 for the Let's Encrypt challenge.
+   It names whatever is holding one.
+3. **DNS.** That `RELAY_HOST` resolves to *this* box. If it points elsewhere, certificate
+   issuance fails, because the challenge goes to the other address.
+4. **The relay.** That a good token forwards and TLS works, that a wrong token gets a
+   404, and that the CORS preflight returns an allow-origin header.
+
 ## Checking it by hand
 
 ```
