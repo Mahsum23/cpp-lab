@@ -23,7 +23,7 @@
   import { codeBlocksFor, isDue, pickNext, type CardRef } from '../lib/review';
   import { today } from '../lib/date';
   import {
-    collect, forgePrompt, parseVerdict, reviewGraderPrompt, streamReply, stripVerdict,
+    collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripVerdict,
     examinerPrompt, ModelGoneError, type ChatMessage,
   } from '../lib/mentor';
   import { TRACKS, type Day, type QuizQuestion, type Track, type Week } from '../lib/types';
@@ -189,19 +189,27 @@
     loading = true;
     error = null;
     try {
-      challenge = await collect(
-        streamReply({
-          provider: app.mentorProvider,
-          key,
-          model: app.progress.settings.mentorModel,
-          alternates: app.fallbackModels,
-          system: forgePrompt(context),
-          messages: [{ role: 'user', content: 'Write the challenge.' }],
-        }),
-      );
-      // An empty forge is not worth showing a blank card for; take the day's stored
-      // teach-back question instead and carry on.
-      if (!challenge) throw new Error('The model sent nothing back.');
+      // A challenge is shown whole, as a question, so half of one is worse than none —
+      // and Gemini can cut a reply mid-sentence while still reporting a clean finish.
+      // Nothing is on screen yet, so an unfinished one is quietly asked for again.
+      let text = '';
+      for (let attempt = 1; attempt <= 2 && !looksComplete(text); attempt++) {
+        text = await collect(
+          streamReply({
+            provider: app.mentorProvider,
+            key,
+            model: app.progress.settings.mentorModel,
+            alternates: app.fallbackModels,
+            system: forgePrompt(context),
+            messages: [{ role: 'user', content: 'Write the challenge.' }],
+          }),
+        );
+      }
+      // Twice unfinished: the day's stored teach-back question is a real question
+      // about the same material, which beats a card that stops mid-word.
+      if (!looksComplete(text)) text = context.day.teachBack ?? '';
+      if (!text) throw new Error('The model could not finish a challenge. Skip this one, or try again.');
+      challenge = text;
     } catch (err) {
       if (err instanceof ModelGoneError) await app.retireModel(app.progress.settings.mentorModel);
       error = err instanceof Error ? err.message : 'Could not write a challenge.';

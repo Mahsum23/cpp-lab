@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
+const { streamReply, looksComplete, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -92,20 +92,20 @@ ok('text is wrapped in parts[]', g.contents[0].parts[0].text === 'why does recv 
 ok('output is capped', g.generationConfig.maxOutputTokens > 0);
 
 // Both line endings are legal per the SSE spec and both are in use, so parse both.
-stub({ body: sse([{ candidates: [{ content: { parts: [{ text: 'crlf ok' }] } }] }], '\r\n\r\n') });
+stub({ body: sse([{ candidates: [{ content: { parts: [{ text: 'crlf ok' }] }, finishReason: 'STOP' }] }], '\r\n\r\n') });
 ok(
   'CRLF-framed frames parse (this is what Google really sends)',
   (await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread }))) === 'crlf ok',
 );
 
-stub({ body: sse([{ candidates: [{ content: { parts: [{ text: 'lf ok' }] } }] }], '\n\n') });
+stub({ body: sse([{ candidates: [{ content: { parts: [{ text: 'lf ok' }] }, finishReason: 'STOP' }] }], '\n\n') });
 ok(
   'LF-framed frames still parse (this is what Anthropic sends)',
   (await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread }))) === 'lf ok',
 );
 
 // A last frame with no trailing blank line used to be dropped on the floor.
-stub({ body: 'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'no trailer' }] } }] }) });
+stub({ body: 'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'no trailer' }] }, finishReason: 'STOP' }] }) });
 ok(
   'a final frame without its trailing blank line is not lost',
   (await collect(streamReply({ provider: 'gemini', key: 'k', model: 'm', system: 's', messages: thread }))) === 'no trailer',
@@ -194,6 +194,8 @@ console.log('\n— anthropic request shape —');
 stub({ body: sse([
   { type: 'content_block_delta', delta: { text: 'errno ' } },
   { type: 'content_block_delta', delta: { text: 'says why.' } },
+  { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+  { type: 'message_stop' },
 ]) });
 
 const claudeText = await collect(
@@ -345,7 +347,7 @@ function script(steps) {
   return calls;
 }
 
-const say = (t) => sse([{ candidates: [{ content: { parts: [{ text: t }] } }] }]);
+const say = (t) => sse([{ candidates: [{ content: { parts: [{ text: t }] }, finishReason: 'STOP' }] }]);
 const drain = async (gen) => { let out = ''; for await (const c of gen) out += c; return out; };
 const ask = (over = {}) => streamReply({
   provider: 'gemini', key: 'AIzaTEST', model: 'gemini-flash-latest',
@@ -421,6 +423,50 @@ script([{ status: 200, body: sse([
   { candidates: [{ content: { parts: [{ text: 'a complete answer' }] }, finishReason: 'STOP' }] },
 ]) }]);
 ok('a finished reply gets no note', (await drain(ask())) === 'a complete answer');
+
+// Every real reply ends on a frame carrying a finish reason. One that just stops was
+// cut in transit, and used to pass for a finished answer.
+script([{ status: 200, body: sse([
+  { candidates: [{ content: { parts: [{ text: 'A table has a live row whose `ctid` is `(0, 5' }] } }] },
+]) }]);
+cut = await drain(ask());
+ok('a stream with no finish reason is flagged as cut off', /cut off .*connection ended/i.test(cut), cut);
+
+const claude = (frames) => { stub({ body: sse(frames) }); return collect(streamReply({ provider: 'anthropic', key: 'k', model: 'm', system: 's', messages: thread })); };
+cut = await claude([
+  { type: 'content_block_delta', delta: { text: 'half' } },
+  { type: 'message_delta', delta: { stop_reason: 'max_tokens' } },
+  { type: 'message_stop' },
+]);
+ok('anthropic: max_tokens names the length limit', /length limit/i.test(cut), cut);
+cut = await claude([{ type: 'content_block_delta', delta: { text: 'half' } }]);
+ok('anthropic: no message_stop is flagged as cut off', /connection ended/i.test(cut), cut);
+cut = await claude([
+  { type: 'content_block_delta', delta: { text: 'done.' } },
+  { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+  { type: 'message_stop' },
+]);
+ok('anthropic: a finished reply gets no note', cut === 'done.', cut);
+
+console.log('\n— is a challenge finished? —');
+// The screenshot case: Gemini can stop mid-sentence and still report STOP, so the text
+// itself is the only evidence left.
+const complete = [
+  'A row has `ctid` `(0, 5)`. After one `UPDATE`, what is its new `ctid`?',
+  'What does this print?\n\n```cpp\nint x = 1; // `odd` backtick in code is fine\nstd::cout << x;\n```',
+  'Name the call that fills the backlog.',
+  'Which `errno` does `recv()` set when the peer resets?',
+];
+const unfinished = [
+  'A table has a live row whose `ctid` is `(0, 5',
+  'What does this print?\n\n```cpp\nint x = 1;',
+  'After the second insert the page holds',
+  'What is the value of `x',
+  'A reply.\n\n_(cut off — the connection ended before the model said it was done. Ask again.)_',
+  '',
+];
+for (const t of complete) ok(`complete: ${JSON.stringify(t.slice(0, 40))}`, looksComplete(t));
+for (const t of unfinished) ok(`unfinished: ${JSON.stringify(t.slice(0, 40))}`, !looksComplete(t));
 
 console.log('\n— thinking must not eat the whole budget —');
 script([{ status: 200, body: sse([{ candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] }]) }]);
