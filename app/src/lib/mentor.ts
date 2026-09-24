@@ -698,6 +698,9 @@ async function* attemptGemini(opts: {
   return { sawText, finish };
 }
 
+/** How every "this reply was cut short" note begins, so a caller can spot one. */
+const CUT_MARK = '_(cut off';
+
 /**
  * A note to append when the model stopped early, or null when it finished properly.
  *
@@ -705,11 +708,37 @@ async function* attemptGemini(opts: {
  * and an error would replace it with nothing.
  */
 function truncationNote(finish: string | undefined): string | null {
-  if (!finish || finish === 'STOP') return null;
-  if (finish === 'MAX_TOKENS') {
-    return '\n\n_(cut off — it hit the length limit. Ask it to carry on, or to be briefer.)_';
+  if (finish === 'STOP') return null;
+  // Every real reply ends on a frame that carries a finish reason. A stream that just
+  // stops without one was cut off in transit — a documented Gemini failure, and also
+  // what a dropped connection looks like — not finished.
+  if (!finish) {
+    return `\n\n${CUT_MARK} — the connection ended before the model said it was done. Ask again.)_`;
   }
-  return `\n\n_(cut off — the model stopped early: ${finish}.)_`;
+  if (finish === 'MAX_TOKENS') {
+    return `\n\n${CUT_MARK} — it hit the length limit. Ask it to carry on, or to be briefer.)_`;
+  }
+  return `\n\n${CUT_MARK} — the model stopped early: ${finish}.)_`;
+}
+
+/**
+ * Whether a short piece of generated text reads as finished.
+ *
+ * The finish reason alone cannot answer this. Gemini is known to end a stream
+ * mid-sentence and still report `STOP`, so a reply can be cut off and say it is
+ * complete. For a one-paragraph challenge that is shown as a question, half a question
+ * is worse than none, so the text itself gets checked: every code fence and every
+ * inline backtick closed, and the last thing on the page a full stop, a question mark
+ * or the end of a code block — never a bare word or a digit, which is where a cut lands.
+ */
+export function looksComplete(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.includes(CUT_MARK)) return false;
+  const fences = t.match(/^[ \t]*```/gm)?.length ?? 0;
+  if (fences % 2) return false;
+  const prose = t.replace(/^[ \t]*```[\s\S]*?^[ \t]*```/gm, '');
+  if ((prose.match(/`/g)?.length ?? 0) % 2) return false;
+  return /(```|[.?!)`"'»…*_])$/.test(t);
 }
 
 /**
@@ -803,16 +832,37 @@ async function* streamAnthropic(opts: {
       : new MentorError(text);
   }
 
+  let sawText = false;
+  let stopReason: string | undefined;
+  let stopped = false;
   for await (const data of sseFrames(res)) {
-    let event: { type?: string; delta?: { text?: string }; error?: { message?: string } };
+    let event: {
+      type?: string;
+      delta?: { text?: string; stop_reason?: string };
+      error?: { message?: string };
+    };
     try {
       event = JSON.parse(data);
     } catch {
       continue;
     }
     if (event.type === 'error') throw new MentorError(event.error?.message ?? 'The stream errored.');
-    if (event.type === 'content_block_delta' && event.delta?.text) yield event.delta.text;
+    if (event.type === 'content_block_delta' && event.delta?.text) {
+      sawText = true;
+      yield event.delta.text;
+    }
+    if (event.type === 'message_delta' && event.delta?.stop_reason) stopReason = event.delta.stop_reason;
+    if (event.type === 'message_stop') stopped = true;
   }
+
+  // Same contract as Gemini's: say so when the reply did not really finish. No
+  // message_stop means the stream was cut in transit; max_tokens means the budget ran out.
+  if (!sawText) return;
+  const finished = !stopReason || stopReason === 'end_turn' || stopReason === 'stop_sequence';
+  const cut = truncationNote(
+    !stopped ? undefined : stopReason === 'max_tokens' ? 'MAX_TOKENS' : finished ? 'STOP' : stopReason,
+  );
+  if (cut) yield cut;
 }
 
 // --- the two entry points --------------------------------------------------
@@ -909,6 +959,8 @@ Rules:
 - Ask about something the material actually covered. Do not invent API behaviour.
 - Output the challenge only. No preamble, no answer, no hints, no "here is a
   challenge" — the first character is the first word of the question.
+- End with the question itself, closed by a question mark. Code, if any, comes before
+  the question, not after it.
 
 ${NO_LATEX}`;
 };
