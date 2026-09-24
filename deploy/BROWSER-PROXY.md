@@ -27,7 +27,64 @@ curl -sS --socks5-hostname HOST:PORT -o /dev/null -w '%{http_code}\n' \
 - **A timeout, or a SOCKS error** — the proxy is unreachable from where you are, or it
   needs a username and password (add `--proxy-user USER:PASS` to check).
 
-If it needs a login, skip to FoxyProxy below — a PAC file cannot carry credentials.
+If it needs a login, a PAC file cannot help — it has nowhere to put credentials. Use the
+local relay below (any browser), or FoxyProxy (Firefox only).
+
+## With a login, in any browser: the local relay
+
+`tools/socks-relay.mjs` is a small program you run on the same machine as the browser. It
+listens on `127.0.0.1`, does the SOCKS5 login itself, and forwards the app's requests
+through the proxy. The app talks to it through the same **relay** setting as the server
+relay in PROXY.md. It needs Node 18 or newer and nothing else — no `npm install`.
+
+The first run writes a config template and stops:
+
+```
+node tools/socks-relay.mjs
+```
+
+Fill in the file it names (`~/.config/cpp-lab/socks-relay.env`, readable only by you):
+
+```
+SOCKS=HOST:PORT
+SOCKS_USER=your-proxy-user
+SOCKS_PASS=your-proxy-password
+ORIGIN=https://your-name.github.io
+```
+
+`ORIGIN` is where the app is served from, exactly as the address bar shows it, without a
+trailing slash. The relay refuses requests from any other page, so a site you happen to
+have open cannot borrow your proxy. The password is taken as written — no URL-encoding,
+even if it contains `@` or `:`.
+
+Then check the whole path in one step, without an API key:
+
+```
+node tools/socks-relay.mjs --check
+```
+
+`works` means the proxy accepted the login and Google answered through it. Otherwise it
+says which part failed: the proxy unreachable, the login rejected, or the proxy itself in
+a blocked location. When it works, start it for real:
+
+```
+node tools/socks-relay.mjs
+```
+
+and in the app, **Settings → Mentor chat → Reach the API through a relay**, enter
+`http://127.0.0.1:8787` and save. Saving fetches the model list through the relay, which
+tests it. Leave the relay running while you use the mentor; the terminal shows one line
+per request.
+
+**Chrome asks once.** Since Chrome 142, a public site talking to your own machine needs
+your permission: the first request shows a prompt asking to let the site access devices
+on your local network. Allow it. If you dismissed it, the requests fail as a network
+error — re-allow it from the padlock menu, under site settings.
+
+What the proxy sees is the same as with the PAC file: which host you connect to, and
+nothing else. The TLS connection to the API is opened *through* the tunnel, so your key is
+encrypted from your machine to Google or Anthropic. The browser only reaches the relay
+over loopback, which never leaves the machine.
 
 ## Without a login: Firefox and the PAC file
 
@@ -48,11 +105,11 @@ file:///home/you/cpp-lab.pac
 
 Press **Reload**, then **OK**.
 
-## With a login, or in Chrome: FoxyProxy
+## With a login, without running anything: FoxyProxy in Firefox
 
 Firefox's own settings take a SOCKS host and port but not credentials. Chrome does not
-support SOCKS5 authentication at all — not natively and not through extensions — so a
-proxy that needs a login is Firefox-only.
+support SOCKS5 authentication at all — not natively and not through extensions — so
+this route is Firefox-only. In Chrome, use the local relay above.
 
 Install **FoxyProxy Standard**, add a proxy of type **SOCKS5** with the host, port and (if
 needed) username and password, and give it exactly two patterns:
@@ -75,9 +132,10 @@ provider for its model list, which is the cheapest possible round trip. A list o
 means the proxy is in the path and working.
 
 If instead the app says Google is refusing requests from your location, the proxy is not
-being applied: the PAC file did not load, or FoxyProxy is not in pattern mode. Leave the
-**relay** field in Settings empty — it is for the other approach (see PROXY.md), and
-setting both would send requests to a relay that is not there.
+being applied: the PAC file did not load, or FoxyProxy is not in pattern mode. With the
+PAC file or FoxyProxy, leave the **relay** field in Settings empty — it is only for a
+relay, local or on a server, and a relay URL with nothing listening behind it makes every
+request fail.
 
 ## Why exact hostnames, and no fallback
 

@@ -326,9 +326,11 @@
     <details class="relay" open={Boolean(app.secrets.relayBase)}>
       <summary>Reach the API through a relay</summary>
       <p class="hint fine">
-        If the provider is blocked where you are, run the small reverse proxy in
-        <code>deploy/</code> on a VPS somewhere it isn't, and put its URL here. Leave it
-        empty to call the provider directly. Stored on this device only — it never rides
+        If the provider is blocked where you are, put a relay's URL here: the reverse
+        proxy in <code>deploy/</code> on a server somewhere it isn't, or
+        <code>http://127.0.0.1:8787</code> for <code>tools/socks-relay.mjs</code> running on
+        this machine in front of a SOCKS5 proxy. Leave it empty to call the provider
+        directly. Stored on this device only — it never rides
         along in sync.
       </p>
       <div class="row">

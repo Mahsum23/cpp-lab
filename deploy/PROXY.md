@@ -41,11 +41,12 @@ Let's Encrypt does issue certificates for bare IP addresses now (generally avail
 since January 2026, on a six-day lifetime via the `shortlived` ACME profile), but Caddy's
 support for that specific path still has open bugs, so it is not the road to take today.
 
-The zero-effort option is wildcard DNS. These already resolve, with no signup:
+The zero-effort option is wildcard DNS. Put your server's IP in the name and it resolves,
+with no signup — for a server at `203.0.113.7`:
 
 ```
-62-60-149-143.sslip.io   ->  62.60.149.143
-62-60-149-143.nip.io     ->  62.60.149.143
+203-0-113-7.sslip.io   ->  203.0.113.7
+203-0-113-7.nip.io     ->  203.0.113.7
 ```
 
 Use `sslip.io`. If Let's Encrypt rate-limits it, register a free name at
@@ -56,7 +57,7 @@ Use `sslip.io`. If Let's Encrypt rate-limits it, register a free name at
 ```
 git clone <this repo> && cd cpp-lab/deploy
 
-RELAY_HOST=62-60-149-143.sslip.io \
+RELAY_HOST=203-0-113-7.sslip.io \
 APP_ORIGIN=https://YOURNAME.github.io \
 sudo -E sh setup-relay.sh
 ```
@@ -111,7 +112,7 @@ whether the provider answered, which is the only thing being asked.
 ```
 sh deploy/check-relay.sh
 
-RELAY_HOST=62-60-149-143.sslip.io sudo -E sh deploy/check-relay.sh
+RELAY_HOST=203-0-113-7.sslip.io sudo -E sh deploy/check-relay.sh
 ```
 
 It checks, in order, so the first failure is the one to fix:

@@ -385,14 +385,25 @@ launcher says so and still offers the run command — but that should be the exc
 
 Google geo-blocks the Generative Language API in some countries, on the network path
 rather than on the key, so a working key simply fails — as `400 FAILED_PRECONDITION`,
-"User location is not supported". There are two ways round it and `deploy/` covers both:
+"User location is not supported". There are three ways round it:
 
-- **A relay** (PROXY.md): `Secrets.relayBase`, set in Settings, and every provider call
-  goes through it. Needs a server of your own that can reach the API.
-- **A browser proxy** (BROWSER-PROXY.md): a SOCKS5 proxy applied by the browser to the two
-  API hosts only, via `cpp-lab.pac` or FoxyProxy. Needs no server and no app change,
-  because `fetch()` never sees it. This is what he uses: his VPS was blocked from Russia,
-  and the SOCKS5 proxy he has is an endpoint, not a machine.
+- **A server relay** (`deploy/PROXY.md`): `Secrets.relayBase`, set in Settings, and every
+  provider call goes through it. Needs a server of your own that can reach the API.
+- **A local relay** (`tools/socks-relay.mjs`, documented in `deploy/BROWSER-PROXY.md`):
+  the same relay setting pointed at `http://127.0.0.1:8787`, where a zero-dependency Node
+  script does the SOCKS5 username/password login and tunnels TLS to the API through the
+  proxy. Works in any browser. This is what he uses: his VPS was blocked from Russia, and
+  his SOCKS5 proxy is an endpoint (not a machine) that needs a login — which Chrome
+  cannot do at all and a PAC file cannot carry.
+- **A browser proxy** (`deploy/BROWSER-PROXY.md`): a SOCKS5 proxy applied by the browser
+  to the two API hosts only, via `cpp-lab.pac` or FoxyProxy. Needs no server and nothing
+  running, because `fetch()` never sees it — but only Firefox + FoxyProxy handles a login.
+
+The local relay's secrets live in `~/.config/cpp-lab/socks-relay.env` (mode 600) and must
+stay there: never in the browser, the repo, the gist sync or a log line. It binds
+loopback only, refuses any `Origin` not in its config, and forwards only a whitelist of
+request headers. If `mentor.ts` starts sending a new header, add it to `FORWARD_UP` in the
+script as well as to the Caddyfile's CORS list.
 
 The PAC file matches exact hostnames, never suffixes — a suffix match on `googleapis.com`
 would route every other Google API and match lookalikes. It has no `DIRECT` fallback, so
