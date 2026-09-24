@@ -384,9 +384,21 @@ launcher says so and still offers the run command — but that should be the exc
 ## The model APIs are not reachable everywhere
 
 Google geo-blocks the Generative Language API in some countries, on the network path
-rather than on the key, so a working key simply fails. The app therefore supports a
-relay: `Secrets.relayBase`, set in Settings, and every provider call goes through it when
-one is configured. `deploy/` holds the Caddyfile, a setup script and PROXY.md.
+rather than on the key, so a working key simply fails — as `400 FAILED_PRECONDITION`,
+"User location is not supported". There are two ways round it and `deploy/` covers both:
+
+- **A relay** (PROXY.md): `Secrets.relayBase`, set in Settings, and every provider call
+  goes through it. Needs a server of your own that can reach the API.
+- **A browser proxy** (BROWSER-PROXY.md): a SOCKS5 proxy applied by the browser to the two
+  API hosts only, via `cpp-lab.pac` or FoxyProxy. Needs no server and no app change,
+  because `fetch()` never sees it. This is what he uses: his VPS was blocked from Russia,
+  and the SOCKS5 proxy he has is an endpoint, not a machine.
+
+The PAC file matches exact hostnames, never suffixes — a suffix match on `googleapis.com`
+would route every other Google API and match lookalikes. It has no `DIRECT` fallback, so
+a dead proxy fails as a network error instead of as Google's location refusal, which
+reads like a key problem. The committed file carries a placeholder, never a real address:
+a proxy in a public repo is a proxy for everyone.
 
 Two consequences when touching `mentor.ts`: never hardcode a provider URL again — go
 through `geminiBase()` / `anthropicUrl()` so a relay keeps working — and if a new

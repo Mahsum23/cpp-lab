@@ -68,5 +68,26 @@ await urlFor('https://host.example/tok3n');
 u = await urlFor(null);
 ok('clearing it returns to direct calls', u.startsWith('https://generativelanguage.googleapis.com/'), u);
 
+console.log('\n— a geo-block is named as one —');
+/**
+ * Google answers a blocked location with 400 FAILED_PRECONDITION. The branches that
+ * handle other 400s talk about the key, and a geo-block is the one failure where the key
+ * is certainly fine — so this must be caught before them, and by its text.
+ */
+const geo = JSON.stringify({ error: { code: 400, message: 'User location is not supported for the API use.', status: 'FAILED_PRECONDITION' } });
+globalThis.fetch = async () => new Response(geo, { status: 400, headers: { 'content-type': 'application/json' } });
+setRelay(null);
+let caught = '';
+try { await listModels('gemini', 'KEY'); } catch (e) { caught = String(e?.message ?? e); }
+ok('it is reported as a location problem', /location/i.test(caught), caught);
+ok('and explicitly not as a key problem', /not a problem with your key/i.test(caught), caught);
+ok('and it names a way out', /proxy|relay/i.test(caught), caught);
+
+const badKey = JSON.stringify({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } });
+globalThis.fetch = async () => new Response(badKey, { status: 400, headers: { 'content-type': 'application/json' } });
+caught = '';
+try { await listModels('gemini', 'KEY'); } catch (e) { caught = String(e?.message ?? e); }
+ok('a real bad-key 400 still gets the key advice', /key/i.test(caught) && !/location/i.test(caught), caught);
+
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all relay cases pass');
 process.exit(fails ? 1 : 0);

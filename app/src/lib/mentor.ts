@@ -563,6 +563,18 @@ const anthropicUrl = () =>
  * Google's own words through rather than paraphrasing them into something vaguer.
  */
 function explainGemini(status: number, message: string): string {
+  // Checked first and by text, not status: Google sends this as 400 FAILED_PRECONDITION,
+  // and it must not fall into the branches below that point at the key. A geo-block
+  // is the one failure where the key is guaranteed to be fine, and "check your key" is
+  // exactly the wrong advice — it sends people re-pasting a working key for an hour.
+  if (/location is not supported/i.test(message)) {
+    return (
+      "Google is refusing requests from your location. That's a geo-block on the network " +
+      "path, not a problem with your key. The request has to leave from somewhere Google " +
+      "serves: a proxy in your browser for the two API hosts, or a relay (Settings → " +
+      "Mentor chat). The repo's deploy/ folder sets up either one."
+    );
+  }
   if (status === 400 && /api.?key/i.test(message)) {
     return 'Google rejected that key. Copy it again from aistudio.google.com/apikey — the whole string, which starts with "AQ." or "AIza".';
   }

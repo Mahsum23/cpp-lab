@@ -1,8 +1,12 @@
 # Reaching the model APIs from a blocked country
 
 Google geo-blocks the Generative Language API in a number of countries. The block is on
-the **network path**, not on your key — a perfectly good key fails, usually as a 403 or a
-connection that never completes. Anthropic applies its own regional restrictions.
+the **network path**, not on your key — a perfectly good key fails, as a 400
+`FAILED_PRECONDITION` saying `User location is not supported`, or as a connection that
+never completes. Anthropic applies its own regional restrictions.
+
+**No server of your own, but a SOCKS5 proxy?** See BROWSER-PROXY.md instead — the
+browser can route the two API hosts through it with no relay at all.
 
 This app is a static site: it calls the provider straight from your browser, so there is
 no server of ours in the middle to route around it. The fix is a relay you run yourself —
@@ -23,7 +27,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 ```
 
 - **200** — good, carry on.
-- **403** with `User location is not supported` — this box is blocked too. A relay on it
+- **400** with `User location is not supported` — this box is blocked too. A relay on it
   changes nothing; you need one somewhere else.
 - **Hangs or connection refused** — the box cannot reach Google at all.
 
@@ -113,7 +117,7 @@ RELAY_HOST=62-60-149-143.sslip.io sudo -E sh deploy/check-relay.sh
 It checks, in order, so the first failure is the one to fix:
 
 1. **Outbound reach.** Whether this box can get an answer out of Gemini and Anthropic at
-   all. A 403 saying `unregistered callers` is a pass — that is Google replying. A 403
+   all. A 403 saying `unregistered callers` is a pass — that is Google replying. A 400
    saying `User location is not supported` means the box is blocked too, and a relay here
    would only relay the block.
 2. **Ports 80 and 443.** Caddy needs 443 to serve and 80 for the Let's Encrypt challenge.
