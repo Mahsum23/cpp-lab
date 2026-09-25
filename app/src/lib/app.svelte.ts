@@ -14,7 +14,7 @@ import {
   type Track,
 } from './types';
 import {
-  cardsFor, dueCards, grade, newCard, shouldAmbush, type CardRef, type Grade,
+  cardsFor, clearedOn, dueCards, grade, newCard, shouldAmbush, type CardRef, type Grade,
 } from './review';
 import * as store from './storage';
 import * as cloud from './cloud';
@@ -85,10 +85,9 @@ class AppStore {
     return dueCards(this.deck, this.progress.review, today());
   }
 
-  /** Cleared today, reset when the date rolls over rather than at any particular hour. */
+  /** Cards answered today, local date — read off the cards, so sync cannot inflate it. */
   get clearedToday(): number {
-    const r = this.progress.review;
-    return r.countedOn === today() ? r.doneToday : 0;
+    return clearedOn(this.progress.review, today());
   }
 
   /**
@@ -125,13 +124,6 @@ class AppStore {
     const review = this.progress.review;
     const card = review.cards[id] ?? newCard();
     review.cards[id] = grade(card, result, new Date(), Math.random, { early });
-
-    const on = today();
-    if (review.countedOn !== on) {
-      review.countedOn = on;
-      review.doneToday = 0;
-    }
-    review.doneToday += 1;
     await this.persist();
   }
 

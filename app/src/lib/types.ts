@@ -242,9 +242,6 @@ export interface ReviewState {
    * lesson. Caps the interruption at once a day.
    */
   lastAmbush: string | null;
-  /** Cards cleared on `countedOn`, so the screen can say when you're done for now. */
-  doneToday: number;
-  countedOn: string | null;
 }
 
 export interface Progress {
@@ -259,7 +256,7 @@ export interface Progress {
 }
 
 export function emptyReview(): ReviewState {
-  return { cards: {}, lastAmbush: null, doneToday: 0, countedOn: null };
+  return { cards: {}, lastAmbush: null };
 }
 
 export function emptyDayProgress(weekId: string): DayProgress {
