@@ -21,7 +21,7 @@
  * Everything here is pure and takes its randomness as an argument, because a scheduler
  * you can't run twice with the same result is a scheduler you can't test.
  */
-import { today } from './date';
+import { localDateOf, today } from './date';
 import type { Day, DayProgress, ReviewCard, ReviewState } from './types';
 
 /** How a card went. Recall is close enough to binary that finer grades are noise. */
@@ -103,6 +103,25 @@ export function grade(
     lapses: card.lapses,
     lastAt,
   };
+}
+
+/**
+ * How many cards were answered on local date `on`.
+ *
+ * Derived from the cards' own `lastAt`, never stored as a tally. A stored count has to
+ * be merged across devices, and the obvious merge — same day on both, so add them — is
+ * not idempotent: every sync uploads the sum, the next sync adds it to itself again, and
+ * the number doubles per round trip. It reached 49196. Reading it off the cards cannot
+ * drift, because the cards are what sync actually agrees on.
+ *
+ * A card answered twice today counts once: this is cards cleared, not answers given.
+ */
+export function clearedOn(state: ReviewState, on: string): number {
+  let n = 0;
+  for (const card of Object.values(state.cards)) {
+    if (card.lastAt && localDateOf(card.lastAt) === on) n++;
+  }
+  return n;
 }
 
 // --- what cards exist -----------------------------------------------------

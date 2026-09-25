@@ -26,7 +26,7 @@ const bundle = async (entry, name) => {
 const R = await bundle('../src/lib/review.ts', 'cpp-lab-review.mjs');
 const M = await bundle('../src/lib/merge.ts', 'cpp-lab-merge-review.mjs');
 const { today } = await bundle('../src/lib/date.ts', 'cpp-lab-date.mjs');
-const { grade, newCard, cardsFor, pickNext, dueCards, shouldAmbush, parseCardId, cardId,
+const { grade, clearedOn, newCard, cardsFor, pickNext, dueCards, shouldAmbush, parseCardId, cardId,
         codeBlocksFor, START_EASE } = R;
 
 let fails = 0;
@@ -109,12 +109,12 @@ ok('an unknown kind is rejected', parseCardId('banana:day-01') === null);
 
 console.log('\n— selection —');
 const deck = cards;
-const fresh = { cards: {}, lastAmbush: null, doneToday: 0, countedOn: null };
+const fresh = { cards: {}, lastAmbush: null };
 ok('everything unseen is due', dueCards(deck, fresh, '2026-09-07').length === deck.length);
 
 const parked = {
   cards: Object.fromEntries(deck.map((x) => [x.id, { ...newCard(NOW), due: '2026-12-01' }])),
-  lastAmbush: null, doneToday: 0, countedOn: null,
+  lastAmbush: null,
 };
 ok('nothing due when everything is parked', dueCards(deck, parked, '2026-09-07').length === 0);
 
@@ -138,11 +138,11 @@ console.log('\n— two devices, one deck —');
 const card = (over) => ({ ...newCard(NOW), ...over });
 const local = {
   cards: { x: card({ due: '2026-10-01', lastAt: '2026-09-07T09:00:00Z', seen: 3, lapses: 1 }) },
-  lastAmbush: '2026-09-07', doneToday: 2, countedOn: '2026-09-07',
+  lastAmbush: '2026-09-07',
 };
 const remote = {
   cards: { x: card({ due: '2026-09-08', lastAt: '2026-09-07T11:00:00Z', seen: 2, lapses: 2 }) },
-  lastAmbush: '2026-09-06', doneToday: 3, countedOn: '2026-09-07',
+  lastAmbush: '2026-09-06',
 };
 let m = M.mergeReview(local, remote);
 // The later answer wins the card even though its due date is nearer — a miss on the
@@ -150,12 +150,28 @@ let m = M.mergeReview(local, remote);
 ok('the most recent answer wins the card', m.cards.x.due === '2026-09-08', m.cards.x.due);
 ok('counters take the max, not the sum', m.cards.x.seen === 3 && m.cards.x.lapses === 2, JSON.stringify(m.cards.x));
 ok('the later ambush date is kept', m.lastAmbush === '2026-09-07');
-ok('same-day tallies add up', m.doneToday === 5, String(m.doneToday));
 
-m = M.mergeReview(local, { ...remote, countedOn: '2026-09-06', doneToday: 9 });
-ok('a stale tally is not added in', m.doneToday === 2, String(m.doneToday));
+console.log('\n— cleared today —');
+// Timestamps at local noon, so the test means the same thing in every timezone.
+const noon = (date) => new Date(`${date}T12:00:00`).toISOString();
+const phone = { cards: { a: card({ lastAt: noon('2026-09-07') }), b: card({ lastAt: noon('2026-09-07') }), old: card({ lastAt: noon('2026-09-01') }) }, lastAmbush: null };
+const laptop = { cards: { c: card({ lastAt: noon('2026-09-07') }), a: card({ lastAt: noon('2026-09-07') }) }, lastAmbush: null };
+ok('counts cards answered on that day', clearedOn(phone, '2026-09-07') === 2, String(clearedOn(phone, '2026-09-07')));
+ok('an older answer is not counted', clearedOn(phone, '2026-09-08') === 0);
+ok('an unanswered card is not counted', clearedOn({ cards: { n: card({}) }, lastAmbush: null }, '2026-09-07') === 0);
+m = M.mergeReview(phone, laptop);
+ok('two devices: each card counted once', clearedOn(m, '2026-09-07') === 3, String(clearedOn(m, '2026-09-07')));
+// The bug this replaces: a stored tally was *added* on every same-day merge, and each
+// sync uploads the merged result, so repeated syncs doubled it — to 49196 in practice.
+let synced = m;
+for (let i = 0; i < 20; i++) synced = M.mergeReview(M.mergeReview(synced, laptop), phone);
+ok('twenty more syncs change nothing', clearedOn(synced, '2026-09-07') === 3, String(clearedOn(synced, '2026-09-07')));
+ok('and no tally is stored to drift', !('doneToday' in synced) && !('countedOn' in synced), JSON.stringify(Object.keys(synced)));
+// A record from before this change still carries the old fields; they must not survive.
+const legacy = { ...phone, doneToday: 49196, countedOn: '2026-09-07' };
+ok('an old synced tally is dropped on merge', !('doneToday' in M.mergeReview(legacy, laptop)));
 
-m = M.mergeReview({ cards: { only: card({}) }, lastAmbush: null, doneToday: 0, countedOn: null }, remote);
+m = M.mergeReview({ cards: { only: card({}) }, lastAmbush: null }, remote);
 ok('a card only one device has is kept', Boolean(m.cards.only) && Boolean(m.cards.x));
 
 console.log('\n— practice you asked for early —');

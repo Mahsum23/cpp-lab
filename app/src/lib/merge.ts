@@ -122,18 +122,9 @@ export function mergeReview(local: ReviewState, remote: ReviewState): ReviewStat
   }
 
   const ambush = (local.lastAmbush ?? '') >= (remote.lastAmbush ?? '') ? local.lastAmbush : remote.lastAmbush;
-  const counted = (local.countedOn ?? '') >= (remote.countedOn ?? '') ? local : remote;
-  return {
-    cards,
-    lastAmbush: ambush,
-    // Same day on both devices means the two tallies are of different cards; adding
-    // them is what "cleared today" actually means to the person doing the clearing.
-    doneToday:
-      local.countedOn && local.countedOn === remote.countedOn
-        ? local.doneToday + remote.doneToday
-        : counted.doneToday,
-    countedOn: counted.countedOn,
-  };
+  // No "cleared today" tally here on purpose: it is derived from the cards (see
+  // clearedOn), because a stored count has no merge that survives repeated syncs.
+  return { cards, lastAmbush: ambush };
 }
 
 export function mergeProgress(local: Progress, remote: Progress): Progress {
