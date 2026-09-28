@@ -30,7 +30,7 @@ export default defineConfig({
         id: base,
         name: 'slowpath',
         short_name: 'slowpath',
-        description: 'One C++ session a day. Theory, quiz, task — 25 minutes.',
+        description: 'One short session a day in C++, PostgreSQL or Go. Theory, quiz, drill, task, teach-back.',
         start_url: base,
         scope: base,
         display: 'standalone',
