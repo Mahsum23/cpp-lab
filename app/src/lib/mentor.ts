@@ -171,7 +171,7 @@ typeset maths and there is no renderer for it, so LaTeX reaches the reader as so
 
 const persona = (track: Track | undefined) => {
   const s = subjectOf(track);
-  return `You are the mentor for cpp-lab, a deliberate-practice ${s.name} curriculum.
+  return `You are the mentor for slowpath, a deliberate-practice ${s.name} curriculum.
 
 Who you're talking to: ${s.audience} ${s.depth}
 
@@ -244,7 +244,7 @@ export function systemPrompt(context: { week: Week; day: Day } | null): string {
 const examiner = (track: Track | undefined) => {
   const s = subjectOf(track);
   return `You are examining a developer on material they have just studied, in a
-deliberate-practice ${s.name} curriculum called cpp-lab. Assume they write ${s.name}
+deliberate-practice ${s.name} curriculum called slowpath. Assume they write ${s.name}
 competently; what is being tested is whether they understood today's material, not
 whether they know the language.
 

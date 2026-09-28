@@ -415,6 +415,16 @@ language. Everything is verified against a real toolchain (1.24 at time of writi
 every exercise stays a single file run with `go run` — no modules, no dependencies, no
 services.
 
+## The name is slowpath; the storage keys still say cpp-lab
+
+The project was renamed from cpp-lab to slowpath once it grew past C++ (the name is from
+the prime directive: understanding is the fast path, writing the solution stays slow).
+Everything a person *sees* says slowpath. Three identifiers deliberately do not, and must
+never be "tidied up": the IndexedDB name in `storage.ts`, the gist filename and `app`
+marker in `cloud.ts` (also what `tools/lab.mjs` searches for), and the export marker in
+`app.svelte.ts`. They are how existing installs find their data and how every device finds
+the same gist; renaming any of them silently starts people from empty.
+
 ## Curriculum
 
 Full curriculum and current milestone specs are in `README.md` and

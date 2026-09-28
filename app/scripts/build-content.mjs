@@ -441,7 +441,7 @@ for (const ref of weekRefs) {
 
 const curriculum = {
   schemaVersion: SCHEMA_VERSION,
-  title: 'cpp-lab',
+  title: 'slowpath',
   generatedAt: new Date(newest || Date.now()).toISOString(),
   weeks: weekRefs,
 };
