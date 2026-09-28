@@ -14,7 +14,7 @@
    */
   import { untrack } from 'svelte';
   import { app } from '../lib/app.svelte';
-  import { router } from '../lib/router.svelte';
+  import { router, sessionPath } from '../lib/router.svelte';
   import Button from '../components/Button.svelte';
   import Markdown from '../components/Markdown.svelte';
   import { highlight } from '../lib/markdown';
@@ -222,8 +222,33 @@
     card?.kind === 'forge' ? challenge : (context?.day.teachBack ?? ''),
   );
 
-  async function submit() {
-    const text = answer.trim();
+  /**
+   * Whether "No idea — show me" may reveal the answer.
+   *
+   * A forged challenge is pure revision, so yes. A teach-back question is also what the
+   * day's examiner grades, and the examiner never supplies the explanation it is asking
+   * for — so its answer is only shown once that day's teach-back has been passed.
+   * Before then, the honest help is the lesson itself, not the answer to the exam.
+   */
+  const canReveal = $derived(
+    card?.kind === 'forge' ||
+      (card?.kind === 'explain' && !!app.progress.days[card.dayId]?.teachBackDone),
+  );
+
+  /** A miss, and straight back to the material rather than to the answer. */
+  async function backToLesson() {
+    if (!context) return;
+    const { week, day } = context;
+    await settle('again');
+    router.go(sessionPath(week.id, day.id));
+  }
+
+  /**
+   * @param showMe "No idea — show me": ask for the answer instead of grading one. Always
+   * graded by the revision grader, which gives the correction, never by the examiner.
+   */
+  async function submit(showMe = false) {
+    const text = showMe ? "I don't know. Show me the answer." : answer.trim();
     const key = app.mentorKey;
     if (!text || !key || !context || streaming) return;
     streaming = true;
@@ -237,14 +262,16 @@
         model: app.progress.settings.mentorModel,
         alternates: app.fallbackModels,
         system:
-          card?.kind === 'forge'
-            ? reviewGraderPrompt(context, challenge)
+          card?.kind === 'forge' || showMe
+            ? reviewGraderPrompt(context, prompt)
             : examinerPrompt(context),
         messages: history,
       })) {
         reply += chunk;
       }
-      const ruling = parseVerdict(reply);
+      // Asking to be shown is a miss by definition, whatever the marker says, and the
+      // card must be closed either way so "Next card" appears under the explanation.
+      const ruling = showMe ? 'gaps' : parseVerdict(reply);
       if (ruling) {
         verdict = ruling;
         await settle(ruling === 'solid' ? 'good' : 'again');
@@ -452,7 +479,15 @@
         <Button onclick={() => void submit()} disabled={!answer.trim() || streaming}>
           {streaming ? 'Marking…' : 'Submit'}
         </Button>
-        <Button variant="ghost" size="sm" onclick={() => void skip()}>No idea — show me</Button>
+        {#if canReveal}
+          <Button variant="ghost" size="sm" disabled={streaming} onclick={() => void submit(true)}>
+            No idea — show me
+          </Button>
+        {:else}
+          <Button variant="ghost" size="sm" disabled={streaming} onclick={() => void backToLesson()}>
+            No idea — reread the lesson
+          </Button>
+        {/if}
       {/if}
     </div>
   {/if}

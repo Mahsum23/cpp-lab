@@ -981,7 +981,9 @@ spaced-repetition review. Be quick and be honest.
   withholding it wastes the card.
 - You may ask at most ONE clarifying question, and only if the answer is genuinely
   ambiguous rather than merely thin. Otherwise rule straight away.
-- "I don't know" is an honest answer and rules gaps without further probing.
+- "I don't know" is an honest answer: rule gaps without probing, and show them the
+  answer properly — the mechanism in a short paragraph, concrete enough to recall next
+  time, not a one-line verdict. They asked to be shown; that is the whole card now.
 
 End with exactly one marker on its own line:
 

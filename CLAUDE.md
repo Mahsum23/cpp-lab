@@ -353,6 +353,14 @@ that cannot end. When writing a `teachBack` question, make it something he can g
 in an interesting way: "what is the backlog a queue of, and who puts things in it" beats
 "explain listen()".
 
+**"No idea — show me" in the review deck must show something.** It used to mark the card
+missed and deal the next one with no explanation, which turns the most teachable moment
+in the deck into a dead end. For a forged challenge, and for a teach-back question whose
+day he has already passed, it asks the revision grader for the answer and shows it before
+moving on. A teach-back not yet passed on its day is the one exception, because revealing
+it would hand over the examiner's answer: there the button reads "reread the lesson" and
+opens that day's theory instead. It still counts as a miss either way.
+
 ## Every day has two halves, and the phone half is not optional
 
 A task needs a machine, and not having one is the most common reason a day stalls
