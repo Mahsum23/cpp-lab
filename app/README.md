@@ -1,4 +1,4 @@
-# cpp-lab app
+# slowpath app
 
 The installable PWA that delivers this repo's curriculum one day at a time.
 Design and rationale live in [`DESIGN.md`](./DESIGN.md); this file is how to run it.
@@ -29,7 +29,7 @@ Other scripts:
 
 1. Push to `main`. `.github/workflows/deploy-app.yml` builds and publishes to GitHub
    Pages. **One-time setup:** repo → Settings → Pages → Source: **GitHub Actions**.
-2. Open `https://<user>.github.io/cpp-lab/` **in Safari** — Chrome on iOS cannot
+2. Open `https://<user>.github.io/slowpath/` **in Safari** — Chrome on iOS cannot
    install PWAs, only Safari can.
 3. Share → **Add to Home Screen**.
 

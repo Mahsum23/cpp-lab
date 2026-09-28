@@ -813,6 +813,8 @@ class AppStore {
 
   exportJSON(): string {
     return JSON.stringify(
+      // 'cpp-lab' is the old project name, kept as the file's marker so old exports and
+      // new ones stay interchangeable.
       { app: 'cpp-lab', exportedAt: new Date().toISOString(), progress: $state.snapshot(this.progress) },
       null,
       2,
@@ -823,7 +825,7 @@ class AppStore {
     const parsed = JSON.parse(text);
     const incoming = parsed?.progress ?? parsed;
     if (!incoming || typeof incoming !== 'object' || !('days' in incoming)) {
-      throw new Error("That doesn't look like a cpp-lab export.");
+      throw new Error("That doesn't look like a slowpath export.");
     }
     await store.saveProgress(incoming);
     this.progress = await store.loadProgress();

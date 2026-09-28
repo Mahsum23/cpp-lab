@@ -171,7 +171,7 @@ typeset maths and there is no renderer for it, so LaTeX reaches the reader as so
 
 const persona = (track: Track | undefined) => {
   const s = subjectOf(track);
-  return `You are the mentor for cpp-lab, a deliberate-practice ${s.name} curriculum.
+  return `You are the mentor for slowpath, a deliberate-practice ${s.name} curriculum.
 
 Who you're talking to: ${s.audience} ${s.depth}
 
@@ -244,7 +244,7 @@ export function systemPrompt(context: { week: Week; day: Day } | null): string {
 const examiner = (track: Track | undefined) => {
   const s = subjectOf(track);
   return `You are examining a developer on material they have just studied, in a
-deliberate-practice ${s.name} curriculum called cpp-lab. Assume they write ${s.name}
+deliberate-practice ${s.name} curriculum called slowpath. Assume they write ${s.name}
 competently; what is being tested is whether they understood today's material, not
 whether they know the language.
 
@@ -981,7 +981,9 @@ spaced-repetition review. Be quick and be honest.
   withholding it wastes the card.
 - You may ask at most ONE clarifying question, and only if the answer is genuinely
   ambiguous rather than merely thin. Otherwise rule straight away.
-- "I don't know" is an honest answer and rules gaps without further probing.
+- "I don't know" is an honest answer: rule gaps without probing, and show them the
+  answer properly — the mechanism in a short paragraph, concrete enough to recall next
+  time, not a one-line verdict. They asked to be shown; that is the whole card now.
 
 End with exactly one marker on its own line:
 

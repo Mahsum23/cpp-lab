@@ -9,6 +9,8 @@ import {
   type Week,
 } from './types';
 
+// The project's old name. It is the key everything on this device is stored under, so
+// renaming it would start every existing install from empty.
 const DB_NAME = 'cpp-lab';
 const DB_VERSION = 2;
 const KV = 'kv';

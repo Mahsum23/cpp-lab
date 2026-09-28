@@ -1,9 +1,9 @@
 {
-  "name": "cpp-lab-app",
+  "name": "slowpath-app",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "cpp-lab \u2014 installable PWA that delivers the C++ curriculum one day at a time.",
+  "description": "slowpath \u2014 installable PWA that delivers the curriculum one day at a time.",
   "scripts": {
     "dev": "vite",
     "build": "npm run content && vite build",

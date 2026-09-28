@@ -353,6 +353,14 @@ that cannot end. When writing a `teachBack` question, make it something he can g
 in an interesting way: "what is the backlog a queue of, and who puts things in it" beats
 "explain listen()".
 
+**"No idea — show me" in the review deck must show something.** It used to mark the card
+missed and deal the next one with no explanation, which turns the most teachable moment
+in the deck into a dead end. For a forged challenge, and for a teach-back question whose
+day he has already passed, it asks the revision grader for the answer and shows it before
+moving on. A teach-back not yet passed on its day is the one exception, because revealing
+it would hand over the examiner's answer: there the button reads "reread the lesson" and
+opens that day's theory instead. It still counts as a miss either way.
+
 ## Every day has two halves, and the phone half is not optional
 
 A task needs a machine, and not having one is the most common reason a day stalls
@@ -406,6 +414,16 @@ written C++..." so a reader who hasn't still follows; never assume any particula
 language. Everything is verified against a real toolchain (1.24 at time of writing), and
 every exercise stays a single file run with `go run` — no modules, no dependencies, no
 services.
+
+## The name is slowpath; the storage keys still say cpp-lab
+
+The project was renamed from cpp-lab to slowpath once it grew past C++ (the name is from
+the prime directive: understanding is the fast path, writing the solution stays slow).
+Everything a person *sees* says slowpath. Three identifiers deliberately do not, and must
+never be "tidied up": the IndexedDB name in `storage.ts`, the gist filename and `app`
+marker in `cloud.ts` (also what `tools/lab.mjs` searches for), and the export marker in
+`app.svelte.ts`. They are how existing installs find their data and how every device finds
+the same gist; renaming any of them silently starts people from empty.
 
 ## Curriculum
 

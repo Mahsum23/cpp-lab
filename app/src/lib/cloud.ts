@@ -22,8 +22,12 @@
 import { SCHEMA_VERSION, type Progress } from './types';
 
 const API = 'https://api.github.com';
+// The project was called cpp-lab before it was slowpath. The filename and the `app`
+// marker below are how an existing gist is found and recognised — on every device, and
+// by ./lab — so they keep the old name. Renaming them would orphan everyone's progress.
+// Only the human-readable description follows the new name.
 const FILENAME = 'cpp-lab-progress.json';
-const DESCRIPTION = 'cpp-lab — learning progress (written by the app; safe to delete, not to hand-edit)';
+const DESCRIPTION = 'slowpath — learning progress (written by the app; safe to delete, not to hand-edit)';
 
 export interface CloudPayload {
   app: 'cpp-lab';
@@ -167,7 +171,7 @@ export async function pull(token: string, gistId: string): Promise<CloudPayload 
     throw new CloudError("The gist doesn't contain valid JSON any more — it's been hand-edited.");
   }
   if (parsed?.app !== 'cpp-lab' || !parsed.progress?.days) {
-    throw new CloudError("That gist isn't a cpp-lab backup.");
+    throw new CloudError("That gist isn't a slowpath backup.");
   }
   if (parsed.schemaVersion > SCHEMA_VERSION) {
     throw new CloudError('The cloud copy was written by a newer version of the app. Update this device first.');

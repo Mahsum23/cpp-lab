@@ -61,7 +61,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `cpp-lab-progress-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `slowpath-progress-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -394,7 +394,7 @@
   </section>
 
   <p class="version">
-    cpp-lab · build {update.build} · content
+    slowpath · build {update.build} · content
     {app.curriculum?.generatedAt?.slice(0, 10) ?? 'not loaded'}
     {#if app.sync.status === 'offline'}· offline{/if}
   </p>

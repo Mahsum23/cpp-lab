@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 
-// GitHub Pages project sites live under /<repo>/. Set APP_BASE=/cpp-lab/ when
+// GitHub Pages project sites live under /<repo>/. Set APP_BASE=/slowpath/ when
 // building for one; the default suits a root deploy (Vercel, Netlify, user Pages).
 const base = process.env.APP_BASE ?? '/';
 
@@ -28,8 +28,8 @@ export default defineConfig({
       includeAssets: ['icons/apple-touch-icon.png', 'icons/favicon.svg'],
       manifest: {
         id: base,
-        name: 'cpp-lab',
-        short_name: 'cpp-lab',
+        name: 'slowpath',
+        short_name: 'slowpath',
         description: 'One C++ session a day. Theory, quiz, task — 25 minutes.',
         start_url: base,
         scope: base,

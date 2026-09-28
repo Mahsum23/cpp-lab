@@ -1,4 +1,4 @@
-# cpp-lab — Learning App Design Doc
+# slowpath — Learning App Design Doc
 
 **Status:** v2 built (2026-09-02) — cloud sync + mentor chat (Gemini free tier or
 Claude). Code in `app/`, how-to in `app/README.md`.
@@ -74,7 +74,7 @@ The default screen. Answers "what am I doing right now" in under a second.
 
 ```
 ┌─────────────────────────────┐
-│  🔥 4        cpp-lab     ⚙︎  │   streak · title · settings
+│  🔥 4        slowpath    ⚙︎  │   streak · title · settings
 │                             │
 │   Week 1 · Raw Sockets      │
 │   ╭───────────────────────╮ │
@@ -297,7 +297,7 @@ The index the app checks for what weeks exist.
 ```json
 {
   "schemaVersion": 1,
-  "title": "cpp-lab",
+  "title": "slowpath",
   "weeks": [
     {
       "id": "week-01",
