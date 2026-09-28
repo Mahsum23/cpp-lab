@@ -1,6 +1,6 @@
 import { app } from './app.svelte';
 import * as store from './storage';
-import { examinerPrompt, ModelGoneError, streamReply, systemPrompt, type ChatMessage } from './mentor';
+import { examinerPrompt, ModelGoneError, streamReply, systemPrompt, type ChatMessage, type MentorFocus } from './mentor';
 import type { Day, Week } from './types';
 
 /** One thread per day, plus a general one for questions that aren't about a lesson. */
@@ -11,7 +11,7 @@ interface StoredThread {
   updatedAt: string;
 }
 
-type DayContext = { week: Week; day: Day } | null;
+type DayContext = { week: Week; day: Day; focus?: MentorFocus | null } | null;
 
 class ChatStore {
   /**
