@@ -243,10 +243,26 @@ export function systemPrompt(context: { week: Week; day: Day; focus?: MentorFocu
   if (rest.length) parts.push(`\nStill ahead this week: ${rest.join('; ')}.`);
   if (context.focus) {
     parts.push(
-      `\n---\n\nWHAT THEY ARE LOOKING AT: they are in the review deck, not the lesson, and have just answered this card. Their questions are about this card unless they say otherwise — do not ask how the day's task is going.\n\n${context.focus.brief}`,
+      `\n---\n\nWHAT THEY ARE LOOKING AT: they are in the review deck, not the lesson, and have just answered a card. Every message they send arrives with that card attached, above their words, and their question is about it unless they say otherwise.
+- You are both looking at the same screen. Speak to it directly — "you picked…", "the key says…" — and never describe the situation back to them ("you're looking at the review card…"). Start with the answer.
+- Do not ask how the day's task is going.
+- Ground what you say in the card's key and in the day's material above. Do not introduce catalog tables, view names, functions, flags or figures that are not in them; if you have to go beyond the material, say that you are.`,
     );
   }
   return parts.join('\n');
+}
+
+/**
+ * Attach the card to a message on its way to the model — not to what is stored or shown.
+ *
+ * The system prompt is a long way from the question by the time a thread has history,
+ * and "why is that the answer?" means nothing without something for "that" to point at.
+ * Putting the card directly above the words it is about keeps the two together however
+ * long the conversation gets.
+ */
+export function withFocus(text: string, focus: MentorFocus | null | undefined): string {
+  if (!focus) return text;
+  return `[The card on screen — we are both looking at it]\n${focus.brief}\n\n[My message about it]\n${text}`;
 }
 
 /**

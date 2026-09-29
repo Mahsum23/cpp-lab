@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, looksComplete, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
+const { streamReply, looksComplete, withFocus, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -275,9 +275,16 @@ ok('no-context prompt still carries the directive', /prime directive/i.test(syst
 
 // Asked from the review deck, the mentor has to know which card is on screen — without
 // it, a question about a quiz card got "how's the day's task going?" back.
-const onCard = systemPrompt({ week, day, focus: { label: 'From the quiz', question: 'Q?', outcome: [], brief: 'CARD-BRIEF [THEIR PICK]' } });
-ok('a review question carries the card it is about', onCard.includes('CARD-BRIEF [THEIR PICK]'));
+const focus = { label: 'From the quiz', question: 'Q?', outcome: [], brief: 'CARD-BRIEF [THEIR PICK]' };
+const onCard = systemPrompt({ week, day, focus });
 ok('and says it is the review deck, not the lesson', /review deck, not the lesson/.test(onCard));
+ok('tells the mentor to answer, not to narrate the setup back', /never describe the situation back/.test(onCard));
+ok('and to stay inside the material rather than invent catalog names', /Do not introduce catalog tables/.test(onCard));
+// The card itself travels with the message — right above the words it is about.
+const wrapped = withFocus('Why is that the answer?', focus);
+ok('the card is attached to the message it is asked with', wrapped.includes('CARD-BRIEF [THEIR PICK]') && wrapped.endsWith('Why is that the answer?'));
+ok('and sits above the question, not after it', wrapped.indexOf('CARD-BRIEF') < wrapped.indexOf('Why is that'));
+ok('no card, no change to the message', withFocus('hi', null) === 'hi' && withFocus('hi', undefined) === 'hi');
 ok('the lesson prompt is unchanged without one', !/review deck/.test(prompt));
 ok('the directive still travels with a card', /Never write the implementation for the day's task/.test(onCard));
 

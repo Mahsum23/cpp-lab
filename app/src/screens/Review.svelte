@@ -562,6 +562,7 @@
     onclose={() => (asking = false)}
     {suggestions}
     {focus}
+    thread={card ? `review:${card.id}` : undefined}
   />
 {/if}
 
