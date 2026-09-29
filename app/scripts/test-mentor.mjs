@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, looksComplete, withFocus, hasHint, stripMarkers, reviewStanding, reviewGraderPrompt, MAX_HINTS, MAX_REVIEW_MESSAGES, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
+const { streamReply, looksComplete, withFocus, hasHint, stripMarkers, reviewStanding, reviewGraderPrompt, withStanding, MAX_HINTS, MAX_REVIEW_MESSAGES, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -322,6 +322,32 @@ ok('once both are spent it tells the model to answer', /Both hints are used: if 
 const final = reviewGraderPrompt(ctx, 'Q', [said('a'), marker('?'), said('b'), marker('?'), said('c'), marker('?'), said('d')]);
 ok('on the last message it must finish', /This is their last message: finish now/.test(final));
 ok('with no history there is no state line', !/WHERE THE CONVERSATION STANDS/.test(reviewGraderPrompt(ctx, 'Q')));
+
+// On the last message the model must end the card. Told only at the end of a 15,000
+// character system prompt, it still finished with "Try again — what's the full statement?"
+// on a card that was already closed, so the note rides on the message itself.
+console.log('\n— the last message says so, next to the words —');
+const four = [said('a'), marker('?'), said('b'), marker('?'), said('c'), marker('?'), said('the full statement')];
+const noted = withStanding(four);
+ok('the last message carries the note above their words', /^\[From the app, not from them: this is their message 4 of 4, the LAST one/.test(noted.at(-1).content) && noted.at(-1).content.endsWith('the full statement'));
+ok('which forbids another question and "try again"', /Do not ask another question and do not say "try again"/.test(noted.at(-1).content));
+ok('and says to give the answer if they have not got it', /give the answer now/.test(noted.at(-1).content));
+ok('earlier turns are untouched', noted.slice(0, -1).every((m, i) => m.content === four[i].content));
+ok('the original is not mutated', four.at(-1).content === 'the full statement');
+ok('the first message gets no note', withStanding([said('hello')]).at(-1).content === 'hello');
+ok('a middle message gets no note', withStanding([said('a'), marker('?'), said('b')]).at(-1).content === 'b');
+const stuck = withStanding([said('idk'), marker('h1\n[[HINT]]'), said('idk'), marker('h2\n[[HINT]]'), said('idk')]);
+ok('with both hints spent it says not to hint again', /both hints are already used/.test(stuck.at(-1).content) && stuck.at(-1).content.endsWith('idk'));
+ok('and does not claim it is the last message', !/LAST one/.test(stuck.at(-1).content));
+ok('the grader prompt itself forbids a question on the last message', /A question on a last message is a bug/.test(reviewGraderPrompt(ctx, 'Q', [said('x')])));
+// On that turn it is a different, single-purpose prompt: close the card.
+const closing = reviewGraderPrompt(ctx, 'THE-QUESTION', four);
+ok('the last message gets a prompt whose only job is to close the card', /You are closing a spaced-repetition review card/.test(closing) && closing.includes('THE-QUESTION'));
+ok('which bans questions and "try again" outright', /cannot ask a question/.test(closing) && /no "try again"/.test(closing));
+ok('and carries no ladder to tempt another probe', !/at most two hints/.test(closing) && !/ask ONE\s+focused follow-up/.test(closing));
+ok('but still rules, and never with a hint marker', /\[\[VERDICT: solid\]\] or \[\[VERDICT: gaps\]\]/.test(closing) && /Never\s+a hint marker/.test(closing));
+ok('earlier messages still get the full ladder', /at most two hints/.test(reviewGraderPrompt(ctx, 'Q', four.slice(0, 5))) && !/closing a spaced-repetition/.test(reviewGraderPrompt(ctx, 'Q', four.slice(0, 5))));
+ok('and it still stays inside the material', /Do not introduce catalog tables/.test(closing));
 
 // --- the examiner ----------------------------------------------------------
 

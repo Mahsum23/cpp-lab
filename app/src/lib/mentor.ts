@@ -1069,6 +1069,11 @@ B. They do not know: "I don't know", "no idea", "I give up", "skip", or plainly 
 C. They ask outright to be told ("just tell me", "show me the answer"). Give the answer as
    in B and rule gaps. Do not make them earn it.
 
+THE LAST MESSAGE. The app tells you when a message is their last on this card. Then the card
+ends with your reply: no follow-up question, and never "try again" or any other invitation
+to answer once more — they cannot. If they have not got it, give the answer properly and rule
+gaps; if they have, say so and rule. A question on a last message is a bug.
+
 Whatever you say must come from the material below. Do not introduce catalog tables, view
 names, functions, flags or figures that are not in it; if you have to go beyond it, say so.
 
@@ -1092,6 +1097,57 @@ export function forgePrompt(context: { week: Week; day: Day }): string {
 }
 
 /**
+ * The same job on the one turn that cannot continue.
+ *
+ * The full prompt above is about probing, hinting and deciding which — exactly what tempts
+ * a model into one more question. On the last message none of that applies, so it gets a
+ * prompt with a single job instead: close the card.
+ */
+const REVIEW_FINAL = `You are closing a spaced-repetition review card. Their newest message is
+the LAST message on it — the card ends with your reply. So you cannot ask a question, and
+you must never invite another try: no "try again", no "have another go", no "what would you
+say?". Speak in statements.
+
+Read their newest message in the light of the conversation above it.
+- If it is right, or shows they have it: say so in a sentence and rule solid. If they only
+  got there after a hint, rule gaps instead — it should come back sooner — and say so kindly.
+- If it is wrong, thin, or they still do not know: say kindly, in a sentence, what was
+  missing, then give the answer properly — the mechanism, in a short paragraph concrete
+  enough to recall next time — and rule gaps.
+
+Whatever you say must come from the material below. Do not introduce catalog tables, view
+names, functions, flags or figures that are not in it; if you have to go beyond it, say so.
+
+End with exactly one marker on its own line: [[VERDICT: solid]] or [[VERDICT: gaps]]. Never
+a hint marker.
+
+${NO_LATEX}`;
+
+/**
+ * Put the app's own note about where the conversation stands directly on their newest
+ * message, only when it changes what you must do: the last message, or hints all spent.
+ *
+ * The state line at the end of the system prompt was not enough. It sits after ~15,000
+ * characters of lesson, and a model told "this is their last message" there still ended
+ * with "Try again — what's the full statement?" on a card that was already closed. Next to
+ * the words it applies to, it is not missed. Returns a copy; what is stored and shown is
+ * untouched.
+ */
+export function withStanding(history: ChatMessage[]): ChatMessage[] {
+  const { said, last, hintsUsedUp } = reviewStanding(history);
+  const note = last
+    ? `From the app, not from them: this is their message ${said} of ${MAX_REVIEW_MESSAGES}, the LAST one. The card ends with your reply. Do not ask another question and do not say "try again" — they cannot. If they have not got it, give the answer now (the mechanism, in a short paragraph) and rule gaps. If they have, say so and rule.`
+    : hintsUsedUp
+      ? 'From the app, not from them: both hints are already used. If they are still stuck, do not hint again — give the answer now and rule gaps.'
+      : null;
+  if (!note) return history;
+  const out = history.map((m) => ({ ...m }));
+  const newest = out.at(-1);
+  if (newest?.role === 'user') newest.content = `[${note}]\n\n${newest.content}`;
+  return out;
+}
+
+/**
  * System prompt for the review conversation about `challenge`.
  *
  * `history` is the exchange so far ending with their newest message. It is used only to
@@ -1112,7 +1168,8 @@ export function reviewGraderPrompt(
   const standing = history.length
     ? `\n\nWHERE THE CONVERSATION STANDS: this is their message ${said} of at most ${MAX_REVIEW_MESSAGES}. Hints given so far: ${hints} of ${MAX_HINTS}.${advice}`
     : '';
-  return `${REVIEW_GRADER}\n\n---\n\n${materialFor(context)}\n\nThe challenge they were asked:\n\n${challenge}${standing}`;
+  const base = last ? REVIEW_FINAL : REVIEW_GRADER;
+  return `${base}\n\n---\n\n${materialFor(context)}\n\nThe challenge they were asked:\n\n${challenge}${standing}`;
 }
 
 /** Run a stream to completion. The deck wants the whole challenge, not a typewriter. */

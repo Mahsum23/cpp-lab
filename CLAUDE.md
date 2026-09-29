@@ -369,6 +369,16 @@ not the model — counts hints (`[[HINT]]` marker) and messages and tells the mo
 stands each turn, and the fourth message from him always ends the card (a ruling, or a
 forced miss if the model forgets), so a card can never trap him.
 
+That last message is where a model kept failing: told "this is their last message" only in
+the system prompt, it still ended with "Try again — what's the full statement?" on a card
+that was already closed. So on that turn (a) the note is attached to the message itself, as
+with the card in `withFocus`; (b) the model is given a different, single-purpose prompt
+(`REVIEW_FINAL`: statements only, close the card) instead of the ladder-and-probes one, since
+that is what tempts another question; (c) the screen says "Last reply on this card" one
+message ahead; and (d) if it asks anyway, the app appends a note saying the card is over.
+Any instruction that must be obeyed on one particular turn goes next to that turn's message,
+not at the end of a long system prompt.
+
 This does not loosen the lesson's own teach-back step. That is the examiner's, it still
 never gives a hint or an answer, and it is the only thing that can close the day's ring
 (`TeachBack.svelte`). The review deck never sets `teachBackDone`, which is why it is safe
