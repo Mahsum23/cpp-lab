@@ -123,11 +123,17 @@
       {/each}
     </ul>
 
-    {#if exam.error}
+    {#if exam.error || exam.unanswered}
       <div class="err">
-        <p>{exam.error}</p>
-        {#if exam.messages.at(-1)?.role === 'user'}
-          <button class="link" onclick={() => void exam.retry()}>Try again</button>
+        <p>
+          {exam.error ??
+            'The examiner never answered your last message — the request failed, or was cut short before a reply arrived. Your answer is saved.'}
+        </p>
+        {#if exam.unanswered}
+          <div class="pair">
+            <button class="link" onclick={() => void exam.retry()}>Send it again</button>
+            <button class="link" onclick={() => void exam.clear()}>Start over</button>
+          </div>
         {/if}
       </div>
     {/if}
@@ -147,6 +153,9 @@
       </div>
     {/if}
 
+    <!-- Not while a reply is owed: "answer the follow-up" would be about a question
+         that was never asked. The card above is the way forward. -->
+    {#if !exam.unanswered}
     <div class="composer">
       <textarea
         bind:this={box}
@@ -171,6 +180,7 @@
         {/if}
       </div>
     </div>
+    {/if}
   {/if}
 
   <div class="finish">

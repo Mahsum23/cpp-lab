@@ -384,6 +384,14 @@ never gives a hint or an answer, and it is the only thing that can close the day
 (`TeachBack.svelte`). The review deck never sets `teachBackDone`, which is why it is safe
 for the deck to help; keep it that way.
 
+**A reply that never arrived must not look like a question that is waiting.** A failed
+request drops the empty reply but keeps what he said, so after a reload the thread ends on
+his own message. The teach-back step took that for "the examiner asked a follow-up" and
+offered a box that said "Answer the follow-up…" — about a question nobody had asked, with no
+way to resend. `error` lives in memory and is gone after a reload; `ChatStore.unanswered`
+is derived from the thread and is not. Any screen that shows a conversation says "no reply
+came back" and offers to send it again when `unanswered` is true, and hides its reply box.
+
 ## Every day has two halves, and the phone half is not optional
 
 A task needs a machine, and not having one is the most common reason a day stalls
