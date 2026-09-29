@@ -12,19 +12,20 @@
    * Nothing here is a gate. You can walk away mid-card and the ones you cleared stay
    * cleared, because a review system you can't quit is one you start avoiding.
    */
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { app } from '../lib/app.svelte';
-  import { router, sessionPath } from '../lib/router.svelte';
+  import { router } from '../lib/router.svelte';
   import Button from '../components/Button.svelte';
   import Markdown from '../components/Markdown.svelte';
   import { highlight } from '../lib/markdown';
   import CodeArea from '../components/CodeArea.svelte';
+  import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
   import MentorSheet from '../components/MentorSheet.svelte';
   import { codeBlocksFor, isDue, pickNext, type CardRef } from '../lib/review';
   import { today } from '../lib/date';
   import {
-    collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripVerdict,
-    examinerPrompt, ModelGoneError, type ChatMessage, type MentorFocus,
+    collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripMarkers,
+    MAX_REVIEW_MESSAGES, ModelGoneError, type ChatMessage, type MentorFocus,
   } from '../lib/mentor';
   import { TRACKS, type Day, type QuizQuestion, type Track, type Week } from '../lib/types';
 
@@ -61,7 +62,9 @@
   let challenge = $state('');
   let answer = $state('');
   let codeMode = $state(false);
-  let reply = $state('');
+  /** The exchange about this card: what they said, and what came back (markers and all). */
+  let turns = $state<ChatMessage[]>([]);
+  let area = $state<ReturnType<typeof CodeArea> | null>(null);
   let streaming = $state(false);
   let verdict = $state<'solid' | 'gaps' | null>(null);
 
@@ -123,8 +126,10 @@
         outcome: [verdict === 'solid' ? 'Marked solid ✓' : verdict === 'gaps' ? 'Marked: gaps ✗' : ''].filter(Boolean),
         brief:
           `A ${card.kind === 'forge' ? 'recall challenge' : 'teach-back question'}:\n\n${prompt}\n\n` +
-          `Their answer: ${answer.trim() || '(none — they asked to be shown the answer)'}\n\n` +
-          `How it was marked:\n${stripVerdict(reply)}`,
+          `The conversation about it so far:\n\n` +
+          (turns
+            .map((t) => `${t.role === 'user' ? 'They' : 'The marker'}: ${stripMarkers(t.content)}`)
+            .join('\n\n') || '(nothing yet)'),
       };
     }
     if (card.kind === 'parsons' && solution.length) {
@@ -176,7 +181,7 @@
     challenge = '';
     answer = '';
     codeMode = false;
-    reply = '';
+    turns = [];
     verdict = null;
     error = null;
   }
@@ -274,55 +279,41 @@
   );
 
   /**
-   * Whether "No idea — show me" may reveal the answer.
+   * Say something to the marker. Every message goes to the same conversation, so a
+   * follow-up question is answered in place rather than by overwriting the last answer.
    *
-   * A forged challenge is pure revision, so yes. A teach-back question is also what the
-   * day's examiner grades, and the examiner never supplies the explanation it is asking
-   * for — so its answer is only shown once that day's teach-back has been passed.
-   * Before then, the honest help is the lesson itself, not the answer to the exam.
+   * `preset` is a message that is not typed: "I don't know" is an ordinary message that
+   * starts the hint ladder, not a separate path that skips to the answer.
    */
-  const canReveal = $derived(
-    card?.kind === 'forge' ||
-      (card?.kind === 'explain' && !!app.progress.days[card.dayId]?.teachBackDone),
-  );
-
-  /** A miss, and straight back to the material rather than to the answer. */
-  async function backToLesson() {
-    if (!context) return;
-    const { week, day } = context;
-    await settle('again');
-    router.go(sessionPath(week.id, day.id));
-  }
-
-  /**
-   * @param showMe "No idea — show me": ask for the answer instead of grading one. Always
-   * graded by the revision grader, which gives the correction, never by the examiner.
-   */
-  async function submit(showMe = false) {
-    const text = showMe ? "I don't know. Show me the answer." : answer.trim();
+  async function submit(preset?: string) {
+    const raw = (preset ?? answer).trim();
     const key = app.mentorKey;
-    if (!text || !key || !context || streaming) return;
+    if (!raw || !key || !context || streaming || verdict) return;
+    const text = preset === undefined && codeMode && !hasFence(raw) ? asCodeBlock(raw, lang) : raw;
+
     streaming = true;
     error = null;
-    reply = '';
-    const history: ChatMessage[] = [{ role: 'user', content: text }];
+    const before = $state.snapshot(turns) as ChatMessage[];
+    const sent: ChatMessage[] = [...before, { role: 'user', content: text }];
+    const at = sent.length;
+    turns = [...sent, { role: 'assistant', content: '' }];
+    answer = '';
+    codeMode = false;
     try {
       for await (const chunk of streamReply({
         provider: app.mentorProvider,
         key,
         model: app.progress.settings.mentorModel,
         alternates: app.fallbackModels,
-        system:
-          card?.kind === 'forge' || showMe
-            ? reviewGraderPrompt(context, prompt)
-            : examinerPrompt(context),
-        messages: history,
+        system: reviewGraderPrompt(context, prompt, sent),
+        messages: sent,
       })) {
-        reply += chunk;
+        turns[at].content += chunk;
       }
-      // Asking to be shown is a miss by definition, whatever the marker says, and the
-      // card must be closed either way so "Next card" appears under the explanation.
-      const ruling = showMe ? 'gaps' : parseVerdict(reply);
+      // The last allowed message always ends the card, whatever the model did: a
+      // conversation with no ruling is a card you can never leave.
+      const lastAllowed = sent.filter((m) => m.role === 'user').length >= MAX_REVIEW_MESSAGES;
+      const ruling = parseVerdict(turns[at].content) ?? (lastAllowed ? 'gaps' : null);
       if (ruling) {
         verdict = ruling;
         await settle(ruling === 'solid' ? 'good' : 'again');
@@ -330,8 +321,15 @@
     } catch (err) {
       if (err instanceof ModelGoneError) await app.retireModel(app.progress.settings.mentorModel);
       error = err instanceof Error ? err.message : 'The mentor is unavailable.';
+      // Nothing came of it: take the exchange back and give them their words again.
+      turns = before;
+      answer = raw;
     } finally {
       streaming = false;
+    }
+    if (!verdict) {
+      await tick();
+      area?.focus();
     }
   }
 
@@ -489,23 +487,34 @@
         {/if}
       </div>
 
+      {#each turns as turn, i}
+        {#if turn.role === 'user'}
+          {@const shape = shapeOf(turn.content)}
+          <div class="mine">
+            <div class="bubble" class:has-code={shape === 'code'} class:mixed={shape === 'mixed'}>
+              {#if shape === 'text'}{turn.content}{:else}<Markdown source={turn.content} />{/if}
+            </div>
+          </div>
+        {:else}
+          {@const ruled = verdict !== null && i === turns.length - 1}
+          <div class="card grade" class:solid={ruled && verdict === 'solid'} class:gaps={ruled && verdict === 'gaps'}>
+            <Markdown source={stripMarkers(turn.content)} />
+            {#if streaming && i === turns.length - 1}<span class="caret"></span>{/if}
+          </div>
+        {/if}
+      {/each}
+
       {#if prompt && !verdict}
         <div class="answer">
           <CodeArea
+            bind:this={area}
             bind:value={answer}
             bind:codeMode
-            placeholder="From memory — no looking it up…"
-            ariaLabel="Your answer"
+            placeholder={turns.length ? 'Reply to the mentor…' : 'From memory — no looking it up…'}
+            ariaLabel={turns.length ? 'Your reply' : 'Your answer'}
             maxHeight={180}
             onsubmit={() => void submit()}
           />
-        </div>
-      {/if}
-
-      {#if reply}
-        <div class="card grade" class:solid={verdict === 'solid'} class:gaps={verdict === 'gaps'}>
-          <Markdown source={stripVerdict(reply)} />
-          {#if streaming}<span class="caret"></span>{/if}
         </div>
       {/if}
     {/if}
@@ -528,17 +537,11 @@
         <Button variant="ghost" size="sm" onclick={() => void skip()}>Skip</Button>
       {:else if graded && prompt}
         <Button onclick={() => void submit()} disabled={!answer.trim() || streaming}>
-          {streaming ? 'Marking…' : 'Submit'}
+          {streaming ? 'Thinking…' : turns.length ? 'Reply' : 'Submit'}
         </Button>
-        {#if canReveal}
-          <Button variant="ghost" size="sm" disabled={streaming} onclick={() => void submit(true)}>
-            No idea — show me
-          </Button>
-        {:else}
-          <Button variant="ghost" size="sm" disabled={streaming} onclick={() => void backToLesson()}>
-            No idea — reread the lesson
-          </Button>
-        {/if}
+        <Button variant="ghost" size="sm" disabled={streaming} onclick={() => void submit("I don't know.")}>
+          I don't know
+        </Button>
       {/if}
     </div>
   {/if}
@@ -833,6 +836,41 @@
   .answer {
     display: flex;
     margin-bottom: 14px;
+  }
+
+  /* What you said, as a chat bubble: right-aligned, so the exchange reads as a
+     conversation and the mentor's replies stay in the cards. */
+  .mine {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 12px;
+  }
+
+  .bubble {
+    background: var(--accent-soft);
+    border-radius: 15px 15px 4px 15px;
+    padding: 9px 12px;
+    font-size: 15px;
+    max-width: 88%;
+    white-space: pre-wrap;
+  }
+
+  .bubble.has-code {
+    max-width: 100%;
+    width: 100%;
+    background: transparent;
+    padding: 0;
+  }
+
+  .bubble.mixed {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .grade {
+    margin-bottom: 12px;
   }
 
   .grade.solid {

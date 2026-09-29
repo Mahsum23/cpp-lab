@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, looksComplete, withFocus, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
+const { streamReply, looksComplete, withFocus, hasHint, stripMarkers, reviewStanding, reviewGraderPrompt, MAX_HINTS, MAX_REVIEW_MESSAGES, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -287,6 +287,41 @@ ok('and sits above the question, not after it', wrapped.indexOf('CARD-BRIEF') < 
 ok('no card, no change to the message', withFocus('hi', null) === 'hi' && withFocus('hi', undefined) === 'hi');
 ok('the lesson prompt is unchanged without one', !/review deck/.test(prompt));
 ok('the directive still travels with a card', /Never write the implementation for the day's task/.test(onCard));
+
+// --- the review conversation ------------------------------------------------
+
+console.log('\n— the review conversation: hints, then the answer —');
+ok('a hint marker is recognised', hasHint('Think about the sort order.\n[[HINT]]') && !hasHint('no marker here'));
+ok('a hint is not a ruling', parseVerdict('Think about it.\n[[HINT]]') === null);
+ok('both markers are stripped for display', stripMarkers('Good.\n[[VERDICT: solid]]') === 'Good.' && stripMarkers('A nudge.\n[[HINT]]') === 'A nudge.');
+ok('the ladder is two hints and a handful of messages', MAX_HINTS === 2 && MAX_REVIEW_MESSAGES === 4);
+
+const said = (content) => ({ role: 'user', content });
+const marker = (content) => ({ role: 'assistant', content });
+let st = reviewStanding([said("I don't know.")]);
+ok('first message, no hints yet', st.said === 1 && st.hints === 0 && !st.last && !st.hintsUsedUp, JSON.stringify(st));
+st = reviewStanding([said("I don't know."), marker('Try thinking about sort order.\n[[HINT]]'), said('still nothing')]);
+ok('one hint spent, second message', st.said === 2 && st.hints === 1 && !st.hintsUsedUp, JSON.stringify(st));
+st = reviewStanding([said('idk'), marker('h1\n[[HINT]]'), said('idk'), marker('h2\n[[HINT]]'), said('idk')]);
+ok('two hints spent means the next stuck reply gets the answer', st.hints === 2 && st.hintsUsedUp && st.said === 3, JSON.stringify(st));
+st = reviewStanding([said('a'), marker('probe?'), said('b'), marker('probe?'), said('c'), marker('probe?'), said('d')]);
+ok('a follow-up question is not a hint', st.hints === 0 && st.said === 4 && st.last, JSON.stringify(st));
+
+const ctx = { week, day: { ...day, teachBack: 'Explain X.' } };
+const first = reviewGraderPrompt(ctx, 'THE-QUESTION', [said("I don't know.")]);
+ok('the challenge is in the prompt', first.includes('THE-QUESTION'));
+ok('it describes the two-hint ladder before an answer', /at most two hints/.test(first) && /Once both hints are used/.test(first));
+ok('an explicit request for the answer is honoured', /just tell me/.test(first));
+ok('a card they only got with a hint still comes back sooner', /only got there\s+after you gave a hint, rule gaps/.test(first));
+ok('and stays inside the material', /Do not introduce catalog tables/.test(first));
+ok('message 1 of 4, no hints, no extra pressure', /message 1 of at most 4\. Hints given so far: 0 of 2\.$/.test(first), first.slice(-120));
+const mid = reviewGraderPrompt(ctx, 'Q', [said('idk'), marker('h1\n[[HINT]]'), said('idk')]);
+ok('after one hint it says so', /message 2 of at most 4\. Hints given so far: 1 of 2\.$/.test(mid));
+const spent = reviewGraderPrompt(ctx, 'Q', [said('idk'), marker('h1\n[[HINT]]'), said('idk'), marker('h2\n[[HINT]]'), said('idk')]);
+ok('once both are spent it tells the model to answer', /Both hints are used: if they are still stuck, give the answer/.test(spent));
+const final = reviewGraderPrompt(ctx, 'Q', [said('a'), marker('?'), said('b'), marker('?'), said('c'), marker('?'), said('d')]);
+ok('on the last message it must finish', /This is their last message: finish now/.test(final));
+ok('with no history there is no state line', !/WHERE THE CONVERSATION STANDS/.test(reviewGraderPrompt(ctx, 'Q')));
 
 // --- the examiner ----------------------------------------------------------
 

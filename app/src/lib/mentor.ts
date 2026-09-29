@@ -342,6 +342,36 @@ export function stripVerdict(text: string): string {
 }
 
 /**
+ * A hint is not a ruling, so it needs a marker of its own: the app counts them to know
+ * when the hints are used up, rather than trusting the model to remember how many it gave.
+ */
+const HINT_RE = /\[\[HINT\]\]/gi;
+
+export function hasHint(text: string): boolean {
+  return new RegExp(HINT_RE.source, 'i').test(text);
+}
+
+/** Every marker taken out, for display. */
+export function stripMarkers(text: string): string {
+  return text.replace(VERDICT_RE, '').replace(HINT_RE, '').trimEnd();
+}
+
+/** Hints the review deck's mentor may give before it answers. */
+export const MAX_HINTS = 2;
+/** Messages from them in one card. A review card that can't end isn't finished on a phone. */
+export const MAX_REVIEW_MESSAGES = 4;
+
+/**
+ * Where a review conversation stands, counted from the transcript so it survives a model
+ * that would otherwise lose track. `history` ends with their newest message.
+ */
+export function reviewStanding(history: ChatMessage[]): { said: number; hints: number; last: boolean; hintsUsedUp: boolean } {
+  const said = history.filter((m) => m.role === 'user').length;
+  const hints = history.filter((m) => m.role === 'assistant' && hasHint(m.content)).length;
+  return { said, hints, last: said >= MAX_REVIEW_MESSAGES, hintsUsedUp: hints >= MAX_HINTS };
+}
+
+/**
  * System prompt for the teach-back. Carries the day's actual theory so the examiner
  * grades against what was actually taught rather than its own idea of the topic.
  */
@@ -1003,33 +1033,49 @@ ${NO_LATEX}`;
 };
 
 /**
- * Grades an answer to a challenge the model itself just wrote.
+ * Marks a review card — a challenge the model wrote, or the day's teach-back question —
+ * as a short conversation rather than a single verdict.
  *
- * Same contract as the examiner — at most a couple of probes, then a verdict — because
- * a review card that turns into a conversation is a review card that doesn't get done
- * on a phone in a queue.
+ * It has to end: a hint ladder of two, a handful of messages, then a ruling, because a
+ * card that can drag on isn't one anybody finishes on a phone in a queue. The lesson's own
+ * teach-back step is different and stays with the examiner, which never gives an answer or
+ * a hint: that step is what closes the day, and a day you were told the answer to hasn't
+ * been passed. Nothing here can close a day, so nothing here needs to withhold.
  */
-const REVIEW_GRADER = `You are grading one short recall answer, in the middle of a
-spaced-repetition review. Be quick and be honest.
+const REVIEW_GRADER = `You are marking a short recall answer in a spaced-repetition
+review, as a conversation. Be quick, warm and honest — a tutor, not a judge. You are given
+their newest message; the exchange so far is above it.
 
-- If the answer is right, say so in a sentence and rule immediately.
-- If it is wrong or vague, say exactly what was missed, in two sentences at most, and
-  give the right answer — this is revision, so the correction is the whole point and
-  withholding it wastes the card.
-- You may ask at most ONE clarifying question, and only if the answer is genuinely
-  ambiguous rather than merely thin. Otherwise rule straight away.
-- "I don't know" is an honest answer: rule gaps without probing, and show them the
-  answer properly — the mechanism in a short paragraph, concrete enough to recall next
-  time, not a one-line verdict. They asked to be shown; that is the whole card now.
+Decide which of these their newest message is.
 
-End with exactly one marker on its own line:
+A. A real attempt.
+   - Right: say so in a sentence and rule solid. The exception: if they only got there
+     after you gave a hint, rule gaps — it should come back sooner — and say so kindly.
+   - Wrong or thin: say in a sentence what is missing, without supplying it, then ask ONE
+     focused follow-up aimed at the weakest part. Do not fill the gap for them, and do not
+     ask several questions at once.
 
-[[VERDICT: solid]]
-or
-[[VERDICT: gaps]]
+B. They do not know: "I don't know", "no idea", "I give up", "skip", or plainly nothing to
+   offer.
+   - Be kind about it, then give a hint. A hint nudges towards the idea and never states
+     the answer. You may give at most two hints in the whole conversation: the first
+     gentle (name the area or idea to think about), the second sharper (narrow the
+     question, or give the first step of the reasoning). End a hint with [[HINT]] on its
+     own line. Do not rule on a hint.
+   - Once both hints are used and they are still stuck, give the answer properly — the
+     mechanism, in a short paragraph concrete enough to recall next time, not a one-line
+     verdict — and rule gaps.
 
-"solid" means they recalled it. "gaps" means they didn't, and it should come back
-sooner. Never emit the marker more than once.
+C. They ask outright to be told ("just tell me", "show me the answer"). Give the answer as
+   in B and rule gaps. Do not make them earn it.
+
+Whatever you say must come from the material below. Do not introduce catalog tables, view
+names, functions, flags or figures that are not in it; if you have to go beyond it, say so.
+
+End with at most one marker on its own line: [[VERDICT: solid]] or [[VERDICT: gaps]] when
+you rule, [[HINT]] when you give a hint, and none when you are asking a follow-up. Never
+two markers, and never a verdict on the same turn as a hint. "solid" means they recalled
+it unaided; "gaps" means they did not, and it should come back sooner.
 
 ${NO_LATEX}`;
 
@@ -1045,9 +1091,28 @@ export function forgePrompt(context: { week: Week; day: Day }): string {
   return `${forger(context.week.track)}\n\n---\n\n${materialFor(context)}`;
 }
 
-/** System prompt for grading an answer to `challenge`. */
-export function reviewGraderPrompt(context: { week: Week; day: Day }, challenge: string): string {
-  return `${REVIEW_GRADER}\n\n---\n\n${materialFor(context)}\n\nThe challenge they were asked:\n\n${challenge}`;
+/**
+ * System prompt for the review conversation about `challenge`.
+ *
+ * `history` is the exchange so far ending with their newest message. It is used only to
+ * tell the model where things stand — how many hints are spent, whether this is the last
+ * message — because a model asked to count its own hints will eventually miscount.
+ */
+export function reviewGraderPrompt(
+  context: { week: Week; day: Day },
+  challenge: string,
+  history: ChatMessage[] = [],
+): string {
+  const { said, hints, last, hintsUsedUp } = reviewStanding(history);
+  const advice = last
+    ? ' This is their last message: finish now. If they have not got it, give the answer, and rule.'
+    : hintsUsedUp
+      ? ' Both hints are used: if they are still stuck, give the answer and rule gaps.'
+      : '';
+  const standing = history.length
+    ? `\n\nWHERE THE CONVERSATION STANDS: this is their message ${said} of at most ${MAX_REVIEW_MESSAGES}. Hints given so far: ${hints} of ${MAX_HINTS}.${advice}`
+    : '';
+  return `${REVIEW_GRADER}\n\n---\n\n${materialFor(context)}\n\nThe challenge they were asked:\n\n${challenge}${standing}`;
 }
 
 /** Run a stream to completion. The deck wants the whole challenge, not a typewriter. */
