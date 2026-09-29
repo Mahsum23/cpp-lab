@@ -8,7 +8,9 @@
   import SelectionAsk from '../../components/SelectionAsk.svelte';
   import { today } from '../../lib/date';
   import Drill from '../../components/Drill.svelte';
-  import { TRACKS, type Track } from '../../lib/types';
+  import TaskCheck from '../../components/TaskCheck.svelte';
+  import type { MentorFocus } from '../../lib/mentor';
+  import { TRACKS, type ItemVerdict, type Track } from '../../lib/types';
 
   interface Props {
     day: Day;
@@ -51,6 +53,30 @@
     { text: 'What should I be checking the return value for here?' },
   ];
 
+  /** Set once the work has been checked, so questions about the review know what it said. */
+  let checkFocus = $state<MentorFocus | null>(null);
+
+  // Openers for someone asking about a review of their work. Like the ones above, none
+  // asks for the fix: the reviewer and the mentor both refuse to write it.
+  const reviewStarters = [
+    { text: 'Why is that item only partial, and what would I look at to fix it?' },
+    { text: 'Which single thing should I fix first?' },
+    { text: "I disagree with one of the verdicts. Here's why:", send: false },
+  ];
+
+  // What the reviewer said about each item, shown beside the tick you gave it. Only when
+  // the review lines up with the checklist as it stands now.
+  const verdicts = $derived(
+    dp.taskReview && task && dp.taskReview.items.length === task.checklist.length ? dp.taskReview.items : null,
+  );
+  const VERDICT_WORD: Record<ItemVerdict, string> = {
+    met: 'met', partial: 'partial', missing: 'missing', unclear: "can't tell",
+  };
+
+  /** The checklist is authored as light markdown: `code` and *emphasis*, nothing else. */
+  const itemHtml = (item: string) =>
+    item.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
   let notes = $state('');
   let hydrated = $state(false);
   $effect(() => {
@@ -89,6 +115,9 @@
       `**Day ${day.day} — ${day.title} (${today()}):**`,
       `- Quiz: ${score.correct}/${score.total}`,
       `- Task: ${dp.task === 'done' ? 'done' : dp.task === 'attempted' ? 'attempted' : 'not started'}`,
+      dp.taskReview && verdicts
+        ? `- Checked: ${{ solid: 'solid', almost: 'almost', notyet: 'not yet' }[dp.taskReview.grade]} (${verdicts.filter((v) => v === 'met').length}/${verdicts.length} items met)`
+        : null,
       notes.trim() ? `- What confused me: ${notes.trim()}` : null,
     ]
       .filter(Boolean)
@@ -169,12 +198,26 @@
               <span class="box" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
               </span>
-              <span class="prose-inline">{@html item.replace(/`([^`]+)`/g, '<code>$1</code>')}</span>
+              <span class="prose-inline">{@html itemHtml(item)}</span>
+              {#if verdicts}
+                <span class="verdict {verdicts[i]}" title="The reviewer's verdict on this item">{VERDICT_WORD[verdicts[i]]}</span>
+              {/if}
             </button>
           </li>
         {/each}
       </ul>
     </div>
+  {/if}
+
+  {#if week}
+    <TaskCheck
+      {day}
+      {weekId}
+      {week}
+      {lang}
+      bind:focus={checkFocus}
+      ondiscuss={() => { ask = null; asking = true; }}
+    />
   {/if}
 {:else}
   <p class="none">No task spec for this day.</p>
@@ -211,7 +254,16 @@
 </button>
 
 {#if week}
-  <MentorSheet {week} {day} {ask} open={asking} onclose={() => (asking = false)} {suggestions} />
+  <MentorSheet
+    {week}
+    {day}
+    {ask}
+    open={asking}
+    onclose={() => (asking = false)}
+    suggestions={checkFocus ? reviewStarters : suggestions}
+    focus={checkFocus}
+    thread={checkFocus ? `check:${day.id}` : undefined}
+  />
 {/if}
 
 <style>
@@ -327,6 +379,25 @@
     color: var(--text-dim);
     transition: color 0.15s ease;
   }
+
+  .verdict {
+    flex: none;
+    margin-left: auto;
+    align-self: flex-start;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+
+  .verdict.met { color: var(--ok); }
+  .verdict.partial { color: var(--accent); }
+  .verdict.missing { color: var(--flame, var(--bad)); }
+  .verdict.unclear { color: var(--text-faint); }
 
   .checklist button.on {
     color: var(--text-faint);

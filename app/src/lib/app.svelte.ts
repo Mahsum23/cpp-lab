@@ -4,9 +4,11 @@ import {
   emptySecrets,
   type Curriculum,
   type Day,
+  type ItemVerdict,
   type MentorProvider,
   type Progress,
   type Secrets,
+  type TaskReview,
   type TaskState,
   type Week,
   isTrack,
@@ -18,7 +20,7 @@ import {
 } from './review';
 import * as store from './storage';
 import * as cloud from './cloud';
-import { listModels, normalizeKey, PROVIDERS, type ModelChoice } from './mentor';
+import { gradeOf, listModels, normalizeKey, PROVIDERS, type ModelChoice } from './mentor';
 import { mergeProgress } from './merge';
 import { fetchCurriculum, fetchWeek, SchemaTooNewError } from './content';
 import { completeDay as advanceStreak, displayedStreak, atRisk } from './streak';
@@ -464,6 +466,29 @@ class AppStore {
   async setTaskState(day: Day, weekId: string, state: TaskState) {
     this.mutable(day.id, weekId).task = state;
     await this.persist();
+  }
+
+  /**
+   * Record the outcome of checking the submitted work. The grade is worked out here from
+   * the verdicts rather than taken from the reviewer, so it can always be explained by
+   * pointing at an item.
+   *
+   * Asking for a check is an attempt by definition, so an untouched task becomes
+   * "attempted". It never becomes "done": that is still his to say, and the day's ring
+   * closes on the drill, not on this.
+   */
+  async setTaskReview(day: Day, weekId: string, items: ItemVerdict[]): Promise<TaskReview> {
+    const p = this.mutable(day.id, weekId);
+    const review: TaskReview = {
+      grade: gradeOf(items),
+      items,
+      at: new Date().toISOString(),
+      checks: (p.taskReview?.checks ?? 0) + 1,
+    };
+    p.taskReview = review;
+    if (p.task === 'todo') p.task = 'attempted';
+    await this.persist();
+    return review;
   }
 
   async toggleChecklist(day: Day, weekId: string, index: number) {

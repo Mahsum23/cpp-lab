@@ -39,7 +39,10 @@ About 25 minutes, in five steps:
    a computer is still a real day. *(The Go days have drills; the C++ and SQL drills are
    still being written.)*
 4. **Task.** A small piece of code that needs a machine. It waits in a queue until you are
-   at one — see `./lab` below.
+   at one — see `./lab` below. When you have written it, paste or pick the file in the app
+   and it is reviewed against the checklist item by item and graded *Solid*, *Almost* or
+   *Not yet*. The reviewer reads your code rather than running it, and never writes the
+   answer for you.
 5. **Teach-back.** Explain the day's mechanism in your own words to an examiner, which
    probes the weakest part of your answer and rules `solid` or `gaps`. It never gives
    the answer away: that would hand over the exact thing being measured.

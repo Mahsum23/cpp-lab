@@ -47,6 +47,17 @@ class ChatStore {
     return this.messages.length === 0;
   }
 
+  /**
+   * They spoke last and nothing has answered — a request that failed, or one cut short
+   * by closing the tab. It is derived from the thread, not from `error`, because `error`
+   * lives in memory and this is still true after a reload: the message was saved, the
+   * reply never was. Screens use it to say so and offer to send it again, instead of
+   * behaving as though a follow-up question were waiting.
+   */
+  get unanswered(): boolean {
+    return !this.streaming && this.messages.at(-1)?.role === 'user';
+  }
+
   get threadKey(): string {
     return this.key;
   }

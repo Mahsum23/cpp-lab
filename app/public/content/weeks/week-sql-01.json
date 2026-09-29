@@ -317,8 +317,8 @@
           "the same query planned with and without an index, both plans and costs recorded",
           "a function on the indexed column observed falling back to a sequential scan",
           "an expression index built, and the plan recovering",
-          "one query reporting `Index Only Scan`, and one reporting `Index Scan` off the same",
-          "the planner observed *refusing* an index for an unselective value, with"
+          "one query reporting `Index Only Scan`, and one reporting `Index Scan` off the same index, and you can say what the difference was",
+          "the planner observed *refusing* an index for an unselective value, with `EXPLAIN ANALYZE` timings showing it was right to"
         ]
       }
     },

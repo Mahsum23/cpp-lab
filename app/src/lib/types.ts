@@ -150,6 +150,22 @@ export interface QuizState {
   cleanSweep: boolean;
 }
 
+/** What the reviewer concluded about one checklist item, from the file it was shown. */
+export type ItemVerdict = 'met' | 'partial' | 'missing' | 'unclear';
+
+/** Derived from the items, never asked of the model: see `gradeOf`. */
+export type TaskGrade = 'solid' | 'almost' | 'notyet';
+
+export interface TaskReview {
+  grade: TaskGrade;
+  /** By checklist index. */
+  items: ItemVerdict[];
+  /** When the newest check ran. It is what decides which record wins a merge. */
+  at: string;
+  /** How many times the work has been checked; it only goes up. */
+  checks: number;
+}
+
 export interface DayProgress {
   weekId: string;
   theoryDone: boolean;
@@ -159,6 +175,11 @@ export interface DayProgress {
   task: TaskState;
   /** Per-item state of the task checklist, by index. */
   checklist: boolean[];
+  /**
+   * The newest review of the submitted work. Optional because a record written before
+   * reviews existed doesn't have it, and a device that hasn't updated still syncs that shape.
+   */
+  taskReview?: TaskReview | null;
   notes: string;
   /** Only meaningful on a day that carries a teachBack prompt. */
   teachBackDone: boolean;
@@ -267,6 +288,7 @@ export function emptyDayProgress(weekId: string): DayProgress {
     drill: { answers: {}, correct: {}, completedAt: null, cleanSweep: false },
     task: 'todo',
     checklist: [],
+    taskReview: null,
     notes: '',
     teachBackDone: false,
     completedAt: null,

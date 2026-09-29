@@ -103,6 +103,22 @@ const local = mergeProgress(
 ok('settings are per-device and not synced', local.settings.theme === 'dark' && local.settings.peekAhead === false);
 ok('loadedWeeks stays local so a fresh install still downloads', Object.keys(local.loadedWeeks).length === 0);
 
+// --- the review of the submitted work ---------------------------------------
+
+const rv = (grade, items, at, checks) => ({ grade, items, at, checks });
+const older = rv('notyet', ['missing', 'partial'], '2026-09-10T09:00:00Z', 1);
+const newer = rv('solid', ['met', 'met'], '2026-09-10T18:00:00Z', 1);
+const rm = (l, r) => mergeProgress(base({ days: { 'day-01': day({ taskReview: l }) } }), base({ days: { 'day-01': day({ taskReview: r }) } })).days['day-01'].taskReview;
+
+ok('the newer check wins, whichever device it came from', rm(older, newer).grade === 'solid' && rm(newer, older).grade === 'solid');
+ok('its verdicts come with it, whole', JSON.stringify(rm(older, newer).items) === '["met","met"]');
+ok('items are never mixed between two checks', JSON.stringify(rm(older, newer).items) !== JSON.stringify(['met', 'partial']));
+ok('the count of checks takes the larger', rm(rv('solid', ['met'], '2026-09-10T18:00:00Z', 2), rv('notyet', ['missing'], '2026-09-10T09:00:00Z', 5)).checks === 5);
+ok('a check on one side only is kept', rm(null, newer).grade === 'solid' && rm(older, null).grade === 'notyet');
+ok('no check on either side stays none', rm(null, null) === null);
+ok('a record from before reviews existed merges cleanly', mergeProgress(base({ days: { 'day-01': day() } }), base({ days: { 'day-01': day({ taskReview: newer }) } })).days['day-01'].taskReview.grade === 'solid');
+ok('merging twice changes nothing', JSON.stringify(rm(rm(older, newer), newer)) === JSON.stringify(rm(older, newer)));
+
 // --- badges ----------------------------------------------------------------
 
 const badges = mergeProgress(

@@ -253,10 +253,13 @@
           {/each}
         </ul>
 
-        {#if chat.error}
+        {#if chat.error || chat.unanswered}
           <div class="err">
-            <p>{chat.error}</p>
-            {#if chat.messages.at(-1)?.role === 'user'}
+            <p>
+              {chat.error ??
+                'No reply came back for your last message — the request failed, or was cut short.'}
+            </p>
+            {#if chat.unanswered}
               <button class="link" onclick={() => void chat.retry()}>Try again</button>
             {/if}
           </div>
