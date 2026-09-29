@@ -353,30 +353,26 @@ that cannot end. When writing a `teachBack` question, make it something he can g
 in an interesting way: "what is the backlog a queue of, and who puts things in it" beats
 "explain listen()".
 
-**"No idea — show me" in the review deck must show something.** It used to mark the card
-missed and deal the next one with no explanation, which turns the most teachable moment
-in the deck into a dead end. For a forged challenge, and for a teach-back question whose
-day he has already passed, it asks the revision grader for the answer and shows it before
-moving on. A teach-back not yet passed on its day is the one exception, because revealing
-it would hand over the examiner's answer: there the button reads "reread the lesson" and
-opens that day's theory instead. It still counts as a miss either way.
+**A graded review card is a conversation, and "I don't know" is a message in it.** The
+review deck's graded cards (the day's teach-back question, and the fresh challenges) used
+to take one answer, give one reply, and offer only "No idea — show me" — which either
+skipped the card with nothing said, or, for a teach-back not yet passed, sent him back to
+the lesson. Now every reply from the mentor that isn't a ruling leaves a fresh input under
+it, his own answers stay above as bubbles, and the whole exchange goes to the model each
+time, so a follow-up question is answered rather than overwriting what he wrote.
 
-**Asking the mentor about a review card must be about that card.** The mentor sheet opened
-from the review deck used to know only the day, cover the card it was asked about, and
-bury the card's openers under whatever the day's thread already held — so a question about
-a quiz card got "how's the day's task going?". The review screen now hands the sheet the
-card (question, their answer, the key), which is pinned above the thread with its openers.
-On wide screens the mentor docks beside the page instead of over it, so whatever is being
-asked about stays visible.
+Saying he doesn't know, or gives up ("I don't know" is also a button that just sends that),
+starts a ladder: a polite hint, then a sharper one, then the answer with its mechanism.
+Two hints at most; an outright "just tell me" gets the answer at once. A card he only
+solved after a hint is scheduled as a miss, since it should come back sooner. The app —
+not the model — counts hints (`[[HINT]]` marker) and messages and tells the model where it
+stands each turn, and the fourth message from him always ends the card (a ruling, or a
+forced miss if the model forgets), so a card can never trap him.
 
-Two things that looked like enough and were not. Putting the card in the system prompt
-alone left it 15,000 characters from the question, so "why is that the answer?" had
-nothing for "that" to point at — the card is attached to the newest message on its way to
-the model (`withFocus`), while the thread stores and the screen shows only what was typed.
-And the day's shared thread carried unrelated chat ("how's the task going?", "ping"), which
-the model then carried on with — each card gets its own thread (`review:<card id>`). Any
-new place that opens the mentor about something narrower than the day should pass `focus`
-and a `thread` the same way.
+This does not loosen the lesson's own teach-back step. That is the examiner's, it still
+never gives a hint or an answer, and it is the only thing that can close the day's ring
+(`TeachBack.svelte`). The review deck never sets `teachBackDone`, which is why it is safe
+for the deck to help; keep it that way.
 
 ## Every day has two halves, and the phone half is not optional
 
