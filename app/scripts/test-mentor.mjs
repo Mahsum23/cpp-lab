@@ -273,6 +273,14 @@ ok("system prompt carries today's theory and task", prompt.includes('THEORY') &&
 ok('system prompt names the days still ahead', prompt.includes('Day 2: Addresses'));
 ok('no-context prompt still carries the directive', /prime directive/i.test(systemPrompt(null)));
 
+// Asked from the review deck, the mentor has to know which card is on screen — without
+// it, a question about a quiz card got "how's the day's task going?" back.
+const onCard = systemPrompt({ week, day, focus: { label: 'From the quiz', question: 'Q?', outcome: [], brief: 'CARD-BRIEF [THEIR PICK]' } });
+ok('a review question carries the card it is about', onCard.includes('CARD-BRIEF [THEIR PICK]'));
+ok('and says it is the review deck, not the lesson', /review deck, not the lesson/.test(onCard));
+ok('the lesson prompt is unchanged without one', !/review deck/.test(prompt));
+ok('the directive still travels with a card', /Never write the implementation for the day's task/.test(onCard));
+
 // --- the examiner ----------------------------------------------------------
 
 console.log('\n— teach-back examiner —');

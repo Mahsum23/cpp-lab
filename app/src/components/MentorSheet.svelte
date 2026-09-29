@@ -7,7 +7,7 @@
    * conversation you find later under Mentor, rather than a second transcript that
    * quietly disagrees with the first.
    */
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import type { Day, Week } from '../lib/types';
   import { app } from '../lib/app.svelte';
   import { chat } from '../lib/chat.svelte';
@@ -17,6 +17,7 @@
   import CodeArea from './CodeArea.svelte';
   import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
   import { TRACKS, type Track } from '../lib/types';
+  import type { MentorFocus } from '../lib/mentor';
 
   /**
    * A tappable opener. `send: false` drops the text into the composer instead of
@@ -40,8 +41,38 @@
      * readily as the first.
      */
     ask?: string | null;
+    /**
+     * The thing on screen the questions are about, when that is narrower than the day —
+     * a review card. It is pinned above the thread, its starters stay offered even when
+     * the day's thread already has history, and the model is told about it.
+     */
+    focus?: MentorFocus | null;
   }
-  let { week, day, open, onclose, suggestions = [], ask = null }: Props = $props();
+  let { week, day, open, onclose, suggestions = [], ask = null, focus = null }: Props = $props();
+
+  /** Whether anything was sent since this opening — starters go once you're talking. */
+  let sentHere = $state(false);
+  /** The pinned question is clamped to a few lines until tapped. */
+  let expanded = $state(false);
+
+  /**
+   * Wide screens get a panel docked beside the page instead of a sheet over it, so the
+   * thing being asked about stays in view. The page column moves over to make room
+   * (the `mentor-docked` rule in app.css); on a phone there is no room to move into.
+   */
+  const wide = typeof window !== 'undefined' ? window.matchMedia('(min-width: 1100px)') : null;
+  let docked = $state(wide?.matches ?? false);
+  const onWide = (e: MediaQueryListEvent) => (docked = e.matches);
+  wide?.addEventListener('change', onWide);
+
+  $effect(() => {
+    document.documentElement.classList.toggle('mentor-docked', open && docked);
+  });
+
+  onDestroy(() => {
+    wide?.removeEventListener('change', onWide);
+    document.documentElement.classList.remove('mentor-docked');
+  });
 
   /** So re-renders while the reply streams don't send the same question again. */
   let asked = $state<string | null>(null);
@@ -59,10 +90,21 @@
   $effect(() => {
     if (!open) {
       asked = null;
+      sentHere = false;
+      expanded = false;
       return;
     }
-    chat.context = { week, day };
+    chat.context = { week, day, focus };
     void chat.open(day.id);
+  });
+
+  // A new card under an open panel is a new subject: offer its starters again.
+  $effect(() => {
+    focus?.question;
+    untrack(() => {
+      sentHere = false;
+      expanded = false;
+    });
   });
 
   // Awaits the open, so the question lands in this day's thread rather than racing
@@ -91,6 +133,7 @@
     const content = codeMode && !hasFence(raw) ? asCodeBlock(raw, lang) : raw;
     draft = '';
     codeMode = false;
+    sentHere = true;
     area?.grow();
     await chat.send(content);
   }
@@ -104,10 +147,12 @@
 </script>
 
 {#if open}
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="scrim" onclick={onclose}></div>
+  {#if !docked}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="scrim" onclick={onclose}></div>
+  {/if}
 
-  <section class="sheet" aria-label="Mentor">
+  <section class="sheet" class:docked aria-label="Mentor">
     <header>
       <div>
         <p class="lbl">Mentor</p>
@@ -117,6 +162,35 @@
         <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>
     </header>
+
+    {#if focus && app.mentorReady}
+      <div class="focus">
+        <p class="flabel">{focus.label}</p>
+        <button
+          class="fq"
+          class:expanded
+          onclick={() => (expanded = !expanded)}
+          aria-expanded={expanded}
+          title={expanded ? 'Collapse' : 'Show the whole question'}
+        >
+          <Markdown source={focus.question} />
+        </button>
+        {#each focus.outcome as line}
+          <button class="fout" class:expanded onclick={() => (expanded = !expanded)} tabindex="-1">
+            <Markdown source={line} />
+          </button>
+        {/each}
+        {#if starters.length && !sentHere && !chat.streaming}
+          <div class="chips">
+            {#each starters as s}
+              <button onclick={() => (s.send ? void send(s.text) : prefill(s.text))}>
+                {s.text}{#if !s.send}<span class="pen">✎</span>{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <div class="body" bind:this={scroller}>
       {#if !app.mentorReady}
@@ -128,7 +202,12 @@
           <Button size="sm" onclick={() => router.go('/settings')}>Open Settings</Button>
         </div>
       {:else}
-        {#if chat.empty}
+        {#if chat.empty && focus}
+          <p class="hint">
+            Ask anything about this card. The mentor sees the question, your answer and
+            the right one, and the day's material behind it.
+          </p>
+        {:else if chat.empty}
           <p class="hint">
             Ask anything about today's material. It knows which day you're on, what the
             theory said and what the task is — and it won't write that task for you, by
@@ -228,6 +307,10 @@
     left: 0;
     right: 0;
     bottom: 0;
+    /* The app is a 620px column; a sheet wider than it on a laptop puts your messages
+       at one edge of the screen and the replies at the other. */
+    max-width: 620px;
+    margin: 0 auto;
     z-index: 41;
     display: flex;
     flex-direction: column;
@@ -240,6 +323,127 @@
     box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.25);
     animation: rise 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
     padding-bottom: var(--safe-b);
+  }
+
+  /* Beside the page rather than over it, stopping at the tab bar. */
+  .sheet.docked {
+    top: 0;
+    left: auto;
+    bottom: calc(var(--tab-h) + var(--safe-b));
+    width: var(--dock-w);
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    border-radius: 0;
+    border-top: none;
+    border-left: 1px solid var(--border);
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.18);
+    padding-bottom: 0;
+    animation: slide 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+
+  @keyframes slide {
+    from { transform: translateX(100%); }
+  }
+
+  .focus {
+    flex: none;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .flabel {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .fq {
+    display: block;
+    width: 100%;
+    text-align: left;
+    color: var(--text);
+    font-size: 14.5px;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .fq.expanded {
+    display: block;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  .fq :global(.prose > *:last-child) {
+    margin-bottom: 0;
+  }
+
+  .fout {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    width: 100%;
+    text-align: left;
+    font-size: 13px;
+    color: var(--text-faint);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  .fout.expanded {
+    display: block;
+  }
+
+  .fout :global(.prose),
+  .fout :global(.prose p) {
+    font-size: inherit;
+    color: inherit;
+    margin: 0;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  /* On a phone the thread needs the height more than the starters do: one row that
+     scrolls sideways. The docked panel has room to let them wrap. */
+  .sheet:not(.docked) .chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-right: -16px;
+    padding-right: 16px;
+  }
+
+  .sheet:not(.docked) .chips button {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .chips button {
+    text-align: left;
+    font-size: 13px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 11px;
+    color: var(--text);
+    line-height: 1.35;
   }
 
   @keyframes fade {

@@ -3,7 +3,7 @@
 The installable PWA that delivers this repo's curriculum one day at a time.
 Design and rationale live in [`DESIGN.md`](./DESIGN.md); this file is how to run it.
 
-The app is a **delivery vehicle**, not the learning. The C++ still gets written on the
+The app is a **delivery vehicle**, not the learning. The code still gets written on the
 laptop — the Task screen is a briefing, not an IDE.
 
 ## Run it

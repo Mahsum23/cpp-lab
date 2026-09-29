@@ -361,6 +361,15 @@ moving on. A teach-back not yet passed on its day is the one exception, because 
 it would hand over the examiner's answer: there the button reads "reread the lesson" and
 opens that day's theory instead. It still counts as a miss either way.
 
+**Asking the mentor about a review card must be about that card.** The mentor sheet opened
+from the review deck used to know only the day, cover the card it was asked about, and
+bury the card's openers under whatever the day's thread already held — so a question about
+a quiz card got "how's the day's task going?". The review screen now hands the sheet the
+card (question, their answer, the key), which is pinned above the thread with its openers
+and put into the mentor's prompt. On wide screens the mentor docks beside the page instead
+of over it, so whatever is being asked about stays visible. Any new place that opens the
+mentor about something narrower than the day should pass it the same way (`focus`).
+
 ## Every day has two halves, and the phone half is not optional
 
 A task needs a machine, and not having one is the most common reason a day stalls

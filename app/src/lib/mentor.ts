@@ -204,7 +204,23 @@ its language. Be concise unless they ask you to go deep — then go deep.
 ${NO_LATEX}`;
 };
 
-export function systemPrompt(context: { week: Week; day: Day } | null): string {
+/**
+ * What the learner is looking at when a question is asked from somewhere other than the
+ * lesson itself — the review deck, today. Without it the mentor only knows the day, and
+ * answers a question about a quiz card by asking how the day's task is going.
+ */
+export interface MentorFocus {
+  /** One line for the sheet's header strip, e.g. "From the quiz". */
+  label: string;
+  /** The question as it was shown. */
+  question: string;
+  /** What they answered and what was right, as short display lines. */
+  outcome: string[];
+  /** Everything the model should know about the card, including the answer key. */
+  brief: string;
+}
+
+export function systemPrompt(context: { week: Week; day: Day; focus?: MentorFocus | null } | null): string {
   if (!context) {
     return `${persona(undefined)}\n\nNo lesson is open, so you have no day context. If a question depends on where they are in the curriculum, just ask.`;
   }
@@ -225,6 +241,11 @@ export function systemPrompt(context: { week: Week; day: Day } | null): string {
   }
   const rest = week.days.filter((d) => d.day > day.day).map((d) => `Day ${d.day}: ${d.title}`);
   if (rest.length) parts.push(`\nStill ahead this week: ${rest.join('; ')}.`);
+  if (context.focus) {
+    parts.push(
+      `\n---\n\nWHAT THEY ARE LOOKING AT: they are in the review deck, not the lesson, and have just answered this card. Their questions are about this card unless they say otherwise — do not ask how the day's task is going.\n\n${context.focus.brief}`,
+    );
+  }
   return parts.join('\n');
 }
 

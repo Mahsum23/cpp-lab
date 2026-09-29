@@ -24,7 +24,7 @@
   import { today } from '../lib/date';
   import {
     collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripVerdict,
-    examinerPrompt, ModelGoneError, type ChatMessage,
+    examinerPrompt, ModelGoneError, type ChatMessage, type MentorFocus,
   } from '../lib/mentor';
   import { TRACKS, type Day, type QuizQuestion, type Track, type Week } from '../lib/types';
 
@@ -87,6 +87,57 @@
   const answerable = $derived(
     app.deck.filter((c) => c.kind === 'quiz' || c.kind === 'parsons' || app.mentorReady),
   );
+
+  /**
+   * The card, as the mentor needs to see it. Without this it only knows the day, and a
+   * question about a quiz card gets answered with "how's the day's task going?".
+   *
+   * Only built once the card is answered — the Ask button only appears then, and before
+   * that the mentor would just be the answer key.
+   */
+  const focus = $derived.by((): MentorFocus | null => {
+    if (!card || !context || !answered) return null;
+    if (card.kind === 'quiz' && question) {
+      const mine = picked !== null ? question.options[picked] : null;
+      const right = question.options.find((o) => o.correct);
+      return {
+        label: 'From the quiz',
+        question: question.prompt,
+        outcome: [
+          mine ? `You picked: ${mine.text} ${mine.correct ? '✓' : '✗'}` : '',
+          mine && !mine.correct && right ? `Right answer: ${right.text}` : '',
+        ].filter(Boolean),
+        brief: [
+          `A multiple-choice quiz card: "${question.prompt}"`,
+          'The options, with the answer key and why each is right or wrong:',
+          ...question.options.map(
+            (o, i) => `- ${o.correct ? '[correct]' : '[wrong]'}${i === picked ? ' [THEIR PICK]' : ''} ${o.text} — ${o.why}`,
+          ),
+        ].join('\n'),
+      };
+    }
+    if ((card.kind === 'forge' || card.kind === 'explain') && prompt) {
+      return {
+        label: card.kind === 'forge' ? 'Fresh challenge' : 'Explain it',
+        question: prompt,
+        outcome: [verdict === 'solid' ? 'Marked solid ✓' : verdict === 'gaps' ? 'Marked: gaps ✗' : ''].filter(Boolean),
+        brief:
+          `A ${card.kind === 'forge' ? 'recall challenge' : 'teach-back question'}:\n\n${prompt}\n\n` +
+          `Their answer: ${answer.trim() || '(none — they asked to be shown the answer)'}\n\n` +
+          `How it was marked:\n${stripVerdict(reply)}`,
+      };
+    }
+    if (card.kind === 'parsons' && solution.length) {
+      const block = (lines: string[]) => `\`\`\`${lang}\n${lines.join('\n')}\n\`\`\``;
+      return {
+        label: 'Rebuild it',
+        question: block(solution),
+        outcome: [parsonsRight ? 'You got the order right ✓' : 'The order was off ✗'],
+        brief: `A reorder card: they had to put these lines back in order. The correct order:\n\n${block(solution)}\n\nThe order they chose:\n\n${block(built)}`,
+      };
+    }
+    return null;
+  });
 
   const remaining = $derived(app.dueNow.filter((c) => !seen.has(c.id)).length);
   const answered = $derived(picked !== null || verdict !== null || checked);
@@ -510,6 +561,7 @@
     open={asking}
     onclose={() => (asking = false)}
     {suggestions}
+    {focus}
   />
 {/if}
 
