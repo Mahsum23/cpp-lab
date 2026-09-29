@@ -14,8 +14,17 @@
    */
   import { highlight } from '../lib/markdown';
   import {
-    autoCloseAt, closerAt, codeSpans, hasFence, inFence, indentAt, looksLikeCode,
-    newlineAt, unpairAt, wrapSelection,
+    autoCloseAt,
+    closerAt,
+    codeSpans,
+    hasFence,
+    inFence,
+    indentAt,
+    looksLikeCode,
+    newlineAt,
+    unpairAt,
+    wrapSelection,
+    sendsOn,
   } from '../lib/compose';
 
   interface Props {
@@ -27,8 +36,15 @@
     maxHeight?: number;
     /** The subject's language: what code mode highlights and fences as. */
     lang?: string;
-    /** Ctrl/Cmd+Enter. */
+    /** Ctrl/Cmd+Enter, and Enter itself when `enterSends` is on. */
     onsubmit?: () => void;
+    /**
+     * Enter sends and Shift+Enter is a newline — for fields where a message is typed.
+     * Never while the cursor is in code (the whole field in code mode, or inside a fence):
+     * Enter is an indented newline there, and Ctrl/Cmd+Enter is what sends. Off by default
+     * because a field that holds a whole file wants Enter to be a newline.
+     */
+    enterSends?: boolean;
     onescape?: () => void;
   }
   let {
@@ -39,6 +55,7 @@
     maxHeight = 148,
     lang = 'cpp',
     onsubmit,
+    enterSends = false,
     onescape,
   }: Props = $props();
 
@@ -184,16 +201,21 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    // Send first, so the editor rules below never see the Enter that meant "send". A plain
+    // Enter is only a send outside code; Ctrl/Cmd+Enter is one anywhere.
+    if (sendsOn(e, enterSends)) {
+      const inCode = box ? codeMode || inFence(box.value, box.selectionStart) : codeMode;
+      if (e.ctrlKey || e.metaKey || !inCode) {
+        e.preventDefault();
+        onsubmit?.();
+        return;
+      }
+    }
     onEdit(e);
     // Ctrl/Cmd+E does what the button does, for anyone typing on a real keyboard.
     if (e.key.toLowerCase() === 'e' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       codeAction();
-    }
-    // Enter is a newline on a phone keyboard. Desktop gets the shortcut it expects.
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      onsubmit?.();
     }
     if (e.key === 'Escape') onescape?.();
   }

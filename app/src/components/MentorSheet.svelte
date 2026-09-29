@@ -277,6 +277,7 @@
           maxHeight={120}
           placeholder={codeMode ? `Paste or type ${TRACKS[(week.track ?? 'cpp') as Track].label}…` : 'Ask about this…'}
           onsubmit={() => void send()}
+          enterSends
           onescape={onclose}
         />
         <button

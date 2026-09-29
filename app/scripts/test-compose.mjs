@@ -19,7 +19,7 @@ const out = await build({
 const file = join(tmpdir(), 'cpp-lab-compose.mjs');
 writeFileSync(file, out.outputFiles[0].text);
 const { looksLikeCode, asCodeBlock, isFenced, hasFence, shapeOf, wrapSelection, indentAt,
-        inFence, newlineAt, closerAt, autoCloseAt, unpairAt, codeSpans, INDENT } = await import(file);
+        inFence, newlineAt, closerAt, autoCloseAt, unpairAt, codeSpans, sendsOn, INDENT } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -183,6 +183,21 @@ ok('an unterminated block runs to the end', sp.length === 1 && 'look:\n```cpp\ni
 
 ok('prose alone has no spans', codeSpans('why does recv() return 0?').length === 0);
 ok('two blocks are both found', codeSpans('```\na\n```\nand\n```\nb\n```').length === 2);
+
+console.log('\n— which key sends —');
+const key = (over = {}) => ({ key: 'Enter', shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, isComposing: false, ...over });
+ok('Enter sends where a message is being typed', sendsOn(key(), true, false));
+ok('Shift+Enter is a newline, not a send', !sendsOn(key({ shiftKey: true }), true, false));
+ok('Alt+Enter is not a send either', !sendsOn(key({ altKey: true }), true, false));
+ok('Ctrl+Enter still sends', sendsOn(key({ ctrlKey: true }), true, false));
+ok('Cmd+Enter still sends', sendsOn(key({ metaKey: true }), true, false));
+ok('Ctrl/Cmd+Enter sends even in a field where plain Enter does not', sendsOn(key({ ctrlKey: true }), false, false) && sendsOn(key({ metaKey: true }), false, false));
+ok('a field that holds a file keeps Enter as a newline', !sendsOn(key(), false, false));
+ok('on a touch phone plain Enter is a newline (no Shift+Enter there)', !sendsOn(key(), true, true));
+ok('and Ctrl/Cmd+Enter still sends on touch (a keyboard is attached)', sendsOn(key({ ctrlKey: true }), true, true));
+ok('Enter that accepts an IME composition does not send', !sendsOn(key({ isComposing: true }), true, false));
+ok('another key never sends', !sendsOn(key({ key: 'a' }), true, false) && !sendsOn(key({ key: 'Tab' }), true, false));
+ok('with no window at all (node), it does not claim to be a phone', sendsOn(key(), true));
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all compose cases pass');
 process.exit(fails ? 1 : 0);
