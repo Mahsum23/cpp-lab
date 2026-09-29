@@ -1,6 +1,6 @@
 import { app } from './app.svelte';
 import * as store from './storage';
-import { examinerPrompt, ModelGoneError, streamReply, systemPrompt, type ChatMessage, type MentorFocus } from './mentor';
+import { examinerPrompt, ModelGoneError, streamReply, systemPrompt, withFocus, type ChatMessage, type MentorFocus } from './mentor';
 import type { Day, Week } from './types';
 
 /** One thread per day, plus a general one for questions that aren't about a lesson. */
@@ -121,6 +121,11 @@ class ChatStore {
     // screen, streaming into itself, rather than appearing 800ms later.
     const index = this.messages.length;
     const history = $state.snapshot(this.messages);
+    // The card rides along with the newest message only; the thread keeps, and the
+    // screen shows, exactly what was typed.
+    const focus = this.context?.focus;
+    const newest = history.at(-1);
+    if (focus && newest?.role === 'user') newest.content = withFocus(newest.content, focus);
     this.messages.push({ role: 'assistant', content: '' });
 
     try {

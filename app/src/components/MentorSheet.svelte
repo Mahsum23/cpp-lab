@@ -47,8 +47,15 @@
      * the day's thread already has history, and the model is told about it.
      */
     focus?: MentorFocus | null;
+    /**
+     * Which conversation this is. Defaults to the day's thread; a card gets its own, so
+     * a question about it isn't answered in the wake of whatever was said about the
+     * day's task — or about some other card — an hour ago.
+     */
+    thread?: string;
   }
-  let { week, day, open, onclose, suggestions = [], ask = null, focus = null }: Props = $props();
+  let { week, day, open, onclose, suggestions = [], ask = null, focus = null, thread = undefined }: Props = $props();
+  const threadKey = $derived(thread ?? day.id);
 
   /** Whether anything was sent since this opening — starters go once you're talking. */
   let sentHere = $state(false);
@@ -95,7 +102,7 @@
       return;
     }
     chat.context = { week, day, focus };
-    void chat.open(day.id);
+    void chat.open(threadKey);
   });
 
   // A new card under an open panel is a new subject: offer its starters again.
@@ -113,7 +120,7 @@
     if (!open || !ask || ask === untrack(() => asked)) return;
     const question = ask;
     asked = question;
-    void chat.open(day.id).then(() => send(question));
+    void chat.open(threadKey).then(() => send(question));
   });
 
   // Follow the stream, but inside the sheet rather than the page.

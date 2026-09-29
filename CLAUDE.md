@@ -365,10 +365,18 @@ opens that day's theory instead. It still counts as a miss either way.
 from the review deck used to know only the day, cover the card it was asked about, and
 bury the card's openers under whatever the day's thread already held — so a question about
 a quiz card got "how's the day's task going?". The review screen now hands the sheet the
-card (question, their answer, the key), which is pinned above the thread with its openers
-and put into the mentor's prompt. On wide screens the mentor docks beside the page instead
-of over it, so whatever is being asked about stays visible. Any new place that opens the
-mentor about something narrower than the day should pass it the same way (`focus`).
+card (question, their answer, the key), which is pinned above the thread with its openers.
+On wide screens the mentor docks beside the page instead of over it, so whatever is being
+asked about stays visible.
+
+Two things that looked like enough and were not. Putting the card in the system prompt
+alone left it 15,000 characters from the question, so "why is that the answer?" had
+nothing for "that" to point at — the card is attached to the newest message on its way to
+the model (`withFocus`), while the thread stores and the screen shows only what was typed.
+And the day's shared thread carried unrelated chat ("how's the task going?", "ping"), which
+the model then carried on with — each card gets its own thread (`review:<card id>`). Any
+new place that opens the mentor about something narrower than the day should pass `focus`
+and a `thread` the same way.
 
 ## Every day has two halves, and the phone half is not optional
 
