@@ -392,6 +392,18 @@ way to resend. `error` lives in memory and is gone after a reload; `ChatStore.un
 is derived from the thread and is not. Any screen that shows a conversation says "no reply
 came back" and offers to send it again when `unanswered` is true, and hides its reply box.
 
+**Enter sends, Shift+Enter is a newline — in every field where a message goes to the mentor.**
+That is the Mentor tab, the Ask sheet, the teach-back step and the review deck's answer box;
+Ctrl/Cmd+Enter still sends too. The decision is one function, `sendsOn` in `compose.ts`, so a
+new field takes it rather than growing its own copy (the teach-back step had, and it had
+drifted). Three deliberate exceptions, each of which would otherwise cost him something:
+while the cursor is in code (code mode, or inside a fence) Enter is an indented newline and
+only Ctrl/Cmd+Enter sends, because sending half a snippet on a stray Enter is miserable; on
+a touch-first device Enter stays a newline, because a phone keyboard has no Shift+Enter and a
+two-line answer would be impossible; and the "Check your work" box holds a whole file, so
+Enter is a newline there and Ctrl/Cmd+Enter checks it. An Enter that accepts an IME
+composition never sends.
+
 ## Every day has two halves, and the phone half is not optional
 
 A task needs a machine, and not having one is the most common reason a day stalls

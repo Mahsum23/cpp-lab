@@ -526,6 +526,7 @@
             ariaLabel={turns.length ? 'Your reply' : 'Your answer'}
             maxHeight={180}
             onsubmit={() => void submit()}
+            enterSends
           />
         </div>
         {#if lastChance}

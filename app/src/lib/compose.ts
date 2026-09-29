@@ -310,3 +310,33 @@ export function codeSpans(text: string): { from: number; to: number; lang: strin
   if (open && open.at <= text.length) spans.push({ from: open.at, to: text.length, lang: open.lang });
   return spans;
 }
+
+/**
+ * Whether this key press should send the message.
+ *
+ * Ctrl/Cmd+Enter always does. Plain Enter does when the field is one where a message is
+ * being typed (`enterSends`), and never when Shift or Alt is held — that is how you get a
+ * newline. Two more places where a plain Enter must stay a newline:
+ *
+ * - on a touch-first device. A phone keyboard has no Shift+Enter, so sending on Enter
+ *   would make a two-line message impossible; there the send button does it.
+ * - while an IME is composing. Enter is what accepts the composed text, not what sends it.
+ *
+ * Whether the cursor is inside code is the caller's call, since it depends on the field.
+ * `touch` is a parameter so this can be tested without a browser.
+ */
+export function sendsOn(
+  e: { key: string; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean; isComposing: boolean },
+  enterSends: boolean,
+  touch: boolean = touchFirst(),
+): boolean {
+  if (e.key !== 'Enter' || e.isComposing) return false;
+  if (e.ctrlKey || e.metaKey) return true;
+  if (!enterSends || e.shiftKey || e.altKey) return false;
+  return !touch;
+}
+
+/** The primary input is a finger, not a keyboard. */
+export function touchFirst(): boolean {
+  return typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches);
+}

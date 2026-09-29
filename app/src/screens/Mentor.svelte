@@ -172,6 +172,7 @@
         {lang}
         placeholder={codeMode ? `Paste or type ${TRACKS[(context?.week.track ?? 'cpp') as Track].label}…` : 'Ask the mentor…'}
         onsubmit={() => void send()}
+        enterSends
       />
       <button
         class="icon toggle"

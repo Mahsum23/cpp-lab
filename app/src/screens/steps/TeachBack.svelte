@@ -3,6 +3,7 @@
   import { app } from '../../lib/app.svelte';
   import { exam } from '../../lib/chat.svelte';
   import { parseVerdict, stripVerdict } from '../../lib/mentor';
+  import { sendsOn } from '../../lib/compose';
   import { router } from '../../lib/router.svelte';
   import Button from '../../components/Button.svelte';
   import Markdown from '../../components/Markdown.svelte';
@@ -57,8 +58,10 @@
     await exam.send(text);
   }
 
+  // Enter sends, Shift+Enter is a newline, Ctrl/Cmd+Enter still sends — and on a touch
+  // phone Enter stays a newline (see `sendsOn`).
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (sendsOn(e, true)) {
       e.preventDefault();
       void send();
     }
