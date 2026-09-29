@@ -25,7 +25,7 @@
   import { today } from '../lib/date';
   import {
     collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripMarkers,
-    MAX_REVIEW_MESSAGES, ModelGoneError, type ChatMessage, type MentorFocus,
+    MAX_REVIEW_MESSAGES, ModelGoneError, withStanding, type ChatMessage, type MentorFocus,
   } from '../lib/mentor';
   import { TRACKS, type Day, type QuizQuestion, type Track, type Week } from '../lib/types';
 
@@ -145,6 +145,11 @@
   });
 
   const remaining = $derived(app.dueNow.filter((c) => !seen.has(c.id)).length);
+  /** Their next message will be the last one allowed on this card. */
+  const lastChance = $derived(
+    graded && !verdict && turns.filter((t) => t.role === 'user').length === MAX_REVIEW_MESSAGES - 1,
+  );
+
   const answered = $derived(picked !== null || verdict !== null || checked);
 
   /**
@@ -306,14 +311,21 @@
         model: app.progress.settings.mentorModel,
         alternates: app.fallbackModels,
         system: reviewGraderPrompt(context, prompt, sent),
-        messages: sent,
+        messages: withStanding(sent),
       })) {
         turns[at].content += chunk;
       }
       // The last allowed message always ends the card, whatever the model did: a
       // conversation with no ruling is a card you can never leave.
       const lastAllowed = sent.filter((m) => m.role === 'user').length >= MAX_REVIEW_MESSAGES;
-      const ruling = parseVerdict(turns[at].content) ?? (lastAllowed ? 'gaps' : null);
+      let ruling = parseVerdict(turns[at].content);
+      if (!ruling && lastAllowed) {
+        // It ignored the last-message note and asked something anyway. The card is over
+        // regardless, so say so instead of leaving a question nobody can answer.
+        ruling = 'gaps';
+        turns[at].content +=
+          '\n\n_That was your last reply on this card, so it is marked to come back soon. Tap **Ask** to keep talking it through._';
+      }
       if (ruling) {
         verdict = ruling;
         await settle(ruling === 'solid' ? 'good' : 'again');
@@ -516,6 +528,9 @@
             onsubmit={() => void submit()}
           />
         </div>
+        {#if lastChance}
+          <p class="fine lastchance">Last reply on this card — the mentor rules on it after this one.</p>
+        {/if}
       {/if}
     {/if}
 
@@ -836,6 +851,10 @@
   .answer {
     display: flex;
     margin-bottom: 14px;
+  }
+
+  .lastchance {
+    margin: -6px 4px 14px;
   }
 
   /* What you said, as a chat bubble: right-aligned, so the exchange reads as a
