@@ -71,9 +71,21 @@ function parseTask(taskMd) {
   const checklistSplit = taskMd.split(/^###\s+Checklist\s*$/m);
   const body = checklistSplit[0];
   if (checklistSplit[1]) {
+    // An item can run over several lines (an indented continuation is the same sentence).
+    // Reading one line per item cut "…off the same index, and you can say what the
+    // difference was" down to "…off the same" — and now that a reviewer grades against
+    // these, half a requirement would be graded as if it were the whole of it.
+    let open = false;
     for (const line of checklistSplit[1].split('\n')) {
       const m = /^\s*-\s*\[[ xX]\]\s+(.*\S)\s*$/.exec(line);
-      if (m) checklist.push(m[1]);
+      if (m) {
+        checklist.push(m[1]);
+        open = true;
+      } else if (open && /^\s+\S/.test(line)) {
+        checklist[checklist.length - 1] += ` ${line.trim()}`;
+      } else {
+        open = false;
+      }
     }
   }
 

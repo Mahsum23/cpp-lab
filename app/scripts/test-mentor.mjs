@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, looksComplete, withFocus, hasHint, stripMarkers, reviewStanding, reviewGraderPrompt, withStanding, MAX_HINTS, MAX_REVIEW_MESSAGES, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey } = await import(file);
+const { streamReply, looksComplete, withFocus, hasHint, stripMarkers, reviewStanding, reviewGraderPrompt, withStanding, MAX_HINTS, MAX_REVIEW_MESSAGES, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey, taskReviewPrompt, taskSubmission, parseItems, stripItems, gradeOf, reviewFocus, MAX_SUBMISSION_CHARS } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -348,6 +348,55 @@ ok('and carries no ladder to tempt another probe', !/at most two hints/.test(clo
 ok('but still rules, and never with a hint marker', /\[\[VERDICT: solid\]\] or \[\[VERDICT: gaps\]\]/.test(closing) && /Never\s+a hint marker/.test(closing));
 ok('earlier messages still get the full ladder', /at most two hints/.test(reviewGraderPrompt(ctx, 'Q', four.slice(0, 5))) && !/closing a spaced-repetition/.test(reviewGraderPrompt(ctx, 'Q', four.slice(0, 5))));
 ok('and it still stays inside the material', /Do not introduce catalog tables/.test(closing));
+
+// --- checking the practice task -----------------------------------------------
+
+console.log('\n— the reviewer\'s verdicts and the grade —');
+ok('a well-formed line is read', JSON.stringify(parseItems('Fine.\n[[ITEMS: 1=met, 2=partial, 3=missing, 4=unclear]]', 4)) === '["met","partial","missing","unclear"]');
+ok('case and spacing are forgiven', JSON.stringify(parseItems('[[items: 1 = MET,2=Partial]]', 2)) === '["met","partial"]');
+ok('order does not matter, coverage does', JSON.stringify(parseItems('[[ITEMS: 2=met, 1=missing]]', 2)) === '["missing","met"]');
+ok('a missing line gives no grade', parseItems('Looks good to me.', 3) === null);
+ok('too few entries gives no grade', parseItems('[[ITEMS: 1=met, 2=met]]', 3) === null);
+ok('an entry out of range gives no grade', parseItems('[[ITEMS: 1=met, 2=met, 3=met]]', 2) === null);
+ok('a repeated entry gives no grade', parseItems('[[ITEMS: 1=met, 1=missing, 2=met]]', 2) === null);
+ok('an invented word gives no grade', parseItems('[[ITEMS: 1=excellent, 2=met]]', 2) === null);
+ok('a checklist of none cannot be graded', parseItems('[[ITEMS: ]]', 0) === null);
+ok('the last line wins if there are two', JSON.stringify(parseItems('[[ITEMS: 1=missing]]\nActually:\n[[ITEMS: 1=met]]', 1)) === '["met"]');
+ok('the machine line is removed for display', stripItems('Good work.\n\n[[ITEMS: 1=met]]') === 'Good work.');
+
+ok('every item met is solid', gradeOf(['met', 'met', 'met']) === 'solid');
+ok('a partial item is almost, not solid', gradeOf(['met', 'partial', 'met']) === 'almost');
+ok('an unprovable item is almost, not a fail', gradeOf(['met', 'unclear']) === 'almost');
+ok('any missing item is not yet, however much else is met', gradeOf(['met', 'met', 'missing', 'partial']) === 'notyet');
+ok('all missing is not yet', gradeOf(['missing', 'missing']) === 'notyet');
+
+console.log('\n— what the reviewer is told —');
+const tday = { day: 2, title: 'An index is a sorted copy', theoryMarkdown: 'THEORY-TEXT', task: { markdown: 'TASK-TEXT', files: ['sql/day02.sql'], compile: null, checklist: ['plans recorded', 'index built'] } };
+const trp = taskReviewPrompt({ week: { title: 'W', track: 'sql', days: [tday] }, day: tday });
+ok('it carries the lesson, the task and the file', trp.includes('THEORY-TEXT') && trp.includes('TASK-TEXT') && trp.includes('sql/day02.sql'));
+ok('the checklist is numbered so verdicts can point at items', trp.includes('1. plans recorded') && trp.includes('2. index built') && /2 items/.test(trp));
+ok('it says it cannot run the code', /You cannot run it/.test(trp));
+ok('unprovable is unclear, not met or missing', /"unclear": not "met", and not "missing"/.test(trp));
+ok('it may not write the solution', /Never write the solution or\s+a corrected version of the file/.test(trp));
+ok('it asks for the machine line in the format the parser reads', /\[\[ITEMS: 1=met, 2=partial, 3=unclear\]\]/.test(trp));
+ok('it is told the track it is reviewing', /SQL/i.test(trp));
+
+const plainSub = taskSubmission({ file: 'sql/day02.sql', code: 'SELECT 1;', lang: 'sql', notes: '' });
+ok('the submission names the file and fences the code', plainSub.includes('`sql/day02.sql`') && plainSub.includes('```sql\nSELECT 1;\n```'));
+ok('no notes means no notes section', !/confused/.test(plainSub));
+ok('notes ride along when there are some', /confused them:\n\nthe cost part/.test(taskSubmission({ file: null, code: 'x', lang: 'sql', notes: ' the cost part ' })));
+const nested = taskSubmission({ file: null, code: 'a\n```\nb\n```\nc', lang: 'sql' });
+ok('code containing a fence cannot close the fence early', /^````sql\n[\s\S]*\n````$/m.test(nested) && nested.trimEnd().endsWith('````'));
+ok('the size cap is generous but finite', MAX_SUBMISSION_CHARS >= 20000 && MAX_SUBMISSION_CHARS <= 200000);
+
+const fx = reviewFocus({ file: 'sql/day02.sql', code: 'CREATE INDEX i ON t (a);', lang: 'sql', checklist: ['plans recorded', 'index built'], items: ['partial', 'met'], grade: 'almost', review: 'Decent.\n[[ITEMS: 1=partial, 2=met]]' });
+ok('a follow-up sees the verdict beside each checklist item', fx.brief.includes('1. [partial] plans recorded') && fx.brief.includes('2. [met] index built'));
+ok('and the grade with the rule behind it', fx.brief.includes('Almost (1 of 2 met)') && /any item missing means "not yet"/.test(fx.brief));
+ok('and the review without its machine line, and their file', !fx.brief.includes('[[ITEMS') && fx.brief.includes('CREATE INDEX i ON t (a);'));
+ok('and is told not to redo their work for them', /must not redo for them/.test(fx.brief));
+ok('the header shows the grade and count', fx.outcome[0] === 'Almost — 1 of 2 items met');
+const big = reviewFocus({ file: null, code: 'x'.repeat(30000), lang: 'sql', checklist: ['a'], items: ['met'], grade: 'solid', review: 'ok' });
+ok('a long file is trimmed on follow-ups, not resent whole', big.brief.length < 12000 && /the rest is cut off/.test(big.brief), String(big.brief.length));
 
 // --- the examiner ----------------------------------------------------------
 

@@ -20,7 +20,7 @@
  * is what stops the mentor tab from becoming a cheat button: it will explain any
  * concept you like and will not hand over the milestone's implementation.
  */
-import type { Day, MentorProvider, Track, Week } from './types';
+import type { Day, ItemVerdict, MentorProvider, TaskGrade, Track, Week } from './types';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -1170,6 +1170,158 @@ export function reviewGraderPrompt(
     : '';
   const base = last ? REVIEW_FINAL : REVIEW_GRADER;
   return `${base}\n\n---\n\n${materialFor(context)}\n\nThe challenge they were asked:\n\n${challenge}${standing}`;
+}
+
+// --- checking the practice task ---------------------------------------------
+
+/** The most of a submission the reviewer is sent. A file is fine; a whole project is not. */
+export const MAX_SUBMISSION_CHARS = 60_000;
+
+/**
+ * How much of the submitted file rides along on follow-up questions about the review.
+ * The whole file is sent once, to be reviewed; carrying all of it on every later message
+ * would make a chat about one line cost as much as the review itself.
+ */
+const FOLLOW_UP_FILE_CHARS = 8_000;
+
+const taskReviewer = (track: Track | undefined) => {
+  const s = subjectOf(track);
+  return `You are reviewing work someone did for a practice task in a deliberate-practice
+${s.name} curriculum, the way a senior engineer reviews a merge request: honestly,
+specifically and kindly.
+
+WHAT YOU CAN AND CANNOT KNOW. You are given the text of their file. You cannot run it.
+Judge what is written — and, where the task has them record plans, output or observations,
+judge whether what they recorded is consistent with what the lesson teaches. Do not assume
+something happened because the code would make it happen. If the evidence for a checklist
+item is not in what you were given, that item is "unclear": not "met", and not "missing".
+
+THE PRIME DIRECTIVE. They did this so that they would learn it. Never write the solution or
+a corrected version of the file, and do not paste replacement statements. Point at the line
+or section, say what is wrong or absent and why it matters, and — where it helps — name the
+concept or keyword they should go and look up. Quoting a line of theirs is fine.
+
+WHAT TO WRITE, briefly, in this order:
+1. Two or three sentences: what they did, and how it went overall.
+2. "Checklist": one line per checklist item, using the numbers below — the number, one
+   verdict word, and one sentence of why that points at the part of their file.
+3. "Worth fixing": at most three things a senior reviewer would raise about idiom,
+   structure, or where they are fighting the language. Leave it out if there is nothing
+   real to say.
+
+The verdict words, strictly: met = the file shows it; partial = started, or some of it is
+there; missing = there is no sign of it; unclear = it cannot be judged from the file. Be
+exact rather than generous — a "met" for something that is not there teaches the wrong thing.
+
+END with one line and nothing after it:
+[[ITEMS: 1=met, 2=partial, 3=unclear]]
+— exactly one entry per checklist item, in order, using only those four words.
+
+${NO_LATEX}`;
+};
+
+/** System prompt for reviewing a submission against `day`'s task and checklist. */
+export function taskReviewPrompt(context: { week: Week; day: Day }): string {
+  const { week, day } = context;
+  const task = day.task;
+  const list = (task?.checklist ?? []).map((c, i) => `${i + 1}. ${c}`).join('\n');
+  return [
+    taskReviewer(week.track),
+    '---',
+    materialFor(context),
+    task ? `\nThe task they were set:\n\n${task.markdown}` : '',
+    task?.files.length ? `\nThe file they were asked to produce: ${task.files.join(', ')}` : '',
+    `\nThe checklist to judge it against (${task?.checklist.length ?? 0} items):\n\n${list}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** A fence longer than any run of backticks inside the code, so the code cannot close it. */
+function fenceFor(code: string): string {
+  const longest = Math.max(0, ...[...code.matchAll(/`+/g)].map((m) => m[0].length));
+  return '`'.repeat(Math.max(3, longest + 1));
+}
+
+/** The message that carries the work itself. */
+export function taskSubmission(opts: { file: string | null; code: string; lang: string; notes?: string }): string {
+  const fence = fenceFor(opts.code);
+  const parts = [
+    `Their work${opts.file ? ` — the file \`${opts.file}\`` : ''}:`,
+    `${fence}${opts.lang}\n${opts.code.trim()}\n${fence}`,
+  ];
+  if (opts.notes?.trim()) parts.push(`What they wrote as having confused them:\n\n${opts.notes.trim()}`);
+  return parts.join('\n\n');
+}
+
+const ITEMS_RE = /\[\[ITEMS:([^\]]*)\]\]/gi;
+const ITEM_RE = /(\d+)\s*=\s*(met|partial|missing|unclear)/gi;
+
+/**
+ * The reviewer's verdict per checklist item, or null if the line is missing or wrong.
+ *
+ * Strict on purpose: exactly one entry for each item, none out of range, none repeated.
+ * A guess at a half-readable line would be a grade the reviewer never gave, and a grade
+ * is the one thing here that should never be invented.
+ */
+export function parseItems(text: string, count: number): ItemVerdict[] | null {
+  const body = [...text.matchAll(ITEMS_RE)].at(-1)?.[1];
+  if (!body || count < 1) return null;
+  const out: (ItemVerdict | undefined)[] = Array.from({ length: count }, () => undefined);
+  for (const m of body.matchAll(ITEM_RE)) {
+    const index = Number(m[1]) - 1;
+    if (index < 0 || index >= count || out[index]) return null;
+    out[index] = m[2].toLowerCase() as ItemVerdict;
+  }
+  return out.every((v) => v !== undefined) ? (out as ItemVerdict[]) : null;
+}
+
+/** The review with its machine-readable line removed, for display. */
+export function stripItems(text: string): string {
+  return text.replace(ITEMS_RE, '').trimEnd();
+}
+
+/**
+ * The grade, worked out here from the verdicts and never asked of the model.
+ *
+ * - solid: every item is met.
+ * - almost: nothing is missing, but something is partial or cannot be shown from the file.
+ * - notyet: at least one item has no sign of it.
+ *
+ * Simple enough to say in one line under the result, so a grade is never a mystery: you
+ * can see which item held it back.
+ */
+export function gradeOf(items: ItemVerdict[]): TaskGrade {
+  if (items.includes('missing')) return 'notyet';
+  return items.every((i) => i === 'met') ? 'solid' : 'almost';
+}
+
+/** What the mentor is told when they ask about a review, so it knows the file and the verdicts. */
+export function reviewFocus(opts: {
+  file: string | null;
+  code: string;
+  lang: string;
+  checklist: string[];
+  items: ItemVerdict[];
+  grade: TaskGrade;
+  review: string;
+}): MentorFocus {
+  const met = opts.items.filter((i) => i === 'met').length;
+  const label = { solid: 'Solid', almost: 'Almost', notyet: 'Not yet' }[opts.grade];
+  const shown = opts.code.length > FOLLOW_UP_FILE_CHARS ? `${opts.code.slice(0, FOLLOW_UP_FILE_CHARS)}\n… (the rest is cut off here)` : opts.code;
+  const fence = fenceFor(shown);
+  return {
+    label: 'Check of your work',
+    question: `The review of ${opts.file ? `\`${opts.file}\`` : 'your work'}`,
+    outcome: [`${label} — ${met} of ${opts.items.length} items met`],
+    brief: [
+      `A review of their practice task work${opts.file ? ` (${opts.file})` : ''}, which you did not write and must not redo for them.`,
+      `The checklist and how each item was judged:\n${opts.checklist.map((c, i) => `${i + 1}. [${opts.items[i]}] ${c}`).join('\n')}`,
+      `The grade: ${label} (${met} of ${opts.items.length} met). It follows from the verdicts: any item missing means "not yet"; all met means "solid"; otherwise "almost".`,
+      `The review they were shown:\n\n${stripItems(opts.review)}`,
+      `Their file:\n${fence}${opts.lang}\n${shown.trim()}\n${fence}`,
+    ].join('\n\n'),
+  };
 }
 
 /** Run a stream to completion. The deck wants the whole challenge, not a typewriter. */

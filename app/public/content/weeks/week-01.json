@@ -1274,7 +1274,7 @@
           "read your own syscall sequence in `strace` and matched it to your source",
           "timed a blocked `accept()` with `strace -T`",
           "found `LISTEN` and `ESTAB` rows for port 9000 simultaneously",
-          "watched `Recv-Q` and `Send-Q` fill with a server that wasn't reading, and",
+          "watched `Recv-Q` and `Send-Q` fill with a server that wasn't reading, and accounted for every byte sent",
           "found the port in `TIME_WAIT` after a disconnect, and watched it expire",
           "wrote the `TIME_WAIT` explanation in `PROGRESS.md` in your own words"
         ]

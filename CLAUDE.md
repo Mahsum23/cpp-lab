@@ -420,6 +420,33 @@ launcher builds from, so every task needs them and they must be exactly right. A
 genuinely has no single file (the sockets week's server-and-client days) is fine — the
 launcher says so and still offers the run command — but that should be the exception.
 
+## The practice task is checked, not self-certified
+
+Until now "Done" on the Practice tab meant only that he said so — the one step of the day
+with no measurement. It now has one, without pretending to be more than it is. He pastes or
+picks the file he wrote (`TaskCheck.svelte`) and the mentor **reads** it against the
+checklist: each item comes back `met`, `partial`, `missing` or `unclear`, with a sentence of
+why. It cannot run the code, and says so; `./lab check` is what runs it. For a task that
+has him record plans or output, that evidence must be written into the file as comments,
+and an item that can't be shown from the file is `unclear`, never `met` and never `missing`.
+
+The **grade is computed by the app from those verdicts** (`gradeOf`), never asked of the
+model, so it can always be explained by pointing at an item: *solid* = every item met,
+*almost* = nothing missing but something partial or unproven, *not yet* = any item missing.
+If the reply's verdict line can't be read exactly (one entry per item, none repeated), nothing
+is graded and the previous grade stands — a grade nobody gave is worse than none.
+
+The reviewer never writes the solution or a corrected file; it points at the line and says
+what is wrong. The grade does not gate anything: the day's ring still closes on the drill,
+and `task: done` is still his button. Checking does move an untouched task to "attempted".
+Follow-up questions go to a thread of their own (`check:<day>`) with the review and his
+file attached, the same way a review card's are (`focus`).
+
+Checklist items in a lesson may run over several lines, and must reach the app whole: an
+indented continuation belongs to the item above it. Reading one line per item had been
+cutting "…and you can say what the difference was" down to "…off the same", and a reviewer
+grading half a requirement grades the wrong thing (`test-checklist.mjs` holds that).
+
 ## The SQL track is PostgreSQL-first
 
 He said plainly that Postgres is the database he wants to learn first, so the SQL track

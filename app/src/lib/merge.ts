@@ -12,7 +12,7 @@
  */
 import {
   emptyDayProgress, emptyReview,
-  type DayProgress, type Progress, type ReviewCard, type ReviewState, type StreakState, type TaskState, type QuizState,
+  type DayProgress, type Progress, type ReviewCard, type ReviewState, type StreakState, type TaskReview, type TaskState, type QuizState,
 } from './types';
 import { deriveXp } from './xp';
 
@@ -34,6 +34,17 @@ function mergeNotes(a: string, b: string): string {
   // Two devices, two different notes on the same day. Silently dropping one is the
   // worst outcome on offer; he can delete the half he doesn't want.
   return `${x}\n\n---\n\n${y}`;
+}
+
+/**
+ * The newer check of the work wins, whole. Its verdicts and its grade describe one file
+ * at one moment, so mixing items from two of them would grade work nobody submitted. The
+ * count of checks is a tally of attempts on either device, so it takes the larger.
+ */
+function mergeTaskReview(local: TaskReview | null, remote: TaskReview | null): TaskReview | null {
+  if (!local || !remote) return local ?? remote;
+  const newer = local.at >= remote.at ? local : remote;
+  return { ...newer, checks: Math.max(local.checks, remote.checks) };
 }
 
 function mergeDay(local: DayProgress, remote: DayProgress): DayProgress {
@@ -68,6 +79,7 @@ function mergeDay(local: DayProgress, remote: DayProgress): DayProgress {
     drill: mergeAnswers(local.drill ?? blank, remote.drill ?? blank),
     task: TASK_RANK[local.task] >= TASK_RANK[remote.task] ? local.task : remote.task,
     checklist: Array.from({ length: width }, (_, i) => Boolean(local.checklist[i]) || Boolean(remote.checklist[i])),
+    taskReview: mergeTaskReview(local.taskReview ?? null, remote.taskReview ?? null),
     notes: mergeNotes(local.notes, remote.notes),
     teachBackDone: local.teachBackDone || remote.teachBackDone,
     completedAt: earliest(local.completedAt, remote.completedAt),
