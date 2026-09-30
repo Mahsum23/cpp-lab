@@ -186,6 +186,15 @@ export interface DayProgress {
   completedAt: string | null;
 }
 
+/**
+ * Whether the lab task counts as finished: he said so ("Done"), or a check of his work
+ * came back Solid. Either is enough, and a later weaker check never undoes the first —
+ * a Solid check is evidence that stays true of the file that was checked.
+ */
+export function taskDone(p: Pick<DayProgress, 'task' | 'taskReview'>): boolean {
+  return p.task === 'done' || p.taskReview?.grade === 'solid';
+}
+
 export interface StreakState {
   count: number;
   longest: number;

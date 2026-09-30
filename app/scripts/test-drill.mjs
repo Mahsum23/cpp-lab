@@ -24,7 +24,7 @@ async function load(entry, name) {
 }
 
 const { mergeProgress } = await load('../src/lib/merge.ts', 'cpp-lab-drill-merge.mjs');
-const { emptyDayProgress, defaultProgress } = await load('../src/lib/types.ts', 'cpp-lab-drill-types.mjs');
+const { emptyDayProgress, defaultProgress, taskDone } = await load('../src/lib/types.ts', 'cpp-lab-drill-types.mjs');
 
 let fails = 0;
 const ok = (label, cond, extra) => {
@@ -92,6 +92,17 @@ q.quiz.cleanSweep = true;
 merged = mergeProgress(withDay(q), withDay({ ...emptyDayProgress('w') })).days['go-day-01'];
 ok('quiz answers still merge', merged.quiz.answers.q1 === 2);
 ok('and a clean sweep is still sticky', merged.quiz.cleanSweep === true);
+
+console.log('\n— the lab task counts as done —');
+const t = (task, grade) => ({ task, taskReview: grade ? { grade, items: [], at: 'x', checks: 1 } : null });
+ok('untouched is not done', !taskDone(t('todo')));
+ok('attempted is not done', !taskDone(t('attempted')));
+ok('"Done" is done', taskDone(t('done')));
+ok('a Solid check is done, even if never marked', taskDone(t('attempted', 'solid')));
+ok('Almost is not done', !taskDone(t('attempted', 'almost')));
+ok('Not yet is not done', !taskDone(t('attempted', 'notyet')));
+ok('a later weak check never undoes "Done"', taskDone(t('done', 'notyet')));
+ok('a record with no taskReview key still reads', taskDone({ task: 'done' }) && !taskDone({ task: 'todo' }));
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all drill cases pass');
 process.exit(fails ? 1 : 0);

@@ -11,7 +11,7 @@
   import Drill from '../../components/Drill.svelte';
   import TaskCheck from '../../components/TaskCheck.svelte';
   import type { MentorFocus } from '../../lib/mentor';
-  import { TRACKS, type ItemVerdict, type Track } from '../../lib/types';
+  import { taskDone, TRACKS, type ItemVerdict, type Track } from '../../lib/types';
 
   interface Props {
     day: Day;
@@ -123,7 +123,7 @@
     [
       `**Day ${day.day} — ${day.title} (${today()}):**`,
       `- Quiz: ${score.correct}/${score.total}`,
-      `- Task: ${dp.task === 'done' ? 'done' : dp.task === 'attempted' ? 'attempted' : 'not started'}`,
+      `- Task: ${taskDone(dp) ? 'done' : dp.task === 'attempted' ? 'attempted' : 'not started'}`,
       dp.taskReview && verdicts
         ? `- Checked: ${{ solid: 'solid', almost: 'almost', notyet: 'not yet' }[dp.taskReview.grade]} (${verdicts.filter((v) => v === 'met').length}/${verdicts.length} items met)`
         : null,
@@ -138,8 +138,10 @@
     void app.setTaskState(day, weekId, 'attempted');
   }
 
-  function done() {
+  /** Records the task as finished — this is what turns the Practice arc green — then moves on. */
+  async function done() {
     flushNotes();
+    await app.setTaskState(day, weekId, 'done');
     onfinish();
   }
 </script>
@@ -254,7 +256,7 @@
   <Button variant="secondary" onclick={attempted}>
     {dp.task === 'attempted' ? '✓ Attempted' : 'Mark attempted'}
   </Button>
-  <Button onclick={done}>Done ✓</Button>
+  <Button onclick={() => void done()}>Done ✓</Button>
 </div>
 
 <button class="ask" onclick={() => { ask = null; asking = true; }} aria-label="Ask the mentor">
