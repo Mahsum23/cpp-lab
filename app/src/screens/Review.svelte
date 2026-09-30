@@ -13,6 +13,7 @@
    * cleared, because a review system you can't quit is one you start avoiding.
    */
   import { tick, untrack } from 'svelte';
+  import { answerKeys, focusComposer, mentorKey } from '../lib/shortcuts.svelte';
   import { app } from '../lib/app.svelte';
   import { router } from '../lib/router.svelte';
   import Button from '../components/Button.svelte';
@@ -365,6 +366,25 @@
     await settle('again');
     await deal();
   }
+
+  // M does what the Ask button does, and only when it would show: once the card is
+  // answered. Before that the mentor would be the answer key.
+  mentorKey(() => ({
+    canOpen: () => answered && Boolean(context) && app.mentorReady,
+    open: () => (asking = true),
+    close: () => (asking = false),
+    isOpen: () => asking,
+    focus: focusComposer,
+  }));
+
+  // 1–4 pick an answer on a quiz card; N or Enter deals the next card once it is answered.
+  answerKeys(() => ({
+    count: () => question?.options.length ?? 0,
+    canChoose: () => card?.kind === 'quiz' && Boolean(question) && picked === null && !loading,
+    choose: (i) => void choose(i),
+    canAdvance: () => answered && !streaming,
+    advance: () => void deal(),
+  }));
 
   $effect(() => {
     if (app.ready && !card && !seen.size) void deal();

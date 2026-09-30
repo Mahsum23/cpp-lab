@@ -5,6 +5,7 @@
   import Button from '../../components/Button.svelte';
   import CopyLine from '../../components/CopyLine.svelte';
   import MentorSheet from '../../components/MentorSheet.svelte';
+  import { focusComposer, mentorKey } from '../../lib/shortcuts.svelte';
   import SelectionAsk from '../../components/SelectionAsk.svelte';
   import { today } from '../../lib/date';
   import Drill from '../../components/Drill.svelte';
@@ -26,6 +27,14 @@
 
   let asking = $state(false);
   let ask = $state<string | null>(null);
+
+  // M does what the floating Ask button does, and Esc closes the sheet.
+  mentorKey(() => ({
+    open: () => { ask = null; asking = true; },
+    close: () => (asking = false),
+    isOpen: () => asking,
+    focus: focusComposer,
+  }));
   const week = $derived(app.findDay(weekId, day.id)?.week ?? null);
 
   /**

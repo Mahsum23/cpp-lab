@@ -404,6 +404,22 @@ two-line answer would be impossible; and the "Check your work" box holds a whole
 Enter is a newline there and Ctrl/Cmd+Enter checks it. An Enter that accepts an IME
 composition never sends.
 
+**Keyboard shortcuts come from one place, and follow the buttons.** `M` asks the mentor, `Esc`
+closes it, `1`–`4` pick an answer, `N`/Enter go on, `G` then `T`/`M`/`S`/`R`/`,` navigate, `?` lists
+them (`SHORTCUT_HELP`, kept beside the rules so the sheet cannot drift). One listener lives in
+`App.svelte`; a screen never writes its own `keydown` but registers what it can do —
+`mentorKey` for "how I open the mentor", `answerKeys` for "my answer buttons and my next" — so a
+new screen gets every rule for free. The rules, all in `shortcuts.ts` and tested without a
+browser: never while typing (only Esc works then, because closing should not depend on the
+cursor), never with Ctrl/Cmd/Alt, never on a held key or mid-IME, and letters are read from the
+physical key (`code`), because on the Russian layout the M key types "ь".
+
+The important one: **a shortcut may never do more than its button.** `M` mirrors the visible
+Ask button and is silent wherever that button is deliberately absent — the lesson's Quiz and
+Explain steps (the mentor there would be the answer key, or would hand over what the examiner
+is measuring) and an unanswered review card. Elsewhere it opens the Mentor tab. So a new place
+that hides the mentor must not register `mentorKey`, and must not be reachable by `M`.
+
 ## Every day has two halves, and the phone half is not optional
 
 A task needs a machine, and not having one is the most common reason a day stalls

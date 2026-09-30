@@ -2,6 +2,7 @@
   import type { Day } from '../../lib/types';
   import { app } from '../../lib/app.svelte';
   import Button from '../../components/Button.svelte';
+  import { answerKeys } from '../../lib/shortcuts.svelte';
 
   interface Props {
     day: Day;
@@ -49,6 +50,15 @@
     if (answered || !q) return;
     void app.answerQuiz(day, weekId, q.id, i);
   }
+
+  // 1–4 pick an answer; N or Enter moves on once it is answered.
+  answerKeys(() => ({
+    count: () => q?.options.length ?? 0,
+    canChoose: () => Boolean(q) && !answered,
+    choose: (i) => choose(i),
+    canAdvance: () => answered,
+    advance: () => next(),
+  }));
 
   function next() {
     if (last) {
