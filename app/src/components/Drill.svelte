@@ -15,6 +15,7 @@
   import { app } from '../lib/app.svelte';
   import { highlight } from '../lib/markdown';
   import Button from './Button.svelte';
+  import { answerKeys } from '../lib/shortcuts.svelte';
 
   interface Props {
     day: Day;
@@ -49,6 +50,15 @@
     if (answered || !step) return;
     void app.answerDrill(day, weekId, step.id, i);
   }
+
+  // 1–4 pick an answer; N or Enter moves on once it is answered.
+  answerKeys(() => ({
+    count: () => step?.options.length ?? 0,
+    canChoose: () => Boolean(step) && !answered,
+    choose: (i) => choose(i),
+    canAdvance: () => answered,
+    advance: () => next(),
+  }));
 
   function next() {
     if (last) {

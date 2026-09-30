@@ -10,6 +10,8 @@
   import Review from './screens/Review.svelte';
   import Session from './screens/Session.svelte';
   import { update } from './lib/update.svelte';
+  import { shortcuts } from './lib/shortcuts.svelte';
+  import ShortcutsHelp from './components/ShortcutsHelp.svelte';
 
   const route = $derived(router.route);
 
@@ -36,6 +38,11 @@
     return () => document.removeEventListener('visibilitychange', onVisible);
   });
 </script>
+
+<!-- One listener for every shortcut. Screens register what they can do; see shortcuts.svelte.ts. -->
+<svelte:window onkeydown={(e) => shortcuts.handle(e)} />
+
+<ShortcutsHelp />
 
 {#if update.ready}
   <!-- Deliberately an offer, not an automatic reload: at this point there may be a

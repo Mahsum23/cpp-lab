@@ -7,7 +7,7 @@
    * conversation you find later under Mentor, rather than a second transcript that
    * quietly disagrees with the first.
    */
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import type { Day, Week } from '../lib/types';
   import { app } from '../lib/app.svelte';
   import { chat } from '../lib/chat.svelte';
@@ -15,7 +15,7 @@
   import Markdown from './Markdown.svelte';
   import Button from './Button.svelte';
   import CodeArea from './CodeArea.svelte';
-  import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
+  import { asCodeBlock, hasFence, shapeOf, touchFirst } from '../lib/compose';
   import { TRACKS, type Track } from '../lib/types';
   import type { MentorFocus } from '../lib/mentor';
 
@@ -112,6 +112,13 @@
       sentHere = false;
       expanded = false;
     });
+  });
+
+  // Ready to type the moment it opens — but not on a phone, where focusing a field
+  // raises the keyboard over the very thing the question was about.
+  $effect(() => {
+    if (!open || !app.mentorReady || touchFirst()) return;
+    void tick().then(() => untrack(() => area?.focus()));
   });
 
   // Awaits the open, so the question lands in this day's thread rather than racing

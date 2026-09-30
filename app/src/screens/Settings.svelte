@@ -5,6 +5,7 @@
   import { PROVIDERS } from '../lib/mentor';
   import type { MentorProvider } from '../lib/types';
   import { update } from '../lib/update.svelte';
+  import { shortcuts } from '../lib/shortcuts.svelte';
 
   const providers = Object.entries(PROVIDERS) as [MentorProvider, (typeof PROVIDERS)[MentorProvider]][];
   const provider = $derived(PROVIDERS[app.mentorProvider]);
@@ -170,6 +171,17 @@
       <span>Unlock days ahead</span>
     </label>
     <p class="hint">One session a day is the design. This just removes the lock if you insist.</p>
+  </section>
+
+  <section>
+    <h2>Keyboard</h2>
+    <p class="hint">
+      <kbd>M</kbd> asks the mentor, <kbd>Esc</kbd> closes it, <kbd>1</kbd>–<kbd>4</kbd> answer
+      and <kbd>N</kbd> moves on. <kbd>?</kbd> shows the rest, anywhere.
+    </p>
+    <Button variant="secondary" size="sm" onclick={() => (shortcuts.helpOpen = true)}>
+      All keyboard shortcuts
+    </Button>
   </section>
 
   <section>
@@ -405,6 +417,18 @@
 </div>
 
 <style>
+  kbd {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    color: var(--text);
+  }
+
   h1 {
     font-size: 27px;
     letter-spacing: -0.025em;

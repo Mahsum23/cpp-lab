@@ -8,6 +8,7 @@
   import CodeArea from '../components/CodeArea.svelte';
   import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
   import { TRACKS, type Track } from '../lib/types';
+  import { mentorKey } from '../lib/shortcuts.svelte';
 
   const provider = $derived(PROVIDERS[app.mentorProvider]);
 
@@ -26,6 +27,13 @@
     chat.context = context;
     void chat.open(threadKey);
   });
+
+  // Already here, so M just puts the cursor in the box.
+  mentorKey(() => ({
+    open: () => area?.focus(),
+    close: () => {},
+    isOpen: () => false,
+  }));
 
   // Follow the stream. Keyed on the tail's length so it re-runs per chunk, not just
   // per message — otherwise a long reply grows off the bottom of the screen.
