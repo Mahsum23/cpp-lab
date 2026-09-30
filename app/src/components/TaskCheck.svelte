@@ -171,7 +171,7 @@
           <p class="rule">{RULE[review.grade]}</p>
           <p class="meta">
             Checked {review.checks === 1 ? 'once' : `${review.checks} times`}.
-            {#if review.grade === 'solid'}Nothing left to fix — mark it done when you are.{/if}
+            {#if review.grade === 'solid'}Solid counts as done: the Practice step is complete.{/if}
             {#if focus && ondiscuss}
               <button class="link" onclick={ondiscuss}>Talk it through with the mentor</button>
             {/if}

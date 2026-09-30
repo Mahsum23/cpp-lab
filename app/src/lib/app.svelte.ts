@@ -12,6 +12,7 @@ import {
   type TaskState,
   type Week,
   isTrack,
+  taskDone,
   TRACKS,
   type Track,
 } from './types';
@@ -102,7 +103,7 @@ class AppStore {
     const cur = this.current;
     if (!cur) return false;
     const p = this.dayProgress(cur.day.id, cur.week.id);
-    return p.theoryDone && Boolean(p.quiz.completedAt) && p.task !== 'done';
+    return p.theoryDone && Boolean(p.quiz.completedAt) && !taskDone(p);
   }
 
   /** Decided once per launch, so a re-render can't re-roll it. */
@@ -231,8 +232,8 @@ class AppStore {
   segments(day: Day, weekId: string): boolean[] {
     const p = this.dayProgress(day.id, weekId);
     const practised = day.drill?.length
-      ? Boolean(p.drill.completedAt) || p.task === 'done'
-      : p.task === 'done';
+      ? Boolean(p.drill.completedAt) || taskDone(p)
+      : taskDone(p);
     const base = [p.theoryDone, Boolean(p.quiz.completedAt) || !day.quiz?.length, practised];
     // Only days that actually pose a teach-back get the fourth arc, so a day without
     // one still reads as complete at three.
@@ -459,7 +460,7 @@ class AppStore {
     return this.availableDays.filter(({ week, day }) => {
       if (!day.task) return false;
       const p = this.dayProgress(day.id, week.id);
-      return p.task !== 'done' && (Boolean(p.drill.completedAt) || Boolean(p.completedAt));
+      return !taskDone(p) && (Boolean(p.drill.completedAt) || Boolean(p.completedAt));
     });
   }
 
@@ -474,8 +475,8 @@ class AppStore {
    * pointing at an item.
    *
    * Asking for a check is an attempt by definition, so an untouched task becomes
-   * "attempted". It never becomes "done": that is still his to say, and the day's ring
-   * closes on the drill, not on this.
+   * "attempted". It never sets "done" itself — a Solid grade counts as done through
+   * `taskDone`, and "Done" is still his to say — and the day's ring closes on the drill.
    */
   async setTaskReview(day: Day, weekId: string, items: ItemVerdict[]): Promise<TaskReview> {
     const p = this.mutable(day.id, weekId);

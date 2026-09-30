@@ -465,8 +465,12 @@ If the reply's verdict line can't be read exactly (one entry per item, none repe
 is graded and the previous grade stands — a grade nobody gave is worse than none.
 
 The reviewer never writes the solution or a corrected file; it points at the line and says
-what is wrong. The grade does not gate anything: the day's ring still closes on the drill,
-and `task: done` is still his button. Checking does move an untouched task to "attempted".
+what is wrong. The day's ring still closes on the drill, but the task has its own state, and
+`taskDone()` (in `types.ts`) is the one place that decides it: `task === 'done'` (the Done ✓
+button, which records it — it once only advanced the page, so nothing could ever become
+done) **or** a *Solid* check. A weaker later check never undoes either. Every reader —
+the Practice arc in `segments()`, the Today lab-queue count, the PROGRESS snippet — goes
+through it, so they cannot disagree. Checking itself moves an untouched task to "attempted".
 Follow-up questions go to a thread of their own (`check:<day>`) with the review and his
 file attached, the same way a review card's are (`focus`).
 
