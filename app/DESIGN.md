@@ -664,7 +664,14 @@ went somewhere better:
   written yet*. Now running out is a normal, visible state: at two written days left Today
   says so, and at zero it says "All caught up" with a button that copies a ready-made
   request for more (track, last day finished, what is planned next). The plan itself is
-  `milestones/tracks.yaml` → `next:`, shown at the end of the map as "After that".
+  `milestones/tracks.yaml` → `next:`, shown at the end of the map as "Coming up".
+
+The first device to update showed only the first old week on the map. The new build had
+read a *stale* content list (GitHub Pages' edge keeps files for up to ten minutes after a
+deploy, and `cache: 'no-cache'` only revalidates against the edge), so it saw nothing to
+migrate. Two guards since: the list is fetched with a query string the edge has never
+seen (the service worker ignores it for its offline copy), and any old per-week bundles
+still held are joined into one path on the client, so the whole track shows either way.
 
 Nothing keyed by week moved, because almost nothing was: progress, review cards, chat
 threads, XP and the streak are all keyed by day id. The exceptions were the session URL

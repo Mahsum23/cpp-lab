@@ -154,7 +154,11 @@ class AppStore {
   /** Weeks of the subject being studied. `weeks` stays the full set: a review card
    *  from the other track still has to be able to find the day it came from. */
   get trackWeeks(): Week[] {
-    return this.weeks.filter((w) => (w.track ?? 'cpp') === this.track);
+    const all = this.weeks.filter((w) => (w.track ?? 'cpp') === this.track);
+    // A track's path (it carries `topics`) supersedes any per-week bundle still held, so
+    // a device caught between the two formats can never show a day twice.
+    const paths = all.filter((w) => w.topics);
+    return paths.length ? paths : all;
   }
 
   async setTrack(track: Track) {
@@ -251,13 +255,31 @@ class AppStore {
     return this.progress.settings.peekAhead ? 'unlocked' : 'locked';
   }
 
-  /** This track's path of days. There is one per track now that weeks are gone. */
+  /**
+   * This track's path of days. Normally exactly one is held per track. A device that
+   * still has the old per-week bundles — it saw a stale content list, or is offline
+   * mid-migration — gets them joined into one path here, each old week standing in as a
+   * topic, so the map and Today show the whole track either way. Before this, the first
+   * week alone was taken for the path, and every later day vanished from the map.
+   */
   get path(): Week | null {
-    return this.trackWeeks[0] ?? null;
+    const ws = this.trackWeeks;
+    if (ws.length <= 1) return ws[0] ?? null;
+    return {
+      ...ws[0],
+      title: TRACKS[this.track].label,
+      intro: '',
+      topics: ws.flatMap((w) => w.topics ?? [{ id: w.id, title: w.title, intro: w.intro }]),
+      next: ws.flatMap((w) => w.next ?? []),
+      days: ws.flatMap((w) => w.days.map((d) => ({ ...d, topic: d.topic ?? w.id }))),
+    };
   }
 
-  topicTitle(week: Week, day: Day): string | null {
-    return week.topics?.find((t) => t.id === day.topic)?.title ?? null;
+  /** The topic a day sits in, looked up on the track's path. */
+  topicTitle(day: Day): string | null {
+    const path = this.path;
+    const id = path?.days.find((d) => d.id === day.id)?.topic;
+    return path?.topics?.find((t) => t.id === id)?.title ?? null;
   }
 
   /**
@@ -379,7 +401,7 @@ class AppStore {
   async downloadWeek(weekId: string): Promise<void> {
     const ref = this.curriculum?.weeks.find((w) => w.id === weekId);
     if (!ref) return;
-    const week = await fetchWeek(ref.url);
+    const week = await fetchWeek(ref.url, ref.contentHash);
     await store.saveWeek(week);
     this.weeks = [...this.weeks.filter((w) => w.id !== week.id), week].sort((a, b) =>
       a.id.localeCompare(b.id),

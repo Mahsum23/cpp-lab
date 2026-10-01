@@ -5,7 +5,7 @@
 # app has somewhere to live, and it deliberately doesn't touch the C++ at all.
 #
 # Content-only changes (a new lesson .md + .quiz.yaml) go through the same path:
-# push to main, this rebuilds, the app sees the new week on its next launch.
+# push to main, this rebuilds, and the new days appear on the next launch.
 name: Deploy app
 
 on:
@@ -13,7 +13,7 @@ on:
     branches: [main]
     paths:
       - 'app/**'
-      - 'milestones/**/lessons/**'
+      - 'milestones/**'
       - '.github/workflows/deploy-app.yml'
   workflow_dispatch:
 

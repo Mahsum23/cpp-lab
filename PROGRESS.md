@@ -550,3 +550,15 @@ request for more lessons; the end of the map shows what is planned next, from th
 `milestones/tracks.yaml`. Existing installs migrate on launch (old week bundles deleted,
 track paths fetched, progress untouched, old session links redirected), checked in Chromium
 against a seeded install that held the old weeks.
+
+**The map stopped at Day 3 after the tracks update (2026-10-01).** On his device the new
+app showed only the first old week ("What the Database Does", days 1–3) while Today
+offered Day 4. The new code had read a stale content list: GitHub Pages' edge serves a
+file for up to ten minutes after a deploy, so the app saw the old per-week list, found
+nothing to migrate, and took the first old week as the whole path. Replayed exactly in
+Chromium (old build with week 2 loaded → new code with the stale list → fresh list).
+Fixed twice over: the content list is fetched with a cache-busting query (offline copy
+still found, since the service worker ignores the query), and old per-week bundles still
+on a device are joined into one path, so the map shows all ten days even mid-migration.
+Also, at his request, the map's "new days are written on request" line and copy button
+are gone; it ends with "Coming up", the plan from `tracks.yaml`.

@@ -58,6 +58,9 @@ export default defineConfig({
             options: {
               cacheName: 'cpp-lab-content',
               networkTimeoutSeconds: 5,
+              // Requests carry a cache-busting query (content.ts); the offline copy is
+              // the same file whatever the query said.
+              matchOptions: { ignoreSearch: true },
               expiration: { maxEntries: 64, maxAgeSeconds: 60 * 60 * 24 * 365 },
               cacheableResponse: { statuses: [0, 200] },
             },
