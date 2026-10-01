@@ -52,9 +52,9 @@ the synced payload.
 
 Connecting a second device with the same token finds the existing gist and **merges**
 rather than overwriting: every completed day, note and badge from both sides survives.
-Settings, and which weeks are downloaded, deliberately stay per-device. See
-`DESIGN.md` §8.5 for why the streak is the one field that gets chosen instead of
-merged.
+Settings, and which content is downloaded, deliberately stay per-device. See
+`DESIGN.md` §8.5 for how XP and the streak are rebuilt from the merged days rather than
+merged as numbers.
 
 **Reset all progress** switches sync off as part of the wipe, so it can't push the
 empty record over your backup. Reconnecting pulls the gist back.
@@ -117,8 +117,9 @@ construction of its system prompt.
 Two files per day, and the app is a build artifact of them:
 
 ```
-milestones/<milestone>/lessons/
-  week.yaml                     week roster: titles, teasers, order, teach-back
+milestones/tracks.yaml          each track: title, intro, and what is planned next
+milestones/<topic>/lessons/
+  topic.yaml                    the topic's roster: titles, teasers, order, teach-back
   day-NN-<slug>.md              theory + task     (## Theory, ## Task, ## Quiz)
   day-NN-<slug>.quiz.yaml       the answer key    (kept out of the .md on purpose)
 ```
@@ -130,8 +131,9 @@ everyone does) can't turn into a pattern the learner spots instead of thinking.
 `## Task` is parsed by convention — `- File: \`path\``, `- Compile: \`cmd\``, and a
 `### Checklist` of `- [ ]` items become structured UI; everything else stays prose.
 
-A day listed in `week.yaml` with no `.md` yet shows on the map as a locked, titled
-step, so the path reads whole while lessons are still written one at a time.
+A day listed in `topic.yaml` with no `.md` yet shows on the map as a locked, titled
+step. Every topic of a track is joined, in directory order, into that track's single
+path; day numbers keep counting up across topics, and the build fails if one restarts.
 
 Then:
 
@@ -140,9 +142,9 @@ npm run content   # regenerate; warns about missing "why" text, bad option count
 git commit && git push
 ```
 
-The app notices the new `contentHash` on its next launch. New weeks are offered with a
-**Load week** button; a changed hash on a week you already hold refreshes silently and
-keeps your progress, because that's a typo fix, not new work.
+The app notices the new `contentHash` on its next launch and takes the new path on its
+own: new days simply appear, and Today says how many arrived. Progress is keyed by day
+id, so nothing already done is touched.
 
 ## Shape of it
 

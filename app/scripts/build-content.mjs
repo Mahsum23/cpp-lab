@@ -3,18 +3,24 @@
  * build-content.mjs — compiles the repo's lessons into the app's content JSON.
  *
  * Source of truth is the repo, always:
- *   milestones/<m>/lessons/week.yaml            week roster (titles, teasers, order)
+ *   milestones/tracks.yaml                      each track's title, intro and plan
+ *   milestones/<m>/lessons/topic.yaml           a topic's roster (titles, teasers, order)
  *   milestones/<m>/lessons/day-NN-<slug>.md     theory + task, greppable, no answers
  *   milestones/<m>/lessons/day-NN-<slug>.quiz.yaml   the answer key, kept out of the .md
  *
  * Output (build artifacts — never hand-edit):
  *   app/public/content/curriculum.json
- *   app/public/content/weeks/week-NN.json
+ *   app/public/content/weeks/track-<t>.json     one path per track, every topic in order
+ *
+ * A track is one continuous path of days. Topics are how the source is organised and
+ * show up only as dividers on it. The output keeps the shape the app has always read
+ * (`weeks`, one object per entry) so an installed copy that has not updated yet still
+ * understands it — it simply sees one long "week" per track.
  *
  * Run: npm run content
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -314,12 +320,12 @@ function loadDrill(path, dayId) {
   return placeOptions(parsed, `${dayId}-drill`);
 }
 
-function buildWeek(milestone) {
+function buildTopic(milestone) {
   const lessonsDir = join(milestonesDir, milestone, 'lessons');
-  const weekYaml = join(lessonsDir, 'week.yaml');
-  if (!existsSync(weekYaml)) return null;
+  const topicYaml = join(lessonsDir, 'topic.yaml');
+  if (!existsSync(topicYaml)) return null;
 
-  const meta = parseYaml(readFileSync(weekYaml, 'utf8'));
+  const meta = parseYaml(readFileSync(topicYaml, 'utf8'));
   const lessonFiles = readdirSync(lessonsDir).filter((f) => /^day-\d+-.*\.md$/.test(f));
 
   const days = (meta.days ?? []).map((d) => {
@@ -333,6 +339,7 @@ function buildWeek(milestone) {
       estMinutes: d.estMinutes ?? 25,
       teaser: d.teaser?.trim() ?? null,
       teachBack: d.teachBack?.trim() ?? null,
+      topic: milestone,
     };
 
     if (!mdName) {
@@ -367,13 +374,11 @@ function buildWeek(milestone) {
   });
 
   return {
-    schemaVersion: SCHEMA_VERSION,
-    id: meta.id,
+    id: milestone,
     title: meta.title,
-    milestone: meta.milestone ?? milestone,
-    // Which subject this week belongs to. Everything downstream — the day the app
+    // Which subject this topic belongs to. Everything downstream — the day the app
     // offers next, the review deck, which language a fence is highlighted as — keys
-    // off this, so a week that forgets to declare it stays with the original track.
+    // off this, so a topic that forgets to declare it lands in the original track.
     track: meta.track ?? 'cpp',
     intro: meta.intro?.trim() ?? '',
     days,
@@ -393,39 +398,83 @@ const milestones = existsSync(milestonesDir)
       .sort()
   : [];
 
-mkdirSync(join(outDir, 'weeks'), { recursive: true });
+const weeksOut = join(outDir, 'weeks');
+// Emptied first: a path that no longer exists (the old per-week files) must not linger in
+// the build output and keep being served.
+rmSync(weeksOut, { recursive: true, force: true });
+mkdirSync(weeksOut, { recursive: true });
 
-const weekRefs = [];
+const trackMeta = parseYaml(readFileSync(join(milestonesDir, 'tracks.yaml'), 'utf8')) ?? {};
+
 /** Newest source mtime, so `generatedAt` only moves when the content actually does —
  *  stamping Date.now() here means every build dirties a committed file. */
 let newest = 0;
-for (const milestone of milestones) {
-  const week = buildWeek(milestone);
-  if (!week) continue;
+newest = statSync(join(milestonesDir, 'tracks.yaml')).mtimeMs;
 
+const topicsByTrack = new Map();
+for (const milestone of milestones) {
+  const topic = buildTopic(milestone);
+  if (!topic) continue;
   const lessonsDir = join(milestonesDir, milestone, 'lessons');
   for (const f of readdirSync(lessonsDir)) {
     newest = Math.max(newest, statSync(join(lessonsDir, f)).mtimeMs);
   }
+  if (!topicsByTrack.has(topic.track)) topicsByTrack.set(topic.track, []);
+  topicsByTrack.get(topic.track).push(topic);
+}
 
-  const json = `${JSON.stringify(week, null, 2)}\n`;
-  const rel = `content/weeks/${week.id}.json`;
-  writeFileSync(join(outDir, 'weeks', `${week.id}.json`), json);
+const weekRefs = [];
+const trackOrder = [...Object.keys(trackMeta), ...[...topicsByTrack.keys()].filter((t) => !(t in trackMeta))];
+for (const track of trackOrder) {
+  const topics = topicsByTrack.get(track);
+  if (!topics) continue;
+  const meta = trackMeta[track] ?? {};
+  const days = topics.flatMap((t) => t.days);
 
-  const available = week.days.filter((d) => d.status === 'available').length;
+  // Day numbers count up through the whole track, so "Day 6" means one thing on the
+  // path. A topic that restarts at 1 would put two Day 1s on one path.
+  for (let i = 1; i < days.length; i++) {
+    if (days[i].day <= days[i - 1].day) {
+      console.error(
+        `\nFATAL: in the ${track} track, ${days[i].id} is day ${days[i].day} but follows ` +
+          `${days[i - 1].id} (day ${days[i - 1].day}).\n` +
+          '       Day numbers keep counting up through a track: a new topic starts where\n' +
+          '       the previous one stopped.\n',
+      );
+      process.exit(1);
+    }
+  }
+
+  const path = {
+    schemaVersion: SCHEMA_VERSION,
+    id: `track-${track}`,
+    title: meta.title ?? track,
+    milestone: topics.at(-1).id,
+    track,
+    intro: meta.intro?.trim() ?? '',
+    topics: topics.map((t) => ({ id: t.id, title: t.title, intro: t.intro })),
+    next: (meta.next ?? []).map((n) => String(n).trim()),
+    days,
+  };
+
+  const json = `${JSON.stringify(path, null, 2)}\n`;
+  const rel = `content/weeks/${path.id}.json`;
+  writeFileSync(join(weeksOut, `${path.id}.json`), json);
+
+  const available = days.filter((d) => d.status === 'available').length;
   weekRefs.push({
-    id: week.id,
-    title: week.title,
-    milestone: week.milestone,
-    track: week.track,
-    days: week.days.length,
+    id: path.id,
+    title: path.title,
+    milestone: path.milestone,
+    track,
+    days: days.length,
     availableDays: available,
     url: rel,
     contentHash: sha256(json),
     available: available > 0,
   });
 
-  console.log(`  ${week.id}  ${week.title.padEnd(24)} ${available}/${week.days.length} days written`);
+  console.log(`  ${path.id.padEnd(11)} ${path.title.padEnd(14)} ${available}/${days.length} days written, ${topics.length} topic(s)`);
 }
 
 // Day ids are the key of the progress record, the review deck and the mentor's chat
@@ -441,7 +490,7 @@ for (const ref of weekRefs) {
     if (owner) {
       console.error(
         `\nFATAL: day id "${day.id}" is used by both ${owner} and ${ref.id}.\n` +
-          '       Day ids must be unique across every week — progress, review cards and\n' +
+          '       Day ids must be unique across every track — progress, review cards and\n' +
           '       chat threads are all keyed by them, so a collision merges two days into\n' +
           '       one record. Prefix the newer track\'s ids (e.g. "sql-day-01").\n',
       );
@@ -459,7 +508,7 @@ const curriculum = {
 };
 writeFileSync(join(outDir, 'curriculum.json'), `${JSON.stringify(curriculum, null, 2)}\n`);
 
-console.log(`\n${weekRefs.length} week(s) → app/public/content/`);
+console.log(`\n${weekRefs.length} track(s) → app/public/content/`);
 if (warnings.length) {
   console.log(`\n${warnings.length} warning(s):`);
   for (const w of warnings) console.log(`  ! ${w}`);

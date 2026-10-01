@@ -273,6 +273,18 @@ ok("system prompt carries today's theory and task", prompt.includes('THEORY') &&
 ok('system prompt names the days still ahead', prompt.includes('Day 2: Addresses'));
 ok('no-context prompt still carries the directive', /prime directive/i.test(systemPrompt(null)));
 
+// A track is one long path now. The mentor is told the track and the topic, and only the
+// next few days rather than every day to the end of a path that grows on request.
+const path = {
+  title: 'PostgreSQL',
+  topics: [{ id: 'sql-02-queries', title: 'Queries That Look Right', intro: '' }],
+  days: Array.from({ length: 20 }, (_, i) => ({ day: i + 1, title: `T${i + 1}`, topic: 'sql-02-queries' })),
+};
+const onPath = systemPrompt({ week: path, day: { ...day, day: 4, title: 'T4', topic: 'sql-02-queries' } });
+ok('says where: track, topic and day', onPath.includes('PostgreSQL, Queries That Look Right, Day 4 — "T4"'));
+ok('lists the next few days, not the whole path', onPath.includes('Day 10: T10') && !onPath.includes('Day 11: T11'));
+ok('and never calls it a week', !/this week/i.test(onPath));
+
 // Asked from the review deck, the mentor has to know which card is on screen — without
 // it, a question about a quiz card got "how's the day's task going?" back.
 const focus = { label: 'From the quiz', question: 'Q?', outcome: [], brief: 'CARD-BRIEF [THEIR PICK]' };

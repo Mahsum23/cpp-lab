@@ -69,7 +69,8 @@ export const BADGES: Badge[] = [
     name: 'Raw Sockets, Done',
     blurb: 'You built the black box by hand. Asio is now a convenience, not a mystery.',
     glyph: '🧱',
-    test: ({ progress, weeks }) => weekComplete(progress, weeks, 'week-01'),
+    // The id predates tracks and stays, because badges already earned are stored under it.
+    test: ({ progress, weeks }) => topicComplete(progress, weeks, '01-raw-sockets'),
   },
   {
     id: 'teach-back',
@@ -81,13 +82,13 @@ export const BADGES: Badge[] = [
 ];
 
 /**
- * Every day in the week's roster, not just the ones written so far — otherwise
- * finishing Day 1 of an 8-day week hands out the week badge on the spot.
+ * Every day in the topic's roster, not just the ones written so far — otherwise
+ * finishing Day 1 of an 8-day topic hands out its badge on the spot.
  */
-function weekComplete(progress: Progress, weeks: Week[], weekId: string): boolean {
-  const week = weeks.find((w) => w.id === weekId);
-  if (!week?.days.length) return false;
-  return week.days.every((d) => d.status === 'available' && dayDone(progress, d.id));
+function topicComplete(progress: Progress, weeks: Week[], topic: string): boolean {
+  const days = weeks.flatMap((w) => w.days).filter((d) => d.topic === topic);
+  if (!days.length) return false;
+  return days.every((d) => d.status === 'available' && dayDone(progress, d.id));
 }
 
 /** Returns ids newly earned by this state. Pure — the caller records them. */

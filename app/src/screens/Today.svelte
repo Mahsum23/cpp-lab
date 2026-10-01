@@ -6,21 +6,19 @@
   import Flame from '../components/Flame.svelte';
   import { TRACKS, type Track } from '../lib/types';
 
+  import MoreLessons from '../components/MoreLessons.svelte';
+
   const current = $derived(app.current);
-  // Directory names lead with the number on one track and with the subject on another
-  // ("01-raw-sockets", "sql-01-..."), so take the first number wherever it sits.
-  const milestoneNo = (m: string) => /\d+/.exec(m)?.[0] ?? m;
-  // Track-scoped: falling back to weeks[0] would show the other subject's week
-  // in the header of a track that hasn't loaded yet.
-  // With nothing left to do, the week worth talking about is the last one finished.
-  const week = $derived(current?.week ?? app.trackWeeks.at(-1) ?? null);
-  /** Weeks of *this* subject the server has and this device has not loaded yet. */
-  const readyHere = $derived(
-    (app.curriculum?.weeks ?? []).filter(
-      (ref) => app.sync.newWeeks.includes(ref.id) && (ref.track ?? 'cpp') === app.track,
-    ),
-  );
-  const wp = $derived(week ? app.weekProgress(week) : { done: 0, total: 0 });
+  // One path per track. Track-scoped, so a subject that hasn't loaded yet never shows
+  // the other subject's path in its header.
+  const week = $derived(current?.week ?? app.path);
+  const topic = $derived(current ? app.topicTitle(current.week, current.day) : null);
+  /** Days written so far on this track, and how many are finished. */
+  const written = $derived(app.availableDays.length);
+  const finished = $derived(written - app.runway);
+  const arrived = $derived(app.sync.newDays[app.track] ?? 0);
+  /** Two days of runway is the moment to ask: a request takes a day to turn round. */
+  const RUNWAY_WARN = 2;
   const segs = $derived(current ? app.segments(current.day, current.week.id) : [false, false, false]);
   const started = $derived(segs.some(Boolean));
 
@@ -89,7 +87,7 @@
   {:else if app.completedToday}
     <!-- "Done today" outranks everything: whether or not a next day exists, the
          answer to "what am I doing right now" is nothing, and that's the point. -->
-    <p class="context">{week.title}</p>
+    <p class="context">{topic ? `${week.title} · ${topic}` : week.title}</p>
     <article class="card hero done">
       <div class="check" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
@@ -103,16 +101,17 @@
         </div>
       {:else}
         <p class="meta">
-          And that's every written day in {week.title}. The next one lands when it's
-          written — the map will say so.
+          And that's every written day of {week.title}. New lessons are written on request,
+          so this is the moment to ask for the next ones.
         </p>
-        <div class="soft">
-          <Button variant="secondary" size="sm" onclick={() => router.go('/map')}>Review a past day</Button>
-        </div>
+        <MoreLessons />
       {/if}
     </article>
+    {#if current && app.runway <= RUNWAY_WARN}
+      <MoreLessons compact />
+    {/if}
   {:else if current}
-    <p class="context">{week.title} · Milestone {milestoneNo(week.milestone)}</p>
+    <p class="context">{topic ? `${week.title} · ${topic}` : week.title}</p>
 
     <article class="card hero">
       <div class="top">
@@ -135,26 +134,21 @@
         <svg class="arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
       </Button>
     </article>
+    {#if app.runway <= RUNWAY_WARN}
+      <MoreLessons compact />
+    {/if}
   {:else}
     <p class="context">{week.title}</p>
     <article class="card hero done">
       <div class="check" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
       </div>
-      <h2>Week clear</h2>
-      {#if readyHere.length}
-        <p class="meta">
-          Every day in {week.title} is done, and the next week — {readyHere[0].title} — is
-          ready.
-        </p>
-        <Button onclick={() => router.go('/map')}>Load it from the map</Button>
-      {:else}
-        <p class="meta">
-          Every written day in {week.title} is done. The next one lands when it's written —
-          the map will say so.
-        </p>
-        <Button variant="secondary" onclick={() => router.go('/map')}>Open the map</Button>
-      {/if}
+      <h2>All caught up</h2>
+      <p class="meta">
+        Every written day of {week.title} is done — {finished} of them. New lessons are
+        written on request, so ask for the next ones and they will appear here on their own.
+      </p>
+      <MoreLessons />
     </article>
   {/if}
 
@@ -197,25 +191,25 @@
     </button>
   {/if}
 
-  {#if week}
-    <section class="weekbar">
+  {#if week && written}
+    <!-- The whole track, not a week of it. One continuous bar rather than a segment per
+         day: a path that grows on request would outgrow segments within a month. -->
+    <button class="trackbar" onclick={() => router.go('/map')}>
       <div class="labels">
         <span>{week.title}</span>
-        <span class="numeral">{wp.done}/{wp.total}</span>
+        <span class="numeral">{finished} of {written} days</span>
       </div>
-      <div class="bar" role="img" aria-label="{wp.done} of {wp.total} days done">
-        {#each { length: wp.total } as _, i}
-          <span class:filled={i < wp.done}></span>
-        {/each}
+      <div class="bar" role="img" aria-label="{finished} of {written} written days done">
+        <span style="width: {(100 * finished) / written}%"></span>
       </div>
-    </section>
+    </button>
   {/if}
 
   {#if app.sync.status === 'offline'}
-    <p class="note">Offline — showing the weeks you've already loaded.</p>
-  {:else if readyHere.length && current}
+    <p class="note">Offline — showing the lessons you already have.</p>
+  {:else if arrived}
     <button class="note new" onclick={() => router.go('/map')}>
-      ✨ New week{readyHere.length > 1 ? 's' : ''} available — open the map to load
+      ✨ {arrived === 1 ? 'A new day' : `${arrived} new days`} in {week?.title ?? 'this track'} — see the map
     </button>
   {/if}
 </div>
@@ -490,7 +484,10 @@
     flex-wrap: wrap;
   }
 
-  .weekbar {
+  .trackbar {
+    display: block;
+    width: 100%;
+    text-align: left;
     margin-top: 24px;
   }
 
@@ -504,22 +501,18 @@
   }
 
   .bar {
-    display: flex;
-    gap: 4px;
-  }
-
-  .bar span {
-    flex: 1;
     height: 7px;
     border-radius: 4px;
     background: var(--surface-2);
     border: 1px solid var(--border);
-    transition: background 0.3s ease;
+    overflow: hidden;
   }
 
-  .bar span.filled {
+  .bar span {
+    display: block;
+    height: 100%;
     background: var(--accent);
-    border-color: transparent;
+    transition: width 0.3s ease;
   }
 
   .note {

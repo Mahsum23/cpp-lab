@@ -34,8 +34,11 @@ export type DayState = 'done' | 'current' | 'unlocked' | 'locked' | 'upcoming';
 export interface SyncState {
   status: 'idle' | 'checking' | 'ok' | 'offline' | 'error';
   message: string | null;
-  /** Weeks the server advertises that we haven't downloaded yet. */
-  newWeeks: string[];
+  /**
+   * Days that arrived in the last content refresh, per track, so Today can say "3 new
+   * days" once. Not persisted: the next refresh has nothing new and the note goes.
+   */
+  newDays: Partial<Record<Track, number>>;
 }
 
 /** Progress sync, which is a different thing from content sync above. */
@@ -55,7 +58,7 @@ class AppStore {
   weeks = $state<Week[]>([]);
   curriculum = $state<Curriculum | null>(null);
   ready = $state(false);
-  sync = $state<SyncState>({ status: 'idle', message: null, newWeeks: [] });
+  sync = $state<SyncState>({ status: 'idle', message: null, newDays: {} });
   secrets = $state<Secrets>(emptySecrets());
   cloud = $state<CloudState>({ status: 'off', lastSyncAt: null, lastDevice: null, error: null });
   /** Badge ids earned by the most recent action, for the celebration sheet. */
@@ -248,6 +251,38 @@ class AppStore {
     return this.progress.settings.peekAhead ? 'unlocked' : 'locked';
   }
 
+  /** This track's path of days. There is one per track now that weeks are gone. */
+  get path(): Week | null {
+    return this.trackWeeks[0] ?? null;
+  }
+
+  topicTitle(week: Week, day: Day): string | null {
+    return week.topics?.find((t) => t.id === day.topic)?.title ?? null;
+  }
+
+  /**
+   * Written days on this track not finished yet: how far he can go before new lessons
+   * are needed. Lessons are written on request rather than a week at a time, so running
+   * out is a normal event the app should see coming, not a dead end.
+   */
+  get runway(): number {
+    return this.availableDays.filter(({ day }) => !this.progress.days[day.id]?.completedAt).length;
+  }
+
+  /** What to paste to whoever writes the lessons, when the path runs short. */
+  moreRequest(): string {
+    const path = this.path;
+    const label = path?.title ?? TRACKS[this.track].label;
+    const done = this.availableDays.filter(({ day }) => this.progress.days[day.id]?.completedAt);
+    const last = done.at(-1)?.day;
+    const plan = path?.next?.length ? ` Planned next: ${path.next[0]}.` : '';
+    return (
+      `Plan and write the next lessons of the ${label} track in slowpath.` +
+      (last ? ` I've finished up to Day ${last.day}, "${last.title}".` : '') +
+      plan
+    );
+  }
+
   weekProgress(week: Week): { done: number; total: number } {
     const days = week.days.filter((d) => d.status === 'available');
     return {
@@ -259,7 +294,14 @@ class AppStore {
   findDay(weekId: string, dayId: string): { week: Week; day: Day } | null {
     const week = this.weeks.find((w) => w.id === weekId);
     const day = week?.days.find((d) => d.id === dayId);
-    return week && day ? { week, day } : null;
+    if (week && day) return { week, day };
+    // A link from before tracks names a week that no longer exists. Day ids are unique
+    // across everything, so the day alone is enough to find where it lives now.
+    for (const w of this.weeks) {
+      const found = w.days.find((d) => d.id === dayId);
+      if (found) return { week: w, day: found };
+    }
+    return null;
   }
 
   // --- lifecycle ----------------------------------------------------------
@@ -283,8 +325,14 @@ class AppStore {
   }
 
   /**
-   * Check the manifest. New weeks are offered, not force-fed; a changed hash on a
-   * week we already hold refreshes silently, because that's a typo fix, not new work.
+   * Check the manifest and take whatever is new.
+   *
+   * Each track is one path of days, and a path is fetched whenever it is new or its hash
+   * changed — new days simply appear, with no "load" step. Content used to arrive as one
+   * bundle per week, offered for a tap; that ceremony made "you've run out" look like
+   * "you've finished", and it existed only because the curriculum was cut into weeks.
+   * Bundles the manifest no longer lists (those old weeks) are dropped, so a day never
+   * appears twice on a path.
    */
   async refresh(): Promise<void> {
     this.sync = { ...this.sync, status: 'checking', message: null };
@@ -292,22 +340,27 @@ class AppStore {
       const curriculum = await fetchCurriculum();
       this.curriculum = curriculum;
 
-      const newWeeks: string[] = [];
+      const before = this.writtenDayIds();
+      const listed = new Set(curriculum.weeks.map((ref) => ref.id));
+      for (const w of [...this.weeks]) if (!listed.has(w.id)) await this.dropWeek(w.id);
+
       for (const ref of curriculum.weeks) {
         if (!ref.available) continue;
         const held = this.progress.loadedWeeks[ref.id];
-        if (!held) {
-          // A track's *first* week arrives without ceremony; later ones wait for a tap.
-          // Per track, not overall: switching to a subject you've never opened should
-          // land on its Day 1, not on an empty screen telling you the week is clear.
-          const first = !this.weeks.some((w) => (w.track ?? 'cpp') === (ref.track ?? 'cpp'));
-          if (first) await this.downloadWeek(ref.id);
-          else newWeeks.push(ref.id);
-        } else if (held.contentHash !== ref.contentHash) {
-          await this.downloadWeek(ref.id);
-        }
+        if (!held || held.contentHash !== ref.contentHash) await this.downloadWeek(ref.id);
       }
-      this.sync = { status: 'ok', message: null, newWeeks };
+
+      // Only a track this device already had days of can gain "new" ones: on a fresh
+      // install everything is new, and saying so would be noise.
+      const after = this.writtenDayIds();
+      const newDays: SyncState['newDays'] = {};
+      for (const [track, ids] of after) {
+        const had = before.get(track);
+        if (!had?.size) continue;
+        const added = [...ids].filter((id) => !had.has(id)).length;
+        if (added) newDays[track] = added;
+      }
+      this.sync = { status: 'ok', message: null, newDays };
     } catch (err) {
       const offline = !navigator.onLine;
       this.sync = {
@@ -335,8 +388,25 @@ class AppStore {
       contentHash: ref.contentHash,
       loadedAt: new Date().toISOString(),
     };
-    this.sync = { ...this.sync, newWeeks: this.sync.newWeeks.filter((id) => id !== weekId) };
     await this.persist();
+  }
+
+  private async dropWeek(weekId: string): Promise<void> {
+    await store.deleteWeek(weekId);
+    this.weeks = this.weeks.filter((w) => w.id !== weekId);
+    delete this.progress.loadedWeeks[weekId];
+    await this.persist();
+  }
+
+  /** Every written day this device holds, by track. */
+  private writtenDayIds(): Map<Track, Set<string>> {
+    const out = new Map<Track, Set<string>>();
+    for (const w of this.weeks) {
+      const t = w.track ?? 'cpp';
+      if (!out.has(t)) out.set(t, new Set());
+      for (const d of w.days) if (d.status === 'available') out.get(t)!.add(d.id);
+    }
+    return out;
   }
 
   private async persist() {

@@ -140,6 +140,15 @@ export async function saveWeek(week: Week): Promise<void> {
   }
 }
 
+/** A path the server no longer lists — the per-week bundles from before tracks. */
+export async function deleteWeek(id: string): Promise<void> {
+  try {
+    await (await db()).delete(WEEKS, id);
+  } catch (err) {
+    console.error('[storage] week delete failed', err);
+  }
+}
+
 /** Wipes progress and content. Secrets survive — re-pasting two API keys after a
  *  reset is pure friction, and "reset progress" doesn't mean "log me out". */
 export async function clearAll(): Promise<void> {

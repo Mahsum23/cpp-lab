@@ -1,50 +1,39 @@
 {
   "schemaVersion": 1,
   "title": "slowpath",
-  "generatedAt": "2026-10-01T09:25:19.255Z",
+  "generatedAt": "2026-10-01T10:06:46.184Z",
   "weeks": [
     {
-      "id": "week-01",
-      "title": "Raw Sockets",
+      "id": "track-cpp",
+      "title": "C++ systems",
       "milestone": "01-raw-sockets",
       "track": "cpp",
       "days": 8,
       "availableDays": 8,
-      "url": "content/weeks/week-01.json",
-      "contentHash": "sha256:f4869e9e0c0829e1b0efdd858bb151cb",
+      "url": "content/weeks/track-cpp.json",
+      "contentHash": "sha256:ca8045e7866de3ae1846946edda7b1ca",
       "available": true
     },
     {
-      "id": "week-go-01",
-      "title": "Go, From Zero",
+      "id": "track-sql",
+      "title": "PostgreSQL",
+      "milestone": "sql-02-queries-that-look-right",
+      "track": "sql",
+      "days": 10,
+      "availableDays": 10,
+      "url": "content/weeks/track-sql.json",
+      "contentHash": "sha256:7a348a7f6c58d540a3db529ec9f0ba75",
+      "available": true
+    },
+    {
+      "id": "track-go",
+      "title": "Go",
       "milestone": "go-01-from-zero",
       "track": "go",
       "days": 6,
       "availableDays": 6,
-      "url": "content/weeks/week-go-01.json",
-      "contentHash": "sha256:a53b6af8c1b83967cbab2ef555c5ffcb",
-      "available": true
-    },
-    {
-      "id": "week-sql-01",
-      "title": "What the Database Does",
-      "milestone": "sql-01-what-the-database-does",
-      "track": "sql",
-      "days": 3,
-      "availableDays": 3,
-      "url": "content/weeks/week-sql-01.json",
-      "contentHash": "sha256:7a9611b0df212cf56d703cb22c421420",
-      "available": true
-    },
-    {
-      "id": "week-sql-02",
-      "title": "Queries That Look Right",
-      "milestone": "sql-02-queries-that-look-right",
-      "track": "sql",
-      "days": 7,
-      "availableDays": 7,
-      "url": "content/weeks/week-sql-02.json",
-      "contentHash": "sha256:0b09983fb6f42953c293a99d2f4257ba",
+      "url": "content/weeks/track-go.json",
+      "contentHash": "sha256:b42beac34f7fd028bfaef8138cd62f2b",
       "available": true
     }
   ]

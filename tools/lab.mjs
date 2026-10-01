@@ -40,7 +40,18 @@ function loadWeeks() {
   return readdirSync(dir)
     .filter((f) => f.endsWith('.json'))
     .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')))
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    // The order the app offers the tracks in, which is the order the manifest lists them.
+    .sort((a, b) => order(a.id) - order(b.id));
+}
+
+function order(id) {
+  try {
+    const refs = JSON.parse(readFileSync(join(contentDir, 'curriculum.json'), 'utf8')).weeks;
+    const i = refs.findIndex((r) => r.id === id);
+    return i === -1 ? Infinity : i;
+  } catch {
+    return 0;
+  }
 }
 
 /** Every day that has a task, flattened, in curriculum order. */
@@ -223,11 +234,19 @@ function check(entry) {
 }
 
 function list(days) {
-  let lastWeek = null;
+  // One path per track; topics are dividers on it, the same as on the app's map.
+  let lastPath = null;
+  let lastTopic = null;
   for (const { week, day } of days) {
-    if (week.id !== lastWeek) {
+    if (week.id !== lastPath) {
       console.log(`\n  ${c.bold(week.title)} ${c.dim(`(${week.track ?? 'cpp'})`)}`);
-      lastWeek = week.id;
+      lastPath = week.id;
+      lastTopic = null;
+    }
+    if (day.topic && day.topic !== lastTopic) {
+      const topic = week.topics?.find((t) => t.id === day.topic);
+      if (topic) console.log(`    ${c.dim(topic.title)}`);
+      lastTopic = day.topic;
     }
     const done = day.task.files.every((f) => existsSync(join(repo, f)));
     const mark = done ? c.green('✓') : c.dim('·');

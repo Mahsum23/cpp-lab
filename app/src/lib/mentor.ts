@@ -220,6 +220,15 @@ export interface MentorFocus {
   brief: string;
 }
 
+/** How many upcoming days the mentor is told about. */
+const AHEAD = 6;
+
+/** "PostgreSQL, Queries That Look Right, Day 6 — "Joins multiply"" — track, topic, day. */
+function where(week: Week, day: Day): string {
+  const topic = week.topics?.find((t) => t.id === day.topic)?.title;
+  return `${week.title}${topic ? `, ${topic}` : ''}, Day ${day.day} — "${day.title}"`;
+}
+
 export function systemPrompt(context: { week: Week; day: Day; focus?: MentorFocus | null } | null): string {
   if (!context) {
     return `${persona(undefined)}\n\nNo lesson is open, so you have no day context. If a question depends on where they are in the curriculum, just ask.`;
@@ -227,7 +236,7 @@ export function systemPrompt(context: { week: Week; day: Day; focus?: MentorFocu
   const { week, day } = context;
   const parts = [
     persona(week.track),
-    `\n---\n\nWHERE THEY ARE RIGHT NOW: ${week.title}, Day ${day.day} — "${day.title}".`,
+    `\n---\n\nWHERE THEY ARE RIGHT NOW: ${where(week, day)}.`,
     'Assume this is the context of the question unless they say otherwise. Do not get ahead of the curriculum: later days are listed below and their material has not been taught yet.',
   ];
   if (day.theoryMarkdown) {
@@ -239,8 +248,10 @@ export function systemPrompt(context: { week: Week; day: Day; focus?: MentorFocu
         (day.task.checklist.length ? `\n\nIts checklist:\n${day.task.checklist.map((c) => `- ${c}`).join('\n')}` : ''),
     );
   }
-  const rest = week.days.filter((d) => d.day > day.day).map((d) => `Day ${d.day}: ${d.title}`);
-  if (rest.length) parts.push(`\nStill ahead this week: ${rest.join('; ')}.`);
+  // The next few, not the whole track: a path that grows on request gets long, and the
+  // point is only to know what has not been taught yet.
+  const rest = week.days.filter((d) => d.day > day.day).slice(0, AHEAD).map((d) => `Day ${d.day}: ${d.title}`);
+  if (rest.length) parts.push(`\nStill ahead on this track: ${rest.join('; ')}.`);
   if (context.focus) {
     parts.push(
       `\n---\n\nWHAT THEY ARE LOOKING AT: they are in the review deck, not the lesson, and have just answered a card. Every message they send arrives with that card attached, above their words, and their question is about it unless they say otherwise.
@@ -380,7 +391,7 @@ export function examinerPrompt(context: { week: Week; day: Day } | null): string
   const { week, day } = context;
   const parts = [
     examiner(week.track),
-    `\n---\n\nWHAT THEY ARE BEING EXAMINED ON: ${week.title}, Day ${day.day} — "${day.title}".`,
+    `\n---\n\nWHAT THEY ARE BEING EXAMINED ON: ${where(week, day)}.`,
   ];
   if (day.teachBack) {
     parts.push(`\nThe question they were given, which is what you are grading:\n\n${day.teachBack}`);
@@ -1086,7 +1097,7 @@ ${NO_LATEX}`;
 
 const materialFor = (context: { week: Week; day: Day }): string => {
   const { week, day } = context;
-  const parts = [`Lesson: ${week.title}, Day ${day.day} — "${day.title}".`];
+  const parts = [`Lesson: ${where(week, day)}.`];
   if (day.theoryMarkdown) parts.push(`\nThe material:\n\n${day.theoryMarkdown}`);
   return parts.join('\n');
 };

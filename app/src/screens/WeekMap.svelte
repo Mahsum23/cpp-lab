@@ -1,105 +1,98 @@
 <script lang="ts">
   import { app } from '../lib/app.svelte';
   import { router, sessionPath } from '../lib/router.svelte';
-  import Button from '../components/Button.svelte';
+  import MoreLessons from '../components/MoreLessons.svelte';
+  import type { Day } from '../lib/types';
 
-  let loading = $state<string | null>(null);
+  /**
+   * One path per track. Topics are dividers on it, never a unit that ends: there is no
+   * "week" to clear and nothing to load, because new days arrive on their own.
+   */
+  const path = $derived(app.path);
 
-  // Track-scoped, like everything else on the path: offering to download the other
-  // subject's week from inside this one's map is just noise.
-  const pending = $derived(
-    (app.curriculum?.weeks ?? []).filter(
-      (ref) => app.sync.newWeeks.includes(ref.id) && (ref.track ?? 'cpp') === app.track,
-    ),
-  );
-
-  async function load(weekId: string) {
-    loading = weekId;
-    try {
-      await app.downloadWeek(weekId);
-    } finally {
-      loading = null;
-    }
-  }
+  /** True for the first day of each topic, where its divider goes. */
+  const startsTopic = (days: Day[], i: number) => i === 0 || days[i].topic !== days[i - 1].topic;
+  const topicOf = (id?: string) => path?.topics?.find((t) => t.id === id) ?? null;
 
   function open(weekId: string, dayId: string) {
     router.go(sessionPath(weekId, dayId, 0));
   }
+
+  // A path that grows on request gets long; land on today rather than on Day 1.
+  $effect(() => {
+    if (!path) return;
+    queueMicrotask(() => document.querySelector('.path li.current')?.scrollIntoView({ block: 'center' }));
+  });
 </script>
 
 <div class="screen">
-  <h1>The path</h1>
+  <h1>{path?.title ?? 'The path'}</h1>
   <p class="sub">Tap a finished day to re-read it or re-drill the quiz.</p>
 
-  {#each app.trackWeeks as week}
-    <section>
-      <header>
-        <h2>{week.title}</h2>
-        <span class="count numeral">
-          {app.weekProgress(week).done}/{week.days.length}
-        </span>
-      </header>
-      {#if week.intro}
-        <p class="intro">{week.intro}</p>
-      {/if}
+  {#if path}
+    {#if path.intro}
+      <p class="intro">{path.intro}</p>
+    {/if}
 
-      <ol class="path">
-        {#each week.days as day}
-          {@const state = app.stateOf(day)}
-          <li class={state}>
-            <button
-              class="node"
-              disabled={state === 'upcoming' || state === 'locked'}
-              onclick={() => open(week.id, day.id)}
-            >
-              <span class="dot" aria-hidden="true">
-                {#if state === 'done'}
-                  <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
-                {:else if state === 'upcoming' || state === 'locked'}
-                  <svg viewBox="0 0 24 24"
-                    ><rect x="5" y="11" width="14" height="9" rx="2" /><path
-                      d="M8 11V8a4 4 0 0 1 8 0v3"
-                    /></svg
-                  >
-                {:else}
-                  <em class="numeral">{day.day}</em>
-                {/if}
-              </span>
-              <span class="body">
-                <span class="title">Day {day.day} · {day.title}</span>
-                {#if state === 'current'}
-                  <span class="tag now">Today</span>
-                {:else if day.teaser}
-                  <span class="teaser">{day.teaser}</span>
-                {/if}
-              </span>
-            </button>
+    <ol class="path">
+      {#each path.days as day, i}
+        {@const state = app.stateOf(day)}
+        {#if startsTopic(path.days, i) && topicOf(day.topic)}
+          {@const topic = topicOf(day.topic)!}
+          <li class="topic">
+            <h2>{topic.title}</h2>
+            {#if topic.intro}<p>{topic.intro}</p>{/if}
           </li>
-        {/each}
-      </ol>
+        {/if}
+        <li class={state}>
+          <button
+            class="node"
+            disabled={state === 'upcoming' || state === 'locked'}
+            onclick={() => open(path.id, day.id)}
+          >
+            <span class="dot" aria-hidden="true">
+              {#if state === 'done'}
+                <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
+              {:else if state === 'upcoming' || state === 'locked'}
+                <svg viewBox="0 0 24 24"
+                  ><rect x="5" y="11" width="14" height="9" rx="2" /><path
+                    d="M8 11V8a4 4 0 0 1 8 0v3"
+                  /></svg
+                >
+              {:else}
+                <em class="numeral">{day.day}</em>
+              {/if}
+            </span>
+            <span class="body">
+              <span class="title">Day {day.day} · {day.title}</span>
+              {#if state === 'current'}
+                <span class="tag now">Today</span>
+              {:else if day.teaser}
+                <span class="teaser">{day.teaser}</span>
+              {/if}
+            </span>
+          </button>
+        </li>
+      {/each}
+    </ol>
 
-      {#if week.days.some((d) => d.status === 'upcoming')}
-        <p class="pending">
-          The locked ones aren't written yet — they land with the rest of their
-          milestone, which is written once the previous one is done.
-        </p>
+    {#if path.days.some((d) => d.status === 'upcoming')}
+      <p class="pending">The locked ones are planned but not written yet.</p>
+    {/if}
+
+    <!-- The end of the path is not an end. What comes next is planned in plain words, and
+         asking for it is one tap. -->
+    <section class="ahead">
+      <h2>After that</h2>
+      {#if path.next?.length}
+        <ul>
+          {#each path.next as item}<li>{item}</li>{/each}
+        </ul>
       {/if}
+      <p class="how">New days are written on request and appear here on their own.</p>
+      <MoreLessons showNext={false} />
     </section>
-  {/each}
-
-  {#each pending as ref}
-    <div class="card newweek">
-      <p class="spark">✨ {ref.title} available</p>
-      <p class="meta">{ref.availableDays} of {ref.days} days written.</p>
-      <Button
-        size="sm"
-        disabled={loading === ref.id}
-        onclick={() => load(ref.id)}
-      >
-        {loading === ref.id ? 'Loading…' : 'Load week'}
-      </Button>
-    </div>
-  {/each}
+  {/if}
 
   {#if !app.trackWeeks.length && app.ready}
     <p class="empty">{app.sync.message ?? 'Nothing loaded yet.'}</p>
@@ -131,26 +124,6 @@
     margin: 0 0 26px;
   }
 
-  section {
-    margin-bottom: 30px;
-  }
-
-  section header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: 6px;
-  }
-
-  h2 {
-    font-size: 17px;
-  }
-
-  .count {
-    font-size: 13px;
-    color: var(--text-faint);
-  }
-
   .intro {
     font-size: 14px;
     line-height: 1.5;
@@ -164,13 +137,13 @@
     padding: 0;
   }
 
-  li {
+  .path li {
     position: relative;
   }
 
   /* The connector between nodes — drawn from each node up to the previous one so
      the last item doesn't trail a line into nothing. */
-  li + li::before {
+  .path li + li::before {
     content: '';
     position: absolute;
     left: 17px;
@@ -180,8 +153,8 @@
     background: var(--border);
   }
 
-  li.done + li.done::before,
-  li.done + li.current::before {
+  .path li.done + li.done::before,
+  .path li.done + li.current::before {
     background: var(--accent);
   }
 
@@ -222,20 +195,20 @@
     stroke-linejoin: round;
   }
 
-  li.done .dot {
+  .path li.done .dot {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--accent-ink);
   }
 
-  li.current .dot {
+  .path li.current .dot {
     border-color: var(--accent);
     color: var(--accent);
     animation: halo 2.4s ease-in-out infinite;
   }
 
-  li.upcoming .dot,
-  li.locked .dot {
+  .path li.upcoming .dot,
+  .path li.locked .dot {
     opacity: 0.55;
   }
 
@@ -251,8 +224,8 @@
     font-weight: 550;
   }
 
-  li.upcoming .title,
-  li.locked .title {
+  .path li.upcoming .title,
+  .path li.locked .title {
     color: var(--text-faint);
     font-weight: 500;
   }
@@ -272,6 +245,58 @@
     font-size: 11px;
   }
 
+  /* A divider is not a step: no connector into it, and none from it to the next day. */
+  .path li.topic::before,
+  .path li.topic + li::before {
+    display: none;
+  }
+
+  .path li.topic {
+    padding: 22px 0 6px;
+  }
+
+  .path li.topic h2 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin: 0 0 6px;
+  }
+
+  .path li.topic p {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    margin: 0;
+  }
+
+  .ahead {
+    margin-top: 26px;
+    padding: 16px;
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+  }
+
+  .ahead h2 {
+    font-size: 16px;
+    margin: 0 0 8px;
+  }
+
+  .ahead ul {
+    margin: 0 0 10px;
+    padding-left: 18px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-dim);
+  }
+
+  .ahead .how {
+    font-size: 13px;
+    color: var(--text-faint);
+    margin: 0 0 12px;
+  }
+
   .pending {
     font-size: 12.5px;
     line-height: 1.5;
@@ -279,22 +304,8 @@
     margin: 14px 0 0 49px;
   }
 
-  .newweek {
-    padding: 18px;
-    text-align: center;
-    border-style: dashed;
-  }
 
-  .spark {
-    font-weight: 650;
-    margin: 0 0 4px;
-  }
 
-  .newweek .meta {
-    font-size: 13.5px;
-    color: var(--text-faint);
-    margin: 0 0 14px;
-  }
 
   .empty {
     color: var(--text-faint);
