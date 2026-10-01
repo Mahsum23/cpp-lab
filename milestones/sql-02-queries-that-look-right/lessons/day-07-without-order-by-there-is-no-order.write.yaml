@@ -1,0 +1,42 @@
+setup: |
+  CREATE TABLE players (id int PRIMARY KEY, name text NOT NULL, score int NOT NULL);
+  INSERT INTO players VALUES (1, 'ana', 90), (2, 'bo', 75), (3, 'cy', 90), (4, 'dee', 60), (5, 'eli', 75);
+  CREATE TABLE feed (id int PRIMARY KEY, created_at timestamptz NOT NULL, title text);
+  INSERT INTO feed VALUES
+    (1, '2026-05-01 10:00+00', 'first'),
+    (2, '2026-05-01 10:05+00', 'second'),
+    (3, '2026-05-01 10:05+00', 'third'),
+    (4, '2026-05-01 10:10+00', 'fourth'),
+    (5, '2026-05-01 10:02+00', 'imported late');
+
+challenges:
+  - id: stable-top
+    prompt: >
+      The three best players: `name` and `score`, highest score first. Two players tie
+      at the top, so make the answer the same every time by breaking ties on `id`.
+    hint: The last sort key has to be unique.
+    solution: |
+      SELECT name, score FROM players ORDER BY score DESC, id LIMIT 3;
+
+  - id: with-ties
+    prompt: >
+      The top three by score, but let ties share their place instead of cutting among
+      them: return `name` and `score`, highest first. Use the standard clause for it,
+      not `LIMIT`.
+    hint: FETCH FIRST … ROWS …
+    # Players on the same score may come back in either order, so only the rows are judged.
+    ordered: false
+    solution: |
+      SELECT name, score FROM players ORDER BY score DESC FETCH FIRST 3 ROWS WITH TIES;
+
+  - id: keyset
+    prompt: >
+      Page 1 of the feed (newest first, ties on `id` descending) ended at the post with
+      `created_at = '2026-05-01 10:05+00'` and `id = 3`. Return the next two posts, as
+      `id` and `title` — compare the pair, not each column on its own.
+    hint: A row comparison — two columns in parentheses on each side of `<`.
+    solution: |
+      SELECT id, title FROM feed
+      WHERE (created_at, id) < ('2026-05-01 10:05+00', 3)
+      ORDER BY created_at DESC, id DESC
+      LIMIT 2;

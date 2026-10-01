@@ -56,9 +56,29 @@ export interface Day {
    * against a claim about what the code would do.
    */
   drill: DrillStep[] | null;
+  /** Queries to write from memory in the review deck. SQL days only, for now. */
+  write?: WriteSet | null;
   task: DayTask | null;
   /** The topic this day belongs to (its source directory), shown as a divider on the path. */
   topic?: string;
+}
+
+/** A query to write from memory. The reference answer is run, never compared as text. */
+export interface WriteChallenge {
+  id: string;
+  prompt: string;
+  solution: string;
+  hint: string | null;
+  /** A statement run after your answer whose rows are what is compared (for DDL/DML). */
+  verify: string | null;
+  /** Whether row order is part of the answer; null decides from the solution's ORDER BY. */
+  ordered: boolean | null;
+}
+
+export interface WriteSet {
+  /** Creates and fills the tables. Run fresh for every attempt. */
+  setup: string;
+  challenges: WriteChallenge[];
 }
 
 /** A run of consecutive days inside a track. Only ever a divider, never a unit to finish. */

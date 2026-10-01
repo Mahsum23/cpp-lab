@@ -126,17 +126,17 @@ export function clearedOn(state: ReviewState, on: string): number {
 
 // --- what cards exist -----------------------------------------------------
 
-export type CardKind = 'quiz' | 'explain' | 'forge' | 'parsons';
+export type CardKind = 'quiz' | 'explain' | 'forge' | 'parsons' | 'write';
 
 export interface CardRef {
   id: string;
   kind: CardKind;
   dayId: string;
-  /** Only on a quiz card: which question of that day's quiz. */
+  /** On a quiz card, which question; on a parsons card, which block; on a write card, which challenge. */
   questionId?: string;
 }
 
-const KINDS = new Set<string>(['quiz', 'explain', 'forge', 'parsons']);
+const KINDS = new Set<string>(['quiz', 'explain', 'forge', 'parsons', 'write']);
 
 export const cardId = (kind: CardKind, dayId: string, questionId?: string) =>
   questionId ? `${kind}:${dayId}:${questionId}` : `${kind}:${dayId}`;
@@ -162,6 +162,13 @@ export function cardsFor(day: Day, progress: DayProgress | undefined, lang = 'cp
   for (const q of day.quiz ?? []) {
     if (q.id in progress.quiz.correct) {
       cards.push({ id: cardId('quiz', day.id, q.id), kind: 'quiz', dayId: day.id, questionId: q.id });
+    }
+  }
+  // Typed from memory against a real database. Gated on the theory having been read, since
+  // the syntax is what the theory taught; the quiz need not have been answered.
+  if (progress.theoryDone) {
+    for (const c of day.write?.challenges ?? []) {
+      cards.push({ id: cardId('write', day.id, c.id), kind: 'write', dayId: day.id, questionId: c.id });
     }
   }
   if (progress.theoryDone && day.teachBack) {
@@ -301,9 +308,15 @@ export function pickNext(
   on: string,
   rng: Rng = Math.random,
   exclude: ReadonlySet<string> = new Set(),
+  /** The kind just dealt: the next card is of another kind whenever another kind exists. */
+  avoid?: CardKind,
 ): CardRef | null {
-  const pool = deck.filter((c) => !exclude.has(c.id));
+  let pool = deck.filter((c) => !exclude.has(c.id));
   if (!pool.length) return null;
+  // Three reorder cards in a row is a different exercise from one of each, and the deck
+  // is meant to mix. It is a preference, not a rule: with only one kind left, deal it.
+  const varied = avoid ? pool.filter((c) => c.kind !== avoid) : pool;
+  if (varied.length) pool = varied;
 
   const due = pool.filter((c) => isDue(state.cards[c.id], on));
   const resting = pool.filter((c) => !isDue(state.cards[c.id], on));

@@ -52,7 +52,10 @@ About 25 minutes, in five steps:
 
 Finished days feed a spaced-repetition deck: quiz questions, code blocks to put back in
 order, the teach-back question again weeks later, and fresh challenges written from the
-day's material.
+day's material. For SQL there is a card that makes you **type the query from memory**: you
+get the tables and the result you are aiming at, write the query, and it is run in a real
+PostgreSQL that runs on your device, offline. Any query that returns the right rows passes,
+however you spelled it.
 
 ## The app
 
@@ -169,5 +172,6 @@ milestones/<name>/lessons/      one .md per day, plus its .quiz.yaml, .drill.yam
 app/                            the PWA (Svelte), built from the lesson files
 tools/lab.mjs, ./lab            the task launcher
 tools/check-sql-lesson.py       runs a SQL lesson top to bottom and checks every output block
+tools/check-write-cards.py      runs every "write the query" card's reference answer on a real PostgreSQL
 PROGRESS.md                     the running log: what got done, and what was confusing
 ```

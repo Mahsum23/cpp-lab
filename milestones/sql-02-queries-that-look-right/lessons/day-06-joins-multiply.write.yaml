@@ -1,0 +1,51 @@
+setup: |
+  CREATE TABLE orders   (id int PRIMARY KEY, customer text NOT NULL, total numeric(10,2) NOT NULL);
+  CREATE TABLE items    (order_id int REFERENCES orders, sku text NOT NULL, qty int NOT NULL);
+  CREATE TABLE payments (order_id int REFERENCES orders, amount numeric(10,2) NOT NULL);
+  INSERT INTO orders VALUES (1, 'ana', 100.00), (2, 'bo', 80.00);
+  INSERT INTO items VALUES (1, 'mug', 1), (1, 'tea', 2), (1, 'spoon', 1), (2, 'kettle', 1);
+  INSERT INTO payments VALUES (1, 50.00), (1, 50.00), (2, 80.00);
+
+challenges:
+  - id: honest-report
+    prompt: >
+      One row per customer, with `customer`, `revenue` (the order total), `paid` (the
+      sum of their payments) and `lines` (their item rows) — every number correct, not
+      multiplied by the other table. Ordered by customer.
+    hint: Reduce each many-side table to one row per order before it meets anything else.
+    solution: |
+      SELECT o.customer, o.total AS revenue, p.paid, i.lines
+      FROM orders o
+      JOIN (SELECT order_id, count(*) AS lines FROM items GROUP BY order_id) i ON i.order_id = o.id
+      JOIN (SELECT order_id, sum(amount) AS paid FROM payments GROUP BY order_id) p ON p.order_id = o.id
+      ORDER BY o.customer;
+
+  - id: fan-out-detector
+    prompt: >
+      Join `orders` to both `items` and `payments`, and return two numbers in one row:
+      how many rows the join produced, and how many distinct orders are in it.
+    hint: Compare a plain count with a count of distinct keys over the same join.
+    solution: |
+      SELECT count(*) AS rows, count(DISTINCT o.id) AS orders
+      FROM orders o
+      JOIN items i ON i.order_id = o.id
+      JOIN payments p ON p.order_id = o.id;
+
+  - id: duplicate-payments
+    prompt: >
+      Which orders have more than one payment? Return `order_id` and the number of
+      payments.
+    hint: Group, then filter the groups.
+    solution: |
+      SELECT order_id, count(*) AS payments
+      FROM payments
+      GROUP BY order_id
+      HAVING count(*) > 1;
+
+  - id: conditional-count
+    prompt: >
+      From `items`, return in one row how many lines have `qty` above 1 and how many
+      lines there are in total — without joining or using a subquery.
+    hint: An aggregate can carry its own filter.
+    solution: |
+      SELECT count(*) FILTER (WHERE qty > 1) AS multi, count(*) AS all_lines FROM items;

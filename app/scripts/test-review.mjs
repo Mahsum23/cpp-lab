@@ -126,6 +126,18 @@ ok('a low roll pulls a wildcard instead', pickNext(deck, oneDue, '2026-09-07', s
 ok('an exhausted deck returns null', pickNext(deck, fresh, '2026-09-07', mid, new Set(deck.map((x) => x.id))) === null);
 ok('nothing due still offers something', pickNext(deck, parked, '2026-09-07', mid) !== null);
 
+console.log('\n— write cards, and not the same kind twice —');
+const sqlDay = { ...day, id: 'sql-day-04', write: { setup: 'CREATE TABLE t(a int)', challenges: [{ id: 'one' }, { id: 'two' }] } };
+const readOnly = { theoryDone: true, quiz: { correct: {} }, drill: {} };
+const writeCards = cardsFor(sqlDay, readOnly).filter((x) => x.kind === 'write');
+ok('a day with challenges deals a write card for each', writeCards.length === 2 && writeCards[0].id === 'write:sql-day-04:one');
+ok('they need the theory read, not the quiz answered', cardsFor(sqlDay, { ...readOnly, theoryDone: false }).every((x) => x.kind !== 'write'));
+ok('a write card id carries its challenge and round-trips', parseCardId('write:sql-day-04:two').questionId === 'two' && parseCardId('write:sql-day-04:two').kind === 'write');
+ok('a day without challenges deals none', cardsFor(day, readOnly).every((x) => x.kind !== 'write'));
+const mixed = [...writeCards, ...cards.filter((x) => x.kind === 'quiz').slice(0, 1)];
+ok('the next card is of another kind when there is one', Array.from({ length: 30 }, (_, i) => pickNext(mixed, fresh, '2026-09-07', seq(0.9, i / 30), new Set(), 'write')).every((x) => x.kind === 'quiz'));
+ok('with only one kind left it is dealt anyway', pickNext(writeCards, fresh, '2026-09-07', mid, new Set(), 'write') !== null);
+
 console.log('\n— the ambush —');
 ok('due cards justify an interruption', shouldAmbush(fresh, deck, '2026-09-07', () => 0.99));
 ok('but only once a day', !shouldAmbush({ ...fresh, lastAmbush: '2026-09-07' }, deck, '2026-09-07', () => 0));

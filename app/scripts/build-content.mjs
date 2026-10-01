@@ -320,6 +320,49 @@ function loadDrill(path, dayId) {
   return placeOptions(parsed, `${dayId}-drill`);
 }
 
+/**
+ * `day-NN-<slug>.write.yaml`: queries to write from memory in the review deck.
+ *
+ *   setup:       SQL that creates and fills the tables (run fresh for every attempt)
+ *   challenges:  id, prompt, solution, and optionally hint, ordered, verify
+ *
+ * There is no expected output in the file on purpose. The deck runs `solution` and shows
+ * what it returns, so the target can never disagree with the reference, and the answer a
+ * learner writes is judged by running it and comparing rows (writecheck.ts) — a different
+ * but correct query passes. `tools/check-write-cards.py` runs every solution on a real
+ * PostgreSQL before it ships, the same way check-sql-lesson.py does for lessons.
+ */
+function loadWrite(path, dayId) {
+  if (!existsSync(path)) return null;
+  const doc = parseYaml(readFileSync(path, 'utf8'));
+  const setup = String(doc?.setup ?? '').trim();
+  const list = doc?.challenges ?? [];
+  if (!setup) warn(`${dayId}: ${path} has no setup — the tables have to come from somewhere`);
+  if (!Array.isArray(list) || list.length === 0) {
+    warn(`${dayId}: ${path} has no challenges`);
+    return null;
+  }
+  const seen = new Set();
+  const challenges = list.map((c, i) => {
+    const id = String(c.id ?? `w${i + 1}`);
+    if (seen.has(id)) warn(`${dayId} write ${id}: duplicate id — card ids are built from it`);
+    seen.add(id);
+    if (/[:\s]/.test(id)) warn(`${dayId} write ${id}: ids may not contain ":" or spaces`);
+    if (!String(c.prompt ?? '').trim()) warn(`${dayId} write ${id}: no prompt`);
+    if (!String(c.solution ?? '').trim()) warn(`${dayId} write ${id}: no solution`);
+    return {
+      id,
+      prompt: String(c.prompt ?? '').trim(),
+      solution: String(c.solution ?? '').trim(),
+      hint: c.hint ? String(c.hint).trim() : null,
+      verify: c.verify ? String(c.verify).trim() : null,
+      // null means "decide from the solution": ordered when it sorts at the top level.
+      ordered: typeof c.ordered === 'boolean' ? c.ordered : null,
+    };
+  });
+  return { setup, challenges };
+}
+
 function buildTopic(milestone) {
   const lessonsDir = join(milestonesDir, milestone, 'lessons');
   const topicYaml = join(lessonsDir, 'topic.yaml');
@@ -351,6 +394,10 @@ function buildTopic(milestone) {
     const sections = splitSections(readFileSync(join(lessonsDir, mdName), 'utf8'));
     const quiz = loadQuiz(join(lessonsDir, mdName.replace(/\.md$/, '.quiz.yaml')), d.id);
     const drill = loadDrill(join(lessonsDir, mdName.replace(/\.md$/, '.drill.yaml')), d.id);
+    const write = loadWrite(join(lessonsDir, mdName.replace(/\.md$/, '.write.yaml')), d.id);
+    if (!write && (meta.track ?? 'cpp') === 'sql') {
+      warn(`${d.id}: no .write.yaml — this SQL day has nothing to type from memory in the review deck`);
+    }
     if (!drill) warn(`${d.id}: no .drill.yaml — this day can only be done at a machine`);
 
     if (!sections.theory) warn(`${d.id}: ${mdName} has no "## Theory" section`);
@@ -368,6 +415,7 @@ function buildTopic(milestone) {
       status: 'available',
       theoryMarkdown: sections.theory ?? null,
       drill,
+      write,
       quiz,
       task: parseTask(sections.task),
     };

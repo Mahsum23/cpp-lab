@@ -279,7 +279,8 @@ The phone app (`app/`, see `app/DESIGN.md`) is built from these files, so:
 - In `## Task`, use the parsed conventions so the app can build real UI from them:
   `- File: \`path\``, `- Compile: \`command\``, and a `### Checklist` of `- [ ]`
   items. Everything else in the section stays free prose.
-- After writing or editing any lesson, run `cd app && npm run content`. It regenerates
+- After writing or editing any lesson, run `cd app && npm run content` (and, for SQL days,
+  `tools/check-write-cards.py` and `tools/check-sql-lesson.py`). It regenerates
   the app's JSON and warns about missing `why` text, bad option counts, and drift
   between the `.md` and the key. Commit the regenerated `app/public/content/`.
 
@@ -530,6 +531,35 @@ the fix people reach for that is also wrong. Every SQL day from that topic on:
 - passes `tools/check-sql-lesson.py`, which runs the lesson top to bottom in a fresh
   database and fails on any output block that is not what psql prints. Where a number
   depends on cache state or timing, give an invariant and let the checker ignore it.
+
+**Review must make him write queries, not only recognise them.** He said so plainly: he wants
+to type queries from memory so the syntax sticks, and the reorder cards (Parsons) trained
+ordering, not recall — he was getting a lot of them. So every SQL day carries
+`day-NN-<slug>.write.yaml`: a `setup` (tables and rows, rebuilt for every attempt) and three
+to five `challenges`, each a `prompt`, a reference `solution`, and optionally a `hint`, an
+`ordered` override and a `verify` statement. In the deck the card shows the tables, runs the
+solution to draw the target result, and judges what he types by running it in a PostgreSQL
+compiled to WebAssembly (PGlite, `sqlrun.worker.ts`) and comparing rows (`writecheck.ts`) —
+so `NOT EXISTS` and `LEFT JOIN … IS NULL` are both right, with no model, no key and no network
+once the engine is cached. Rules that keep the cards honest:
+
+- The prompt names exactly what to return (columns, order, what a NULL means) — the target
+  table is what he aims at, so an ambiguous prompt is a card nobody can pass fairly.
+- No answer a guess can hit. `test-write.mjs` fails a card that `SELECT 1` passes, which is
+  how a single-row count (`1`) got caught; return ids or values, not a count that could be
+  anything.
+- Anything not deterministic (a `now()`, physical sizes, plan text, transaction ids) is out.
+  `ordered: false` where ties could legitimately come back either way.
+- DDL and DML (`CREATE INDEX`, `UPDATE`) are judged through `verify`, a catalog or table
+  query whose rows are compared — an index is judged by what it is, not by what he named it.
+- `tools/check-write-cards.py` runs every solution on a real PostgreSQL 16 before it ships,
+  and `PG16_ANSWERS=… node scripts/test-write.mjs` compares the browser engine's answers with
+  it, card by card. Run both after writing or editing one.
+
+The first run of a card is what the schedule hears (wrong, an error, a hint, or "show answer"
+is a miss); fixing it afterwards is free. The deck never deals the same kind of card twice
+in a row when another kind exists. Go and C++ have no equivalent yet; the obvious route is
+model-graded write cards.
 
 Quiz, drill and checklist text may use `code`, **bold** and *emphasis*, and nothing else:
 `inline.ts` renders exactly those, escaped. `test-inline.mjs` fails if any string the app

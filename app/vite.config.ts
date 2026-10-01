@@ -16,6 +16,10 @@ const buildId =
 export default defineConfig({
   base,
   define: { __BUILD_ID__: JSON.stringify(buildId) },
+  // The SQL engine runs in a module worker, and PGlite finds its .wasm and .data files
+  // with `new URL(..., import.meta.url)`, which Vite's dependency pre-bundler would break.
+  worker: { format: 'es' },
+  optimizeDeps: { exclude: ['@electric-sql/pglite'] },
   build: {
     target: 'es2022',
     // Phones on cellular: keep an eye on this, don't let it creep.
@@ -48,10 +52,24 @@ export default defineConfig({
         // The shell is precached. Curriculum JSON is deliberately NOT, so that a
         // pushed week shows up without shipping a new app build (DESIGN.md §7).
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        globIgnores: ['**/content/**'],
+        // The SQL engine (a PostgreSQL compiled to WebAssembly, ~5 MB over the wire) is
+        // not part of installing the app: it is fetched the first time a "write it" card
+        // is dealt and cached then (runtimeCaching below), so a phone that never reaches
+        // one never pays for it.
+        globIgnores: ['**/content/**', '**/sqlrun.worker-*.js', '**/opfs-ahp-*.js', '**/nodefs-*.js', '**/__vite-browser-external-*.js'],
         navigateFallback: `${base}index.html`,
         cleanupOutdatedCaches: true,
         runtimeCaching: [
+          {
+            // File names carry a content hash, so a cached copy is never stale.
+            urlPattern: ({ url }) => /\/assets\/(pglite|initdb|sqlrun\.worker|opfs-ahp|nodefs|__vite-browser-external)-/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'slowpath-sql-engine',
+              expiration: { maxEntries: 12 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             urlPattern: ({ url }) => url.pathname.includes('/content/'),
             handler: 'NetworkFirst',

@@ -1,0 +1,40 @@
+# After your statement runs, `verify` reads the catalog, and its rows are what is compared:
+# an index is judged by what it is, not by what you called it.
+setup: |
+  CREATE TABLE s(id bigserial PRIMARY KEY, name text, note text);
+  INSERT INTO s(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 2000) g;
+
+challenges:
+  - id: expression-index
+    prompt: >
+      Queries keep filtering on `lower(name)`, and the plain index on `name` can't help.
+      Create an index on `s` that can.
+    hint: An index can be built on an expression, not just on a column.
+    solution: |
+      CREATE INDEX ON s (lower(name));
+    verify: |
+      SELECT count(*) AS indexes_on_lower_name FROM pg_indexes
+      WHERE tablename = 's' AND indexdef LIKE '%(lower(name))%';
+
+  - id: covering-index
+    prompt: >
+      Create an index on `s(name)` that also carries `note` as a payload column, so a
+      query for just those two can be answered from the index alone. Use the clause
+      meant for exactly that, not a two-column key.
+    hint: The extra column is stored in the index but is not part of its sort order.
+    solution: |
+      CREATE INDEX ON s (name) INCLUDE (note);
+    verify: |
+      SELECT regexp_replace(indexdef, '^CREATE INDEX \S+', 'CREATE INDEX') AS definition
+      FROM pg_indexes WHERE tablename = 's' AND indexname <> 's_pkey';
+
+  - id: prefix-index
+    prompt: >
+      `WHERE name LIKE 'name7%'` can't use an ordinary index when the database's
+      collation is not C. Create an index on `s(name)` that sorts by the `"C"` collation.
+    hint: A column in an index can carry its own collation.
+    solution: |
+      CREATE INDEX ON s (name COLLATE "C");
+    verify: |
+      SELECT regexp_replace(indexdef, '^CREATE INDEX \S+', 'CREATE INDEX') AS definition
+      FROM pg_indexes WHERE tablename = 's' AND indexname <> 's_pkey';

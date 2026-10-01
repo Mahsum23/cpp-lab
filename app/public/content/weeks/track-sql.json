@@ -35,6 +35,35 @@
       "status": "available",
       "theoryMarkdown": "You already write queries that work. This track is about the layer underneath them: what\nthe engine does with the bytes once your `SELECT` arrives. Start with the most physical\nquestion there is — where does a row actually live?\n\nEverything below is run against **PostgreSQL 16**, because it is the engine most likely\nto be under whatever you build next, and because it is unusually willing to show you its\nown internals. Stack Overflow's developer survey has had it as the most-used database\nsince 2023, and by 2025 it had pulled to 55.6% of all respondents — 58.2% of professional\ndevelopers, roughly eighteen points clear of MySQL in second. But popularity is not why\nit earns this track. It earns it because you can ask Postgres to hand you a raw 8 kB page\nand tell you what is on it, and almost nothing else will.\n\n### A row is not the unit of anything\n\nThe mental model most people carry is that a table is a list of rows, and reading a row\nreads a row. Neither half is true.\n\nA table on disk is a flat array of fixed-size **pages** — Postgres calls the file a\n*heap*. Every page is the same size, and the page is the unit the engine reads, writes,\ncaches and locks. Rows are packed into pages; a page holds as many as fit. When you ask\nfor one row, the engine reads the whole page that row sits in, because that is the\nsmallest thing it can read.\n\n```sql\nSHOW block_size;\n```\n\n```\n block_size\n------------\n 8192\n```\n\n8192 bytes, and it is a compile-time constant: changing it means rebuilding Postgres and\nrecreating every cluster, which is why essentially nobody does. SQLite defaults to 4096,\nmatching the virtual-memory page and most filesystem blocks. The number is a compromise\nnobody has wanted to relitigate since the 1990s — bigger pages waste less space on\nper-page bookkeeping and read more useful bytes per seek, smaller pages waste less I/O\nwhen you only wanted one row.\n\nWatch the file grow in page-sized steps rather than row-sized ones:\n\n```sql order\nCREATE TABLE t(id bigserial PRIMARY KEY, name text, note text);\nSELECT pg_relation_size('t') / 8192 AS pages;\nINSERT INTO t(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 2000) g;\nSELECT pg_relation_size('t') / 8192 AS pages, pg_size_pretty(pg_relation_size('t')) AS heap;\n```\n\n```\n pages\n-------\n     0\n\n pages |  heap\n-------+--------\n    23 | 184 kB\n```\n\nA freshly created Postgres table is **zero pages** — an empty file. (SQLite's answer is\ndifferent and worth knowing: creating a table there costs pages before any row exists,\nbecause the schema and the table's own tree root have to live somewhere.) Then 2000 rows\nland in 23 pages, and the file grew one page at a time at moments that had nothing to do\nwith your row count. Ninety-seven of those rows fit on the first page — a number you will\nbe able to derive rather than guess by the end of this lesson.\n\n### Where a row is, exactly\n\nEvery Postgres row carries hidden system columns you never declared. The one that\nanswers \"where does this row live\" is `ctid`:\n\n```sql\nSELECT ctid, id, name FROM t WHERE id IN (1, 2, 82) ORDER BY id;\n```\n\n```\n  ctid  | id |  name\n--------+----+--------\n (0,1)  |  1 | name1\n (0,2)  |  2 | name2\n (0,82) | 82 | name82\n```\n\n`(page, slot)`. Row 1 is the first slot of page zero; row 82 is the 82nd slot of the same\npage. This is a **physical address**, not an identity — and the difference is the whole\nlesson of the next section.\n\n### An UPDATE does not update\n\nHere is the fact that surprises people who have used Postgres for years:\n\n```sql\nUPDATE t SET note = 'changed' WHERE id = 1;\nSELECT ctid FROM t WHERE id = 1;\n```\n\n```\n  ctid\n---------\n (22,56)\n```\n\nThe row moved from page 0 to page 22. Postgres did not modify the row in place. It wrote\na **new version** of the row wherever there was space, and marked the old one as dead.\nBoth copies are in the file right now.\n\nThat is MVCC — multi-version concurrency control — and it is the mechanism behind\nPostgres's most-loved property: readers never block writers and writers never block\nreaders, because a reader is looking at a version that hasn't gone anywhere. The two\nother hidden columns are the bookkeeping:\n\n```sql\nSELECT ctid, xmin, xmax, id FROM t ORDER BY id LIMIT 3;\n```\n\n```\n  ctid   | xmin | xmax | id\n---------+------+------+----\n (22,56) |  798 |    0 |  1\n (0,2)   |  797 |    0 |  2\n (0,3)   |  797 |    0 |  3\n```\n\n`xmin` is the transaction that created this version, `xmax` the transaction that deleted\nit (0 if it is still live). Row 1 wears its update on its sleeve: same table, same\n`INSERT`, but a *newer* `xmin` than its neighbours, because the version you are looking\nat was created by the `UPDATE` and not by the insert. Every query you run is really \"show me the versions visible\nto my transaction id\", which is why a long-running `SELECT` can sit there returning a\nconsistent snapshot of a table being rewritten underneath it.\n\nThe bill arrives as **bloat**:\n\n```sql order\nSELECT pg_size_pretty(pg_relation_size('t')) AS before_updates;\nUPDATE t SET note = note || 'a';\nSELECT count(*) AS live_rows, pg_size_pretty(pg_relation_size('t')) AS file FROM t;\n```\n\nRun that middle statement three times, changing the appended character each time, so\nevery row gets three new versions:\n\n```\n live_rows |  file\n-----------+--------\n      2000 | 720 kB\n```\n\nSame 2000 rows, and the file went from 184 kB to 720 kB. Three updates of every row left\nthree dead versions of every row lying in the heap. Now clean up:\n\n```sql order\nVACUUM t;\nSELECT pg_size_pretty(pg_relation_size('t')) AS after_vacuum;\nVACUUM FULL t;\nSELECT pg_size_pretty(pg_relation_size('t')) AS after_vacuum_full;\n```\n\n```\n after_vacuum\n--------------\n 720 kB\n\n after_vacuum_full\n-------------------\n 184 kB\n```\n\n**Plain `VACUUM` gave back nothing.** It marks the dead space reusable *by that table*,\nso the file stops growing — but it does not shrink the file, and this is the single most\nmisunderstood thing about Postgres operations. `VACUUM FULL` genuinely returns the space,\nby rewriting the whole table into a new file, and it takes an `ACCESS EXCLUSIVE` lock for\nthe duration: nothing reads or writes that table until it finishes. On a large production\ntable that is an outage, which is why teams reach for `pg_repack` instead, and why \"our\ndisk is full and `VACUUM` didn't help\" is a support conversation that happens every week\nof the year.\n\n> [!NOTE]\n> **The most expensive consequence of ctid, in production.** Because an index entry\n> points at a physical `(page, slot)`, moving a row means every index on the table has to\n> be updated — even indexes on columns your `UPDATE` never touched. Uber's engineering\n> blog made this famous in 2016 as their headline reason for migrating off Postgres:\n> a table with a dozen indexes turned a one-column update into twelve index writes, and\n> that amplification then rode through their replication stream, which ships physical\n> page changes rather than statements. MySQL's InnoDB avoids it by making secondary\n> indexes point at the primary key instead of a physical location — which costs an extra\n> lookup on every index read. There is no free answer here, only a trade someone picked.\n\n### Worth knowing: ask Postgres for the raw bytes of a page\n\nThere is a contrib extension that reads pages directly, and it turns every claim above\ninto something you can check yourself. Rebuild the table first if you have been updating\nit — the numbers below are page 0 of a table freshly loaded with those 2000 rows:\n\n```sql\nCREATE EXTENSION IF NOT EXISTS pageinspect;\nSELECT lower, upper, pagesize FROM page_header(get_raw_page('t', 0));\nSELECT count(*) AS tuples, min(lp_len) AS small, max(lp_len) AS big FROM heap_page_items(get_raw_page('t', 0));\n```\n\n```\n lower | upper | pagesize\n-------+-------+----------\n   412 |   432 |     8192\n\n tuples | smallest | largest\n--------+----------+---------\n     97 |       79 |      80\n```\n\nDo the arithmetic and the page layout falls out of it. A page starts with a 24-byte\nheader, then grows an array of 4-byte **line pointers** downward from the front while the\nrow data itself is stacked upward from the back. `lower` is where the pointer array ends,\n`upper` where the data begins, and the gap between them is the free space — here\n432 − 412 = 20 bytes, so this page is full.\n\nWhich gives you an invariant to check rather than a number to believe:\n**`lower` = 24 + 4 × tuples**. Here that is 24 + 97 × 4 = 412, exactly. Run those two\nqueries against any page of any table of your own and it will still hold, whatever the\ncounts happen to be. That layer of indirection is also why a row can be moved *within* a\npage without any index noticing — the line pointer keeps the slot number stable while the\ndata behind it moves.\n\nNow account for one row's 79 bytes. Eight for the bigint, six for `'name1'`, 41 for the\n40-character note — varying-length values each carry a length byte — and the other 24 are\na per-row header that is yours whether you want it or not. Postgres charges 23 bytes of\nvisibility bookkeeping per row, rounded up for alignment. That is why a table of millions\nof narrow rows is far bigger than `rows × columns` suggests, and why \"just add a boolean\ncolumn\" is never as free as it sounds.\n\n> [!NOTE]\n> **The clock nobody watches until it stops them.** Transaction ids are 32-bit, so they\n> wrap. Postgres protects itself by refusing all writes once a table's oldest unfrozen\n> transaction gets too far behind — `SELECT name, setting FROM pg_settings WHERE name =\n> 'autovacuum_freeze_max_age'` shows the threshold, 200 million by default, against a\n> 2^31 ceiling. Vacuum's *other* job, besides reclaiming space, is freezing old rows so\n> this never happens. When it falls behind on a write-heavy table the ending is always\n> the same: Sentry's engineering blog describes losing most of a US working day to\n> exactly this, and the only recovery is to stop accepting writes and vacuum.",
       "drill": null,
+      "write": {
+        "setup": "CREATE TABLE t(id bigserial PRIMARY KEY, name text, note text);\nINSERT INTO t(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 200) g;",
+        "challenges": [
+          {
+            "id": "ctid",
+            "prompt": "Show where rows 1, 2 and 82 of `t` physically live: return the hidden location column and `id`, in `id` order.",
+            "solution": "SELECT ctid, id FROM t WHERE id IN (1, 2, 82) ORDER BY id;",
+            "hint": "Every row carries a system column that says which page and slot it sits in.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "moved",
+            "prompt": "Change the `note` of row 1 to `'changed'`, then return that row's location. It should be the *new* one — an UPDATE writes a new version of the row.",
+            "solution": "UPDATE t SET note = 'changed' WHERE id = 1;\nSELECT ctid FROM t WHERE id = 1;",
+            "hint": "Two statements. The second one is the same system column as before.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "heap-size",
+            "prompt": "Return the size of the table's heap file as a human-readable string, the way `psql` would show it (like `640 kB`).",
+            "solution": "SELECT pg_size_pretty(pg_relation_size('t'));",
+            "hint": "One function measures the relation in bytes, another one prettifies bytes.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -194,6 +223,35 @@
       "status": "available",
       "theoryMarkdown": "Yesterday: a table is a heap of pages, and finding a row without help means reading all\nof them. Today: what an index actually is, and the four separate reasons a perfectly good\none gets ignored.\n\n### It is a second table you don't get to see\n\nAn index is not an annotation on a table, and it is not a hint. It is **another B-tree,\ncontaining the indexed columns plus a pointer back to the row's physical location**, kept\nsorted.\n\nThat single sentence explains almost everything indexes do:\n\n- Lookups get fast, because the tree is sorted — finding a value is a descent through\n  three or four pages instead of a walk through all of them.\n- Writes get slower, because every `INSERT` now writes two trees, and (as yesterday's\n  `ctid` lesson showed) an `UPDATE` that moves a row writes *every* index on the table.\n- The database gets bigger, sometimes much bigger, because the index is a real copy of\n  real data.\n- `ORDER BY` on the indexed column can become free — the sorted order already exists on\n  disk, so there is nothing to sort.\n\nThat third point is not theoretical. Two indexes on a 50,000-row table:\n\n```\n  relname  | pg_size_pretty\n-----------+----------------\n idx_lower | 1544 kB\n idx_name  | 1544 kB\n s         | 4552 kB\n```\n\nTwo indexes on one column each, and they are already two thirds of the size of the table\nholding three columns. This is why index bloat is a real budget line and why\n`pg_stat_user_indexes.idx_scan = 0` — an index nobody has ever used — is the first thing\na Postgres consultant grep's for.\n\nYou never pay for an index once. You pay on every write, forever, in exchange for the\nreads.\n\n### Ask the planner, never guess\n\nEvery engine will tell you its plan. In Postgres:\n\n```sql order\nCREATE TABLE s(id bigserial PRIMARY KEY, name text, note text);\nINSERT INTO s(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 50000) g;\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE name = 'name7';\n```\n\n```\n                     QUERY PLAN\n-----------------------------------------------------\n Seq Scan on s  (cost=0.00..1194.00 rows=1 width=58)\n   Filter: (name = 'name7'::text)\n```\n\n`Seq Scan` — every page, to find one row. Now build the index:\n\n```sql order\nCREATE INDEX idx_name ON s(name);\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE name = 'name7';\n```\n\n```\n Index Scan using idx_name on s  (cost=0.29..8.31 rows=1 width=58)\n   Index Cond: (name = 'name7'::text)\n```\n\nCost 1194 to cost 8.31. Note `ANALYZE` in there — not `EXPLAIN ANALYZE`, the *other*\n`ANALYZE`, which updates the planner's statistics. Postgres does not pick plans by\nreading your query; it picks them by estimating rows from a sample of your data. Stale\nstatistics are behind an enormous share of \"it was fast yesterday\" incidents, and it is\nthe first thing to check after a bulk load.\n\nTwo numbers, both estimates: `cost` is in arbitrary units where 1.0 is roughly one\nsequential page read, and `rows` is how many the planner *thinks* will come back.\n`EXPLAIN ANALYZE` runs the query and prints what really happened next to the guess — and\nthe gap between estimate and reality is where nearly every planner mystery is solved.\n\n### Reason one: you asked about a different value\n\nHere is the rule that catches everyone: **an index on a column can only answer questions\nabout that column's value.** Wrap the column in a function and you are asking about a\ndifferent value, which the sorted copy is not sorted by.\n\n```sql\nEXPLAIN SELECT * FROM s WHERE lower(name) = 'name7';\n```\n\n```\n Seq Scan on s  (cost=0.00..1319.00 rows=250 width=58)\n   Filter: (lower(name) = 'name7'::text)\n```\n\n`Seq Scan`, with `idx_name` sitting right there. Same story for `WHERE price * 1.2 > 100`,\n`WHERE date(created_at) = '2026-01-01'`, and every `WHERE CAST(id AS text) = ?` written to\nmake a type error go away. Postgres's answer is to let you index the expression itself:\n\n```sql order\nCREATE INDEX idx_lower ON s(lower(name));\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE lower(name) = 'name7';\n```\n\n```\n Index Scan using idx_lower on s  (cost=0.29..8.31 rows=1 width=58)\n   Index Cond: (lower(name) = 'name7'::text)\n```\n\nExpression indexes are a genuine Postgres advantage — MySQL only got them in 8.0.13, in\n2018 — and the case-insensitive-email index is the single most common use of them in\nproduction schemas anywhere.\n\n### Reason two: the index would be slower\n\nThis is the one people refuse to believe, so watch it happen. One table, one index, one\nquery shape — only the *value* changes:\n\n```\n=== WHERE status = 'rare'      (2,000 of 200,000 rows)\n Index Only Scan using idx_status on t2 (actual time=0.033..1.644 rows=2000 loops=1)\n Execution Time: 1.788 ms\n\n=== WHERE status = 'common'    (198,000 of 200,000 rows)\n Parallel Seq Scan on t2 (actual time=0.016..13.148 rows=99000 loops=2)\n Execution Time: 24.699 ms\n```\n\nThe planner used the index for `'rare'` and *refused* it for `'common'`, and it was right\nboth times. An index scan costs one descent per matching row, plus a jump to the heap for\neach; once you are fetching most of the table, reading it straight through in physical\norder is cheaper than 198,000 random jumps. This is why \"add an index\" does nothing for\nyour `WHERE deleted = false` filter when 99% of rows are not deleted — and why a partial\nindex (`CREATE INDEX ... WHERE deleted = true`) is often the actual answer.\n\n### Reason three: the query needed a column the index doesn't carry\n\nIf the index contains every column the query needs, the engine can answer from the index\nalone and never touch the heap:\n\n```sql\nEXPLAIN SELECT name FROM s WHERE name = 'name7';\n```\n\n```\n Index Only Scan using idx_name on s  (cost=0.29..8.31 rows=1 width=9)\n```\n\n**`Index Only Scan`** is the phrase to look for — it means the second lookup, index to\nrow, did not happen. Change that `SELECT name` to `SELECT *` and it drops back to a plain\n`Index Scan`, because `note` only exists in the heap. This is why adding one more column\nto an existing index sometimes beats adding a whole new index, and Postgres has dedicated\nsyntax for exactly that: `CREATE INDEX ... INCLUDE (note)` carries the extra column in the\nindex's leaf pages without making it part of the sort key.\n\n> [!NOTE]\n> Index-only scans in Postgres are only *mostly* index-only. The index has no visibility\n> information, so the engine still has to know whether each row is visible to your\n> transaction — it consults the **visibility map**, one bit per page saying \"everything on\n> this page is visible to everyone\". Pages the map hasn't marked force a heap fetch\n> anyway. `EXPLAIN ANALYZE` prints `Heap Fetches:`, and a high number there on a\n> supposedly index-only scan almost always means the table needs vacuuming. Two lessons\n> in and vacuum is already the answer to a second unrelated question.\n\n### Worth knowing: `C.UTF-8` is not `C`, and the difference is a sequential scan\n\nA prefix search looks like it should be a range scan — everything starting with `name7`\nis contiguous in a sorted list. It isn't:\n\n```sql\nEXPLAIN SELECT * FROM s WHERE name LIKE 'name7%';\n```\n\n```\n Seq Scan on s  (cost=0.00..1194.00 rows=1010 width=58)\n   Filter: (name ~~ 'name7%'::text)\n```\n\nThe reason is **collation**. An index is sorted according to some collation, and a\nlocale-aware one (`en_US.UTF-8`, and yes `C.UTF-8`) can sort in ways where the strings\nmatching a prefix are not one contiguous run — so `LIKE 'x%'` cannot be turned into a\nrange. Only the `C` collation, which compares byte by byte, guarantees it can.\n\nThe trap is that `C.UTF-8` *looks* like `C` and is not. Prove it by declaring an index\nwith the real thing:\n\n```sql order\nCREATE INDEX idx_c ON s(name COLLATE \"C\");\nANALYZE s;\nEXPLAIN SELECT * FROM s WHERE name LIKE 'name7%';\n```\n\n```\n Bitmap Heap Scan on s  (cost=26.44..624.27 rows=1010 width=58)\n   ->  Bitmap Index Scan on idx_c  (cost=0.00..26.19 rows=990 width=0)\n         Index Cond: ((name >= 'name7'::text) AND (name < 'name8'::text))\n```\n\nLook at what the planner did with your `LIKE`: it rewrote it into `name >= 'name7' AND\nname < 'name8'`, a range, exactly as the intuition said it should. The equivalent without\ntouching collation is a `text_pattern_ops` index, which sorts by byte regardless of the\ndatabase's locale.\n\nTwo more things worth carrying out of this. First, the plan is a **Bitmap Heap Scan**, not\nan Index Scan — Postgres's middle gear for when a few thousand rows match: collect all\ntheir locations first, sort them into physical order, then sweep the heap once. Second,\nand this is the part that bites in production: a database created with a locale-aware\ncollation will *silently* not use your index for prefix searches, and you will discover it\nthe week after it worked on someone's laptop where the default was different.",
       "drill": null,
+      "write": {
+        "setup": "CREATE TABLE s(id bigserial PRIMARY KEY, name text, note text);\nINSERT INTO s(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 2000) g;",
+        "challenges": [
+          {
+            "id": "expression-index",
+            "prompt": "Queries keep filtering on `lower(name)`, and the plain index on `name` can't help. Create an index on `s` that can.",
+            "solution": "CREATE INDEX ON s (lower(name));",
+            "hint": "An index can be built on an expression, not just on a column.",
+            "verify": "SELECT count(*) AS indexes_on_lower_name FROM pg_indexes\nWHERE tablename = 's' AND indexdef LIKE '%(lower(name))%';",
+            "ordered": null
+          },
+          {
+            "id": "covering-index",
+            "prompt": "Create an index on `s(name)` that also carries `note` as a payload column, so a query for just those two can be answered from the index alone. Use the clause meant for exactly that, not a two-column key.",
+            "solution": "CREATE INDEX ON s (name) INCLUDE (note);",
+            "hint": "The extra column is stored in the index but is not part of its sort order.",
+            "verify": "SELECT regexp_replace(indexdef, '^CREATE INDEX \\S+', 'CREATE INDEX') AS definition\nFROM pg_indexes WHERE tablename = 's' AND indexname <> 's_pkey';",
+            "ordered": null
+          },
+          {
+            "id": "prefix-index",
+            "prompt": "`WHERE name LIKE 'name7%'` can't use an ordinary index when the database's collation is not C. Create an index on `s(name)` that sorts by the `\"C\"` collation.",
+            "solution": "CREATE INDEX ON s (name COLLATE \"C\");",
+            "hint": "A column in an index can carry its own collation.",
+            "verify": "SELECT regexp_replace(indexdef, '^CREATE INDEX \\S+', 'CREATE INDEX') AS definition\nFROM pg_indexes WHERE tablename = 's' AND indexname <> 's_pkey';",
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -353,6 +411,43 @@
       "status": "available",
       "theoryMarkdown": "Two lessons about where bytes live. This one is about a single value that isn't one, and\nthe class of bug it produces: queries that are syntactically perfect, throw no error, log\nnothing, and return the wrong answer for years.\n\n### It is not zero, and it is not empty\n\n`NULL` means *unknown*. Not absent, not blank, not a default — unknown. Once you take\nthat literally, everything else follows, including the parts that look broken.\n\nIf a value is unknown, then any comparison with it is also unknown:\n\n```sql\nSELECT NULL = NULL AS \"null = null\", NULL <> NULL AS \"null <> null\", NULL IS NULL AS \"is null\";\n```\n\n```\n null = null | null <> null | is null\n-------------+--------------+---------\n             |              | t\n```\n\nThe first two came back **blank — which is psql printing NULL**, not false. `NULL = NULL`\nis not false; it is unknown, because two unknown quantities may or may not be equal and\nSQL declines to guess. This is why `IS NULL` exists as separate syntax: it is the only\noperator that asks about the unknown-ness itself rather than about the value.\n\nSo SQL does not run on booleans. It runs on **three-valued logic**: true, false, unknown.\nAnd the rule that turns that from trivia into production bugs is one line long:\n\n> `WHERE` keeps a row only when the condition is **true**. Unknown is discarded, exactly\n> like false.\n\nSilently. That is the whole failure mode.\n\n### The query that returns nothing, forever\n\nHere is the shape, and it is in more codebases than anyone would like:\n\nThree users, and one of the two orders has a NULL `user_id` — a returns row, a deleted\naccount, a legacy import, whatever your schema permits:\n\n```sql\nCREATE TABLE users(id int, name text);\nINSERT INTO users VALUES (1, 'ana'), (2, 'bo'), (3, 'cy');\n```\n\n```sql order\nCREATE TABLE orders(id int, user_id int);\nINSERT INTO orders VALUES (10, 1), (11, NULL);\nSELECT name FROM users WHERE id NOT IN (SELECT user_id FROM orders);\n```\n\n```\n name\n------\n(0 rows)\n```\n\nTwo users have never ordered anything. The query says nobody has. It is a perfectly\nreasonable-looking way to ask the question, it returns a perfectly reasonable-looking\nempty result, and it is wrong.\n\nExpand it for user 2. `2 NOT IN (1, NULL)` means `2 <> 1 AND 2 <> NULL`:\n\n```\n 2=1 | 2=NULL | not in\n-----+--------+--------\n f   |        |\n```\n\n`2 <> 1` is true. `2 <> NULL` is **unknown**. And `true AND unknown` is unknown — not\ntrue — so `WHERE` drops the row. Now notice that nothing about this depended on the\nnumber 2. Whatever value you test, the second term stays unknown, so the whole `NOT IN`\nis at best unknown and the row is always dropped. **A single NULL anywhere in the list\nmakes `NOT IN` return nothing for every possible input.**\n\n`IN` is not symmetric with it: `2 IN (1, NULL)` is also unknown and also drops the row,\nbut at least it can return true when there *is* a match, so the bug hides only the misses.\n`NOT IN` hides everything.\n\nThe fix is `NOT EXISTS`, which is written in terms of rows rather than values and so has\nnothing to be unknown about:\n\n```sql\nSELECT name FROM users WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id);\n```\n\n```\n name\n------\n bo\n cy\n```\n\nPostgres will also usually plan `NOT EXISTS` better — as an anti-join rather than as a\nfilter — so the correct version is generally the faster one too. That is rare enough to\nbe worth enjoying.\n\n### It is contagious\n\nUnknown propagates through arithmetic and string operations as well as comparisons:\n\n```sql\nSELECT 'a' || NULL AS concat, 1 + NULL AS arith, coalesce('a' || NULL, 'fallback') AS fixed;\n```\n\n```\n concat | arith |  fixed\n--------+-------+----------\n        |       | fallback\n```\n\n`'a' || NULL` is not `'a'`. If one part of the greeting you are building is unknown, the\ngreeting is unknown. Every templating bug that renders an empty string where a name\nshould be traces back to this, and `coalesce(x, fallback)` — return the first non-NULL\nargument — is the standard defence.\n\nAggregates go the other way and **skip NULLs entirely**, which is the source of a whole\nsecond family of quiet wrongness:\n\n```sql order\nCREATE TABLE n(v int);\nINSERT INTO n VALUES (1), (2), (NULL);\nSELECT count(*), count(v), sum(v), avg(v) FROM n;\n```\n\n```\n count | count | sum |       avg\n-------+-------+-----+--------------------\n     3 |     2 |   3 | 1.5000000000000000\n```\n\n`count(*)` counts rows: 3. `count(v)` counts non-NULL values: 2. And `avg` is 1.5, not 1\n— it divided by 2, not by 3. If those NULLs represent \"sensor was offline\", the average\nyou just reported is the average of the readings you have, which is a defensible answer.\nIf they represent \"we forgot to record a zero\", it is a lie. The database cannot tell the\ndifference, and neither can the dashboard.\n\n### The inconsistency the experts actually argue about\n\nHere is where SQL stops being merely counter-intuitive and becomes genuinely\nself-contradictory. `WHERE v = NULL` matches nothing, because two unknowns are not known\nto be equal. Put a second NULL into that same table and ask two more questions of it:\n\n```sql\nINSERT INTO n VALUES (NULL);\nSELECT v, count(*) FROM n GROUP BY v ORDER BY v;\nSELECT count(DISTINCT v) AS distinct_v, count(*) AS all_rows FROM n;\n```\n\n```\n v | count            distinct_v | all_rows\n---+-------           ------------+----------\n 1 |     1                     2 |        4\n 2 |     1\n   |     2\n```\n\n`GROUP BY` collected the two NULL rows into **one group of two** — treating them as equal\nto each other, in a language where `NULL = NULL` is not true — while `count(DISTINCT v)`\nignored them entirely and reported 2 distinct values out of 4 rows. `ORDER BY` has an opinion too:\nPostgres sorts NULLs as larger than every value, so they land last ascending and first\ndescending, and `ORDER BY x NULLS FIRST` exists because the standard left it to the\nimplementation.\n\nSo NULLs are unequal in `WHERE`, equal in `GROUP BY` and `DISTINCT`, absent from\naggregates, and last-by-default in `ORDER BY`. Four different answers to \"are two unknowns\nthe same thing\", inside one language.\n\nThat inconsistency is why this is one of the longest-running arguments in database theory.\nC. J. Date, who has spent four decades writing about the relational model and worked with\nCodd himself, argues that nulls should be removed from it outright: that three-valued\nlogic makes queries mean things their authors cannot predict, and that missing information\nbelongs in additional relations rather than in a magic value. It is not a fringe position,\nand it is not a settled one — Claude Rubinson's *Nulls, three-valued logic, and ambiguity\nin SQL* (SIGMOD Record, 2007) argues Date misreads his own example queries, while\nconceding the broader point: nulls introduce a startling amount of complexity into\napparently straightforward queries. Nobody in that argument thinks the current situation\nis *good*. You have to write queries in it anyway.\n\n### Worth knowing: UNIQUE lets in as many NULLs as you like — until you ask it not to\n\nA `UNIQUE` constraint is defined in terms of equality, and NULLs are never equal, so:\n\n```sql order\nCREATE TABLE u(v int UNIQUE);\nINSERT INTO u VALUES (NULL), (NULL), (NULL);\nSELECT count(*) FROM u;\n```\n\n```\n count\n-------\n     3\n```\n\nThree NULLs in a unique column, no error. This is the standard's behaviour and it is\ncorrect by the rules — but it is not what \"unique\" means to the person reading your\nschema, and it is why partial unique indexes and `NOT NULL` on key columns are so common.\n\nPostgreSQL 15 finally added the other option:\n\n```sql\nCREATE TABLE u2(v int UNIQUE NULLS NOT DISTINCT);\nINSERT INTO u2 VALUES (NULL);\nINSERT INTO u2 VALUES (NULL);\n```\n\n```\nERROR:  duplicate key value violates unique constraint \"u2_v_key\"\nDETAIL:  Key (v)=(null) already exists.\n```\n\n`NULLS NOT DISTINCT` says: for the purpose of this constraint, treat unknowns as equal to\neach other. It arrived roughly thirty years into the language's life, which tells you how\nlong people put up with the alternative.\n\nOne more tool worth carrying: `IS DISTINCT FROM` is `<>` with unknowns treated as\ncomparable, so `WHERE v IS DISTINCT FROM 1` returns the NULL rows as well as the 2s —\nwhich is almost always what the person writing `WHERE v <> 1` actually meant.",
       "drill": null,
+      "write": {
+        "setup": "CREATE TABLE users(id int, name text, city text);\nINSERT INTO users VALUES (1, 'ana', 'Tashkent'), (2, 'bo', NULL), (3, 'cy', 'Oslo');\nCREATE TABLE orders(id int, user_id int);\nINSERT INTO orders VALUES (10, 1), (11, NULL);\nCREATE TABLE n(v int);\nINSERT INTO n VALUES (1), (2), (NULL);",
+        "challenges": [
+          {
+            "id": "never-ordered",
+            "prompt": "Which users have never placed an order? Return their names. `orders.user_id` can be NULL, so don't use `NOT IN`.",
+            "solution": "SELECT name FROM users\nWHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id);",
+            "hint": "Ask about the existence of rows, not about the equality of values.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "counting-nulls",
+            "prompt": "From `n`, return in one row: how many rows there are, how many of them have a non-NULL `v`, and the average of `v`.",
+            "solution": "SELECT count(*), count(v), avg(v) FROM n;",
+            "hint": "One form of `count` counts rows, the other counts values.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "is-distinct",
+            "prompt": "Return every row of `n` whose `v` is not 1 — **including** the row where `v` is NULL. `v <> 1` drops it.",
+            "solution": "SELECT * FROM n WHERE v IS DISTINCT FROM 1;",
+            "hint": "There is a comparison operator that treats unknowns as comparable.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "fallback",
+            "prompt": "Return each user's name and city, showing `'unknown'` where the city is NULL. Order by `id`.",
+            "solution": "SELECT name, coalesce(city, 'unknown') AS city FROM users ORDER BY id;",
+            "hint": "One function returns its first non-NULL argument.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -597,6 +692,43 @@
           ]
         }
       ],
+      "write": {
+        "setup": "CREATE TABLE orders (\n  id       int PRIMARY KEY,\n  customer text NOT NULL,\n  status   text NOT NULL,\n  amount   numeric(10,2) NOT NULL\n);\nINSERT INTO orders VALUES\n  (1, 'ana', 'paid',      120.00),\n  (2, 'ana', 'paid',       40.00),\n  (3, 'bo',  'cancelled', 500.00),\n  (4, 'bo',  'paid',       30.00),\n  (5, 'cy',  'paid',       90.00),\n  (6, 'cy',  'paid',       25.00);",
+        "challenges": [
+          {
+            "id": "big-spenders",
+            "prompt": "Which customers have **paid** more than 150 in total? Return `customer` and `total`, ordered by customer. Cancelled orders must not count towards the sum.",
+            "solution": "SELECT customer, sum(amount) AS total\nFROM orders\nWHERE status = 'paid'\nGROUP BY customer\nHAVING sum(amount) > 150\nORDER BY customer;",
+            "hint": "A condition about one row and a condition about a group go in different clauses.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "filter-an-alias",
+            "prompt": "Return `id` and `gross` (the amount times 1.2) for the orders whose gross is over 100, highest first. `WHERE gross > 100` is an error, so find the way around it that filters the alias itself.",
+            "solution": "SELECT id, gross\nFROM (SELECT id, amount * 1.2 AS gross FROM orders) o\nWHERE gross > 100\nORDER BY gross DESC;",
+            "hint": "Wrap the query that creates the alias, and filter from outside.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "zero-not-null",
+            "prompt": "Return the total amount of orders over 1000, as a single value that is `0` when there are none — not NULL.",
+            "solution": "SELECT coalesce(sum(amount), 0) AS total FROM orders WHERE amount > 1000;",
+            "hint": "The sum of no rows is NULL. Something returns its first non-NULL argument.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "per-customer",
+            "prompt": "Return each customer and how many orders they have, most orders first, ties broken by customer name.",
+            "solution": "SELECT customer, count(*) AS orders\nFROM orders\nGROUP BY customer\nORDER BY orders DESC, customer;",
+            "hint": "Two sort keys, the second one only matters on ties.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -841,6 +973,43 @@
           ]
         }
       ],
+      "write": {
+        "setup": "CREATE TABLE customers (id int PRIMARY KEY, name text NOT NULL);\nCREATE TABLE orders (\n  id          int PRIMARY KEY,\n  customer_id int REFERENCES customers,\n  status      text NOT NULL,\n  amount      numeric(10,2) NOT NULL\n);\nINSERT INTO customers VALUES (1, 'ana'), (2, 'bo'), (3, 'cy'), (4, 'dee');\nINSERT INTO orders VALUES\n  (10, 1, 'paid',     120.00),\n  (11, 1, 'refunded',  40.00),\n  (12, 2, 'refunded',  30.00),\n  (13, 3, 'paid',      90.00);",
+        "challenges": [
+          {
+            "id": "keep-everyone",
+            "prompt": "List **every** customer with their paid orders: return the customer's `name` and the order's `id`. A customer with no paid order still appears, with a NULL id. Order by name, then order id.",
+            "solution": "SELECT c.name, o.id\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'paid'\nORDER BY c.name, o.id;",
+            "hint": "The condition on the right-hand table belongs where the match is decided.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "anti-join",
+            "prompt": "Return the names of the customers who have never placed an order, using a `LEFT JOIN` and a test on the right-hand side.",
+            "solution": "SELECT c.name\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE o.id IS NULL;",
+            "hint": "A row the join invented has NULL in every right-hand column.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "count-right",
+            "prompt": "Return each customer's `name` and how many orders they have — `0` for the one with none. Ordered by name.",
+            "solution": "SELECT c.name, count(o.id) AS orders\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nGROUP BY c.name\nORDER BY c.name;",
+            "hint": "`count(*)` counts the row the join made up. Count something from the other side.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "paid-total",
+            "prompt": "Return each customer's `name` and the total of their **paid** orders, showing `0` for customers who have none. Ordered by name.",
+            "solution": "SELECT c.name, coalesce(sum(o.amount), 0) AS paid\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'paid'\nGROUP BY c.name\nORDER BY c.name;",
+            "hint": "Filter in `ON`, aggregate, then replace the NULL a missing match produces.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -1085,6 +1254,43 @@
           ]
         }
       ],
+      "write": {
+        "setup": "CREATE TABLE orders   (id int PRIMARY KEY, customer text NOT NULL, total numeric(10,2) NOT NULL);\nCREATE TABLE items    (order_id int REFERENCES orders, sku text NOT NULL, qty int NOT NULL);\nCREATE TABLE payments (order_id int REFERENCES orders, amount numeric(10,2) NOT NULL);\nINSERT INTO orders VALUES (1, 'ana', 100.00), (2, 'bo', 80.00);\nINSERT INTO items VALUES (1, 'mug', 1), (1, 'tea', 2), (1, 'spoon', 1), (2, 'kettle', 1);\nINSERT INTO payments VALUES (1, 50.00), (1, 50.00), (2, 80.00);",
+        "challenges": [
+          {
+            "id": "honest-report",
+            "prompt": "One row per customer, with `customer`, `revenue` (the order total), `paid` (the sum of their payments) and `lines` (their item rows) — every number correct, not multiplied by the other table. Ordered by customer.",
+            "solution": "SELECT o.customer, o.total AS revenue, p.paid, i.lines\nFROM orders o\nJOIN (SELECT order_id, count(*) AS lines FROM items GROUP BY order_id) i ON i.order_id = o.id\nJOIN (SELECT order_id, sum(amount) AS paid FROM payments GROUP BY order_id) p ON p.order_id = o.id\nORDER BY o.customer;",
+            "hint": "Reduce each many-side table to one row per order before it meets anything else.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "fan-out-detector",
+            "prompt": "Join `orders` to both `items` and `payments`, and return two numbers in one row: how many rows the join produced, and how many distinct orders are in it.",
+            "solution": "SELECT count(*) AS rows, count(DISTINCT o.id) AS orders\nFROM orders o\nJOIN items i ON i.order_id = o.id\nJOIN payments p ON p.order_id = o.id;",
+            "hint": "Compare a plain count with a count of distinct keys over the same join.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "duplicate-payments",
+            "prompt": "Which orders have more than one payment? Return `order_id` and the number of payments.",
+            "solution": "SELECT order_id, count(*) AS payments\nFROM payments\nGROUP BY order_id\nHAVING count(*) > 1;",
+            "hint": "Group, then filter the groups.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "conditional-count",
+            "prompt": "From `items`, return in one row how many lines have `qty` above 1 and how many lines there are in total — without joining or using a subquery.",
+            "solution": "SELECT count(*) FILTER (WHERE qty > 1) AS multi, count(*) AS all_lines FROM items;",
+            "hint": "An aggregate can carry its own filter.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -1330,6 +1536,35 @@
           ]
         }
       ],
+      "write": {
+        "setup": "CREATE TABLE players (id int PRIMARY KEY, name text NOT NULL, score int NOT NULL);\nINSERT INTO players VALUES (1, 'ana', 90), (2, 'bo', 75), (3, 'cy', 90), (4, 'dee', 60), (5, 'eli', 75);\nCREATE TABLE feed (id int PRIMARY KEY, created_at timestamptz NOT NULL, title text);\nINSERT INTO feed VALUES\n  (1, '2026-05-01 10:00+00', 'first'),\n  (2, '2026-05-01 10:05+00', 'second'),\n  (3, '2026-05-01 10:05+00', 'third'),\n  (4, '2026-05-01 10:10+00', 'fourth'),\n  (5, '2026-05-01 10:02+00', 'imported late');",
+        "challenges": [
+          {
+            "id": "stable-top",
+            "prompt": "The three best players: `name` and `score`, highest score first. Two players tie at the top, so make the answer the same every time by breaking ties on `id`.",
+            "solution": "SELECT name, score FROM players ORDER BY score DESC, id LIMIT 3;",
+            "hint": "The last sort key has to be unique.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "with-ties",
+            "prompt": "The top three by score, but let ties share their place instead of cutting among them: return `name` and `score`, highest first. Use the standard clause for it, not `LIMIT`.",
+            "solution": "SELECT name, score FROM players ORDER BY score DESC FETCH FIRST 3 ROWS WITH TIES;",
+            "hint": "FETCH FIRST … ROWS …",
+            "verify": null,
+            "ordered": false
+          },
+          {
+            "id": "keyset",
+            "prompt": "Page 1 of the feed (newest first, ties on `id` descending) ended at the post with `created_at = '2026-05-01 10:05+00'` and `id = 3`. Return the next two posts, as `id` and `title` — compare the pair, not each column on its own.",
+            "solution": "SELECT id, title FROM feed\nWHERE (created_at, id) < ('2026-05-01 10:05+00', 3)\nORDER BY created_at DESC, id DESC\nLIMIT 2;",
+            "hint": "A row comparison — two columns in parentheses on each side of `<`.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -1574,6 +1809,51 @@
           ]
         }
       ],
+      "write": {
+        "setup": "CREATE TABLE sales (id int PRIMARY KEY, region text NOT NULL, day date NOT NULL, amount int NOT NULL);\nINSERT INTO sales VALUES\n  (1, 'north', '2026-03-01', 100),\n  (2, 'north', '2026-03-02',  50),\n  (3, 'north', '2026-03-02',  70),\n  (4, 'north', '2026-03-03',  30),\n  (5, 'south', '2026-03-01', 200),\n  (6, 'south', '2026-03-02', 200),\n  (7, 'south', '2026-03-03',  10);",
+        "challenges": [
+          {
+            "id": "share",
+            "prompt": "For every sale return `id` and its percentage of its **region's** total, rounded to one decimal place (so 100 of north's 250 is `40.0`). Keep all seven rows. Ordered by id.",
+            "solution": "SELECT id, round(100.0 * amount / sum(amount) OVER (PARTITION BY region), 1) AS pct\nFROM sales\nORDER BY id;",
+            "hint": "A window over each region keeps the rows; `100.0` avoids integer division.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "top-per-region",
+            "prompt": "Each region's biggest sale — `region`, `id`, `amount` — keeping **both** when two sales tie for first. Ordered by region, then id. You can't filter on a window function in `WHERE`.",
+            "solution": "SELECT region, id, amount\nFROM (\n  SELECT region, id, amount,\n         rank() OVER (PARTITION BY region ORDER BY amount DESC) AS r\n  FROM sales\n) ranked\nWHERE r = 1\nORDER BY region, id;",
+            "hint": "Rank in a subquery, filter the rank outside it.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "running-total",
+            "prompt": "A running total of north's sales in order of day then id: return `id` and `running`, ordered by id. Two sales share a day, so the default frame would get it wrong.",
+            "solution": "SELECT id,\n       sum(amount) OVER (ORDER BY day, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running\nFROM sales\nWHERE region = 'north'\nORDER BY id;",
+            "hint": "Count rows, not peers — and give the frame explicitly.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "day-change",
+            "prompt": "Total sales per day, and how much each day changed from the day before: `day`, `total`, `change` (NULL for the first day). Ordered by day.",
+            "solution": "SELECT day, total, total - lag(total) OVER (ORDER BY day) AS change\nFROM (SELECT day, sum(amount) AS total FROM sales GROUP BY day) d\nORDER BY day;",
+            "hint": "One window function reads a value from the previous row.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "one-per-region",
+            "prompt": "Exactly one top sale per region (the lowest id wins a tie): `region`, `id`, `amount`, ordered by region. Use the PostgreSQL-specific shortcut, not a subquery.",
+            "solution": "SELECT DISTINCT ON (region) region, id, amount\nFROM sales\nORDER BY region, amount DESC, id;",
+            "hint": "DISTINCT with an ON list, and an ORDER BY that starts with the same column.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -1818,6 +2098,43 @@
           ]
         }
       ],
+      "write": {
+        "setup": "CREATE TABLE visits (id int PRIMARY KEY, converted boolean NOT NULL);\nINSERT INTO visits SELECT n, n % 8 = 0 FROM generate_series(1, 200) AS n;\nCREATE TABLE m (id int, v float8);\nINSERT INTO m VALUES (1, 0.1::float8 + 0.2::float8), (2, 0.3), (3, 0.4);",
+        "challenges": [
+          {
+            "id": "conversion-rate",
+            "prompt": "The conversion rate of `visits` as a percentage rounded to two decimals, in one column. Beware: counts are integers, and integer division throws the remainder away.",
+            "solution": "SELECT round(100.0 * count(*) FILTER (WHERE converted) / count(*), 2) AS rate FROM visits;",
+            "hint": "Start the arithmetic with a number that is not an integer.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "tolerance",
+            "prompt": "Which rows of `m` hold the value 0.3? Row 1 stores `0.1 + 0.2` as a `float8`, so `v = 0.3` finds only row 2 — compare with a tolerance of `1e-9` instead, and return the matching `id`s in order.",
+            "solution": "SELECT id FROM m WHERE abs(v - 0.3) < 1e-9 ORDER BY id;",
+            "hint": "The absolute difference, against a small number.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "exact-sum",
+            "prompt": "Add 0.1 up a thousand times and get exactly the answer, in decimal arithmetic. Use `generate_series` for the thousand rows, and return the single sum.",
+            "solution": "SELECT sum(0.1::numeric) AS total FROM generate_series(1, 1000);",
+            "hint": "Cast the 0.1 to the exact decimal type before summing.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "no-overflow",
+            "prompt": "`SELECT 2147483647 + 1` fails with `integer out of range`. Return that sum successfully, by making the arithmetic happen in the wider integer type.",
+            "solution": "SELECT 2147483647::bigint + 1 AS fine;",
+            "hint": "Cast one side to the 8-byte integer type.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -2062,6 +2379,43 @@
           ]
         }
       ],
+      "write": {
+        "setup": "CREATE TABLE logins (id int, at timestamptz);\nINSERT INTO logins VALUES\n  (1, '2026-06-01 09:00+00'),\n  (2, '2026-06-07 23:59:59.5+00'),\n  (3, '2026-06-08 00:00:00+00'),\n  (4, '2026-06-08 10:00+00');",
+        "challenges": [
+          {
+            "id": "whole-week",
+            "prompt": "The ids of the logins in the week of 1–7 June, **including everything on the 7th** and nothing from the 8th. Ordered by id. `BETWEEN` can't express this.",
+            "solution": "SELECT id FROM logins\nWHERE at >= '2026-06-01' AND at < '2026-06-08'\nORDER BY id;",
+            "hint": "Inclusive start, exclusive end — the end is the start of the next day.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "wall-clock",
+            "prompt": "What did a wall clock in Tashkent (`'Asia/Tashkent'`) show at the instant `2026-03-29 12:00:00+00`? Return it as a plain timestamp, without a time zone.",
+            "solution": "SELECT timestamptz '2026-03-29 12:00:00+00' AT TIME ZONE 'Asia/Tashkent' AS wall_clock;",
+            "hint": "One operator converts an instant to the wall-clock time in a named zone.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "pinned-day",
+            "prompt": "Cut the instant `2026-06-01 22:30+00` down to the start of its day **in UTC**, so the answer doesn't depend on the session's time zone. Pass the zone explicitly.",
+            "solution": "SELECT date_trunc('day', timestamptz '2026-06-01 22:30+00', 'UTC') AS utc_day;",
+            "hint": "`date_trunc` takes an optional third argument.",
+            "verify": null,
+            "ordered": null
+          },
+          {
+            "id": "month-clamp",
+            "prompt": "The date one month after 31 January 2026, returned as a `date` — not a timestamp.",
+            "solution": "SELECT (date '2026-01-31' + interval '1 month')::date AS next_month;",
+            "hint": "Add an interval, then cast the result back down.",
+            "verify": null,
+            "ordered": null
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",

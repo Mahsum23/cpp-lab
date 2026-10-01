@@ -1,0 +1,32 @@
+# Queries to type from memory in the review deck. The tables are rebuilt from `setup` for
+# every attempt; the reference `solution` is run to produce the target the learner sees,
+# and an answer passes if its rows match — whatever the spelling.
+setup: |
+  CREATE TABLE t(id bigserial PRIMARY KEY, name text, note text);
+  INSERT INTO t(name, note) SELECT 'name' || g, repeat('x', 40) FROM generate_series(1, 200) g;
+
+challenges:
+  - id: ctid
+    prompt: >
+      Show where rows 1, 2 and 82 of `t` physically live: return the hidden location
+      column and `id`, in `id` order.
+    hint: Every row carries a system column that says which page and slot it sits in.
+    solution: |
+      SELECT ctid, id FROM t WHERE id IN (1, 2, 82) ORDER BY id;
+
+  - id: moved
+    prompt: >
+      Change the `note` of row 1 to `'changed'`, then return that row's location. It
+      should be the *new* one — an UPDATE writes a new version of the row.
+    hint: Two statements. The second one is the same system column as before.
+    solution: |
+      UPDATE t SET note = 'changed' WHERE id = 1;
+      SELECT ctid FROM t WHERE id = 1;
+
+  - id: heap-size
+    prompt: >
+      Return the size of the table's heap file as a human-readable string, the way
+      `psql` would show it (like `640 kB`).
+    hint: One function measures the relation in bytes, another one prettifies bytes.
+    solution: |
+      SELECT pg_size_pretty(pg_relation_size('t'));

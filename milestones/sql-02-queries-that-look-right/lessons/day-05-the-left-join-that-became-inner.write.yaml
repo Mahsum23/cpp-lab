@@ -1,0 +1,62 @@
+setup: |
+  CREATE TABLE customers (id int PRIMARY KEY, name text NOT NULL);
+  CREATE TABLE orders (
+    id          int PRIMARY KEY,
+    customer_id int REFERENCES customers,
+    status      text NOT NULL,
+    amount      numeric(10,2) NOT NULL
+  );
+  INSERT INTO customers VALUES (1, 'ana'), (2, 'bo'), (3, 'cy'), (4, 'dee');
+  INSERT INTO orders VALUES
+    (10, 1, 'paid',     120.00),
+    (11, 1, 'refunded',  40.00),
+    (12, 2, 'refunded',  30.00),
+    (13, 3, 'paid',      90.00);
+
+challenges:
+  - id: keep-everyone
+    prompt: >
+      List **every** customer with their paid orders: return the customer's `name` and
+      the order's `id`. A customer with no paid order still appears, with a NULL id.
+      Order by name, then order id.
+    hint: The condition on the right-hand table belongs where the match is decided.
+    solution: |
+      SELECT c.name, o.id
+      FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'paid'
+      ORDER BY c.name, o.id;
+
+  - id: anti-join
+    prompt: >
+      Return the names of the customers who have never placed an order, using a
+      `LEFT JOIN` and a test on the right-hand side.
+    hint: A row the join invented has NULL in every right-hand column.
+    solution: |
+      SELECT c.name
+      FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id
+      WHERE o.id IS NULL;
+
+  - id: count-right
+    prompt: >
+      Return each customer's `name` and how many orders they have — `0` for the one
+      with none. Ordered by name.
+    hint: "`count(*)` counts the row the join made up. Count something from the other side."
+    solution: |
+      SELECT c.name, count(o.id) AS orders
+      FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id
+      GROUP BY c.name
+      ORDER BY c.name;
+
+  - id: paid-total
+    prompt: >
+      Return each customer's `name` and the total of their **paid** orders, showing `0`
+      for customers who have none. Ordered by name.
+    hint: Filter in `ON`, aggregate, then replace the NULL a missing match produces.
+    solution: |
+      SELECT c.name, coalesce(sum(o.amount), 0) AS paid
+      FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'paid'
+      GROUP BY c.name
+      ORDER BY c.name;
