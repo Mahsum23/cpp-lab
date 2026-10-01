@@ -12,7 +12,14 @@
   const milestoneNo = (m: string) => /\d+/.exec(m)?.[0] ?? m;
   // Track-scoped: falling back to weeks[0] would show the other subject's week
   // in the header of a track that hasn't loaded yet.
-  const week = $derived(current?.week ?? app.trackWeeks[0] ?? null);
+  // With nothing left to do, the week worth talking about is the last one finished.
+  const week = $derived(current?.week ?? app.trackWeeks.at(-1) ?? null);
+  /** Weeks of *this* subject the server has and this device has not loaded yet. */
+  const readyHere = $derived(
+    (app.curriculum?.weeks ?? []).filter(
+      (ref) => app.sync.newWeeks.includes(ref.id) && (ref.track ?? 'cpp') === app.track,
+    ),
+  );
   const wp = $derived(week ? app.weekProgress(week) : { done: 0, total: 0 });
   const segs = $derived(current ? app.segments(current.day, current.week.id) : [false, false, false]);
   const started = $derived(segs.some(Boolean));
@@ -135,11 +142,19 @@
         <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
       </div>
       <h2>Week clear</h2>
-      <p class="meta">
-        Every written day in {week.title} is done. The next one lands when it's written —
-        the map will say so.
-      </p>
-      <Button variant="secondary" onclick={() => router.go('/map')}>Open the map</Button>
+      {#if readyHere.length}
+        <p class="meta">
+          Every day in {week.title} is done, and the next week — {readyHere[0].title} — is
+          ready.
+        </p>
+        <Button onclick={() => router.go('/map')}>Load it from the map</Button>
+      {:else}
+        <p class="meta">
+          Every written day in {week.title} is done. The next one lands when it's written —
+          the map will say so.
+        </p>
+        <Button variant="secondary" onclick={() => router.go('/map')}>Open the map</Button>
+      {/if}
     </article>
   {/if}
 
@@ -198,9 +213,9 @@
 
   {#if app.sync.status === 'offline'}
     <p class="note">Offline — showing the weeks you've already loaded.</p>
-  {:else if app.sync.newWeeks.length}
+  {:else if readyHere.length && current}
     <button class="note new" onclick={() => router.go('/map')}>
-      ✨ Week {app.sync.newWeeks.length > 1 ? 's' : ''} available — open the map to load
+      ✨ New week{readyHere.length > 1 ? 's' : ''} available — open the map to load
     </button>
   {/if}
 </div>

@@ -29,6 +29,7 @@
     MAX_REVIEW_MESSAGES, ModelGoneError, withStanding, type ChatMessage, type MentorFocus,
   } from '../lib/mentor';
   import { TRACKS, type Day, type QuizQuestion, type Track, type Week } from '../lib/types';
+  import { inlineHtml } from '../lib/inline';
 
   /** Cards dealt this sitting, so the same one can't come round twice in a row. */
   let seen = $state<Set<string>>(new Set());
@@ -452,7 +453,7 @@
       <div class="card wait"><span class="dot"></span> Writing you a challenge…</div>
     {:else if card.kind === 'quiz' && question}
       <div class="card">
-        <h2 class="q">{question.prompt}</h2>
+        <h2 class="q inline-md">{@html inlineHtml(question.prompt)}</h2>
         <div class="options">
           {#each question.options as option, i}
             <button
@@ -462,12 +463,12 @@
               disabled={picked !== null}
               onclick={() => void choose(i)}
             >
-              <span class="text">{option.text}</span>
+              <span class="text inline-md">{@html inlineHtml(option.text)}</span>
               {#if answered && option.correct}<span class="mark">✓</span>{/if}
               {#if picked === i && !option.correct}<span class="mark">✗</span>{/if}
             </button>
             {#if answered && (picked === i || option.correct)}
-              <p class="why" class:muted={picked !== i}>{option.why}</p>
+              <p class="why inline-md" class:muted={picked !== i}>{@html inlineHtml(option.why)}</p>
             {/if}
           {/each}
         </div>

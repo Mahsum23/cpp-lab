@@ -15,6 +15,7 @@ import {
   type DayProgress, type Progress, type ReviewCard, type ReviewState, type StreakState, type TaskReview, type TaskState, type QuizState,
 } from './types';
 import { deriveXp } from './xp';
+import { deriveStreak } from './streak';
 
 const TASK_RANK: Record<TaskState, number> = { todo: 0, attempted: 1, done: 2 };
 
@@ -156,7 +157,8 @@ export function mergeProgress(local: Progress, remote: Progress): Progress {
   return {
     schemaVersion: Math.max(local.schemaVersion, remote.schemaVersion),
     days,
-    streak: mergeStreak(local.streak, remote.streak),
+    // Replayed from the merged days, not chosen between two counters: see deriveStreak.
+    streak: deriveStreak(Object.values(days), mergeStreak(local.streak, remote.streak)),
     xp: deriveXp(Object.values(days)),
     badges,
     // Theme and pace are how *this* device is set up. Syncing them means turning on

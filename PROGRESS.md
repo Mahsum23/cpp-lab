@@ -493,3 +493,48 @@ right-click with a selection shows it and suppresses the native menu; right-clic
 no selection leaves the native menu alone; selecting the page heading (outside the
 watched element) offers nothing; a two-character selection offers nothing; the question
 is really sent and the reply renders.
+
+**SQL week 2 written: Queries That Look Right (2026-10-01).** The SQL track had run out of
+days, and he asked for the next week with the weight on fundamentals, because he still
+makes mistakes there. Seven days, `sql-day-04` to `sql-day-10`: logical clause order,
+the LEFT JOIN that becomes an INNER JOIN, join fan-out, ORDER BY and pagination, window
+functions, numeric types, time. Each day has a theory file, 5 quiz questions, 3 drills
+(so every day can be finished on a phone) and a task with a checklist.
+
+Everything was run on PostgreSQL 16.13 with the Docker image's locale and time zone, and
+`tools/check-sql-lesson.py` now runs each lesson top to bottom and compares all 102 output
+blocks with what psql prints. Things that turned up while running it, and became material:
+- `GROUP BY name` resolves to the *input* column and `ORDER BY name` to the *output*
+  alias, so one query printed `ana` twice (day 4's "worth knowing").
+- The planner's rewrite of a broken LEFT JOIN into an inner join is visible in `EXPLAIN`:
+  the plan says `Nested Loop`, with no `Left` in it (day 5).
+- Synchronized seqscans can be shown in a single psql session: park a cursor 100,000 rows
+  into a 69 MB table, and a plain `SELECT … LIMIT 3` starts at row 99,553. Below 32 MB
+  (a quarter of the default `shared_buffers`) it always starts at row 1 (day 7).
+- `QUALIFY` is a syntax error in Postgres that points at the *next* word, because
+  `FROM sales QUALIFY` parses as a table alias (day 8).
+- Summing `0.1::real` a million times gives 100,958.34. `round(2.5)` is 3 but
+  `round(2.5::float8)` is 2 (day 9).
+- `'12:00 UTC+5'` is 17:00 UTC: POSIX offsets count west (day 10).
+
+Two fixes found on the way. On a phone, quiz and drill text showed its backticks literally
+on every track; it now renders `code` and **bold** through an escaped `inline.ts`, and
+`test-inline.mjs` checks all 1,523 strings the app ships. Today's "Week clear" card also
+said "the next one lands when it's written" right above "New week available"; it now names
+the ready week and offers to load it.
+
+Not done: the checker flags week 1's SQL lessons as not runnable top to bottom, because
+several blocks re-create the same table, so a reader's numbers drift from the printed ones.
+Week 1 also still has no drills.
+
+**Streak said 1 the day after a finished day (2026-10-01).** He finished a day yesterday
+and another today, and the celebration said "1 day streak". The streak was a stored
+counter, and on sync the device that had been active most recently won it outright. If a
+device finished a day before it had pulled the other's progress (pull still in flight or
+failed, or a tab left open since before), it computed 1 from its own stale counter, and
+the merge then kept that 1 permanently, even though both finished days were sitting in
+the merged record. Now the streak is replayed from the days' `completedAt` dates
+(`deriveStreak`), the same way XP has always been derived. That happens on merge, on
+finishing a day and on load, so a counter the old code broke heals on the next launch.
+Reproduced in `test-streak.mjs` before fixing, and checked in a browser: a broken
+"1" becomes 2 on reload, and finishing a day on a stale device celebrates a 2-day streak.

@@ -1,0 +1,148 @@
+# Answer key for day 09. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      Why does `count(*) FILTER (WHERE converted) / count(*) * 100` return 0 for a 12.5%
+      conversion rate in PostgreSQL, and how do you fix it?
+    options:
+      - text: >
+          Both counts are integers, so `/` is integer division: 25 / 200 is 0, and 0 × 100
+          is 0. Start with `100.0 *` or cast one side to numeric
+        correct: true
+        why: >
+          The fractional part is thrown away before the multiplication ever happens.
+          Moving the 100 to the front gives 12, still truncated. A non-integer anywhere at
+          the start makes the whole expression numeric: 12.50.
+      - text: "`FILTER` returns NULL when fewer than half the rows match"
+        correct: false
+        why: >
+          FILTER just restricts which rows a single aggregate sees. The count is 25. The
+          zero comes from the division.
+      - text: Postgres rounds percentages below 50% down to 0
+        correct: false
+        why: >
+          There is no percentage logic anywhere. It is plain integer division, which
+          truncates toward zero.
+      - text: "`count(*)` returns a float, which cannot be multiplied by an integer"
+        correct: false
+        why: >
+          count returns bigint, an integer. That is exactly why the division truncates.
+
+  - id: q2
+    prompt: >
+      Why is `0.1::float8 + 0.2::float8 = 0.3` false in PostgreSQL while
+      `0.1 + 0.2 = 0.3` is true?
+    options:
+      - text: >
+          A bare literal like `0.1` is numeric, which is exact decimal; as float8, 0.1 and
+          0.2 are stored as their nearest binary neighbours and their sum is
+          0.30000000000000004
+        correct: true
+        why: >
+          0.1 has no finite binary expansion, just as 1/3 has no finite decimal one. The
+          literal-is-numeric rule is why a quick check in psql can come out exact while a
+          float8 column misbehaves.
+      - text: Postgres has a bug in float addition that numeric does not have
+        correct: false
+        why: >
+          Every IEEE 754 implementation gives the same 0.30000000000000004. The behaviour
+          is correct for binary floating point.
+      - text: Both are float8, but the second one is rounded for display before comparing
+        correct: false
+        why: >
+          The second one is not float8 at all — Postgres reads `0.1` as numeric.
+          Comparisons never use display rounding.
+      - text: The `=` operator is not defined for float8
+        correct: false
+        why: >
+          It is defined, and it compares the exact stored values — which is why it says
+          false.
+
+  - id: q3
+    prompt: >
+      You insert 19.999 into a `numeric(10,2)` column. What is stored, and does anything
+      warn you?
+    options:
+      - text: "20.00, rounded silently on the way in"
+        correct: true
+        why: >
+          A declared scale is enforced by rounding to that many decimal places, with no
+          error and no notice. Overflowing the precision (too many digits before the point)
+          is an error; extra digits after it are not.
+      - text: "19.99, truncated, with a NOTICE"
+        correct: false
+        why: >
+          numeric rounds rather than truncates, and it does it silently.
+      - text: "An error: value has too many decimal places"
+        correct: false
+        why: >
+          Too many digits in total raises `numeric field overflow`. Too many decimal places
+          just rounds.
+      - text: "19.999, because numeric is arbitrary precision"
+        correct: false
+        why: >
+          Only an unconstrained `numeric` keeps every digit. The `(10,2)` is a promise
+          that the column holds exactly two decimals, kept by rounding.
+
+  - id: q4
+    prompt: >
+      What do `round(2.5)` and `round(2.5::float8)` return in PostgreSQL, and why do they
+      differ?
+    options:
+      - text: >
+          3 and 2: numeric rounds half away from zero, float8 rounds half to even (the
+          IEEE 754 default)
+        correct: true
+        why: >
+          Round-half-to-even does not drift upward over many values, which is why IEEE
+          754 uses it by default. Casting splits the same way: `2.5::int` is 3,
+          `2.5::float8::int` is 2.
+      - text: Both return 3
+        correct: false
+        why: >
+          The numeric one does. The float8 one uses the platform's round-to-even and
+          returns 2.
+      - text: Both return 2, because Postgres always uses banker's rounding
+        correct: false
+        why: >
+          Only float8 does. numeric uses the school rule, half away from zero, so it gives
+          3 here and -3 for -2.5.
+      - text: 2 and 3, because float8 is more precise
+        correct: false
+        why: >
+          The other way round, and precision is not the cause. 2.5 is exact in both types;
+          the tie-breaking rule is what differs.
+
+  - id: q5
+    prompt: >
+      Which type would you use for an amount of money in PostgreSQL, and why not `float8`
+      or `money`?
+    options:
+      - text: >
+          `numeric` with an explicit scale, or an integer count of the smallest currency
+          unit; float8 cannot represent most decimal amounts exactly, and `money` depends
+          on the server's locale setting
+        correct: true
+        why: >
+          Floats turn 0.10 into a binary approximation and drift under addition. The
+          `money` type's output follows `lc_monetary` and it has one fixed fractional
+          precision for every currency; the Postgres wiki's "Don't Do This" page says not
+          to use it. Stripe's API, for one, uses integers in the smallest unit.
+      - text: "`money`, because it was designed for currency"
+        correct: false
+        why: >
+          Designed for it, and still discouraged by the people who maintain Postgres
+          advice: locale-dependent output, one fixed precision, and awkward arithmetic.
+      - text: "`float8`, since it has 15 significant digits, more than any price needs"
+        correct: false
+        why: >
+          The problem is not the number of digits but which values are representable. 0.1
+          is not, and sums of not-quite-0.1 drift.
+      - text: "`real`, to save space on large tables"
+        correct: false
+        why: >
+          real has a 24-bit significand: it cannot even represent every integer above
+          16,777,216, and adding 0.1 a million times gives 100,958.

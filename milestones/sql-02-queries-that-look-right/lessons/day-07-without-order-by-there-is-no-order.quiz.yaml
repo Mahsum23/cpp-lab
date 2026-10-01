@@ -1,0 +1,152 @@
+# Answer key for day 07. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      A query without `ORDER BY` has returned rows in insertion order for months. Name two
+      things that can change that order without the query changing.
+    options:
+      - text: >
+          An `UPDATE` writing a row's new version elsewhere in the table, and the planner
+          switching to a different plan (an index, a parallel scan, a synchronized scan)
+        correct: true
+        why: >
+          Without ORDER BY you get whatever order the chosen plan meets the rows in. Writes
+          move rows physically — an updated row is a new version in a new slot — and plan
+          changes alter the path through them. Synchronized scans can even start halfway
+          through a big table. None of it needs a code change.
+      - text: Nothing — Postgres guarantees insertion order for tables with a primary key
+        correct: false
+        why: >
+          No such guarantee exists. A primary key is an index beside the heap; it does not
+          make the heap ordered, and a sequential scan ignores it entirely.
+      - text: Only a `VACUUM FULL` or `CLUSTER`, which physically rewrites the table
+        correct: false
+        why: >
+          Those do change it, but so does a single ordinary UPDATE: the updated row's new
+          version lands in the next free slot, at the end of the scan.
+      - text: Only a Postgres major-version upgrade
+        correct: false
+        why: >
+          Upgrades can change plans, but day-to-day writes and statistics changes do it
+          far more often.
+
+  - id: q2
+    prompt: >
+      `ORDER BY score DESC LIMIT 1` on a table where two players share the top score:
+      which one is returned, and how do you make the answer stable?
+    options:
+      - text: >
+          Either — the order among ties is unspecified and can change with the plan; add a
+          unique column as the last sort key, e.g. `ORDER BY score DESC, id`
+        correct: true
+        why: >
+          ORDER BY only orders rows whose keys differ. A seq scan plus sort and an index
+          scan can return different tied winners for the same data. A unique final key
+          makes the order total. If ties should share the place, use
+          `FETCH FIRST 1 ROW WITH TIES`.
+      - text: The one inserted first, because sorting in Postgres is stable
+        correct: false
+        why: >
+          Whether a sort is stable is an implementation detail, and the input order to the
+          sort is itself not guaranteed. In the lesson an index scan and a seq scan
+          disagreed on exactly this.
+      - text: The one with the lower primary key, since ties are broken by the key
+        correct: false
+        why: >
+          Only if you write the key into ORDER BY. Postgres never adds a tiebreaker for
+          you.
+      - text: Both — LIMIT 1 returns every row tied for first place
+        correct: false
+        why: >
+          That is what `FETCH FIRST 1 ROW WITH TIES` does. Plain LIMIT cuts at exactly
+          one row.
+
+  - id: q3
+    prompt: >
+      A feed pages with `LIMIT 20 OFFSET 20` for page 2, and a new post is published
+      while the reader is still on page 1. What does the reader see on page 2, and why?
+    options:
+      - text: >
+          The last post from page 1 again, because the new post pushed every row down one
+          place and OFFSET skips a count, not the rows already seen
+        correct: true
+        why: >
+          OFFSET is positional, and inserts and deletes shift positions. An insert above
+          causes a duplicate; a delete above causes a skip. Keyset pagination anchors to
+          the last row seen, so it is immune to both.
+      - text: Exactly the next 20 posts, because OFFSET is computed against a snapshot of page 1
+        correct: false
+        why: >
+          Each page is a separate query and sees the data as it is at that moment. No
+          snapshot is held between page loads.
+      - text: The new post at the top of page 2
+        correct: false
+        why: >
+          The new post is newest, so it is at position 1 — on page 1, which the reader has
+          already loaded. What page 2 gets is the row that was pushed off page 1.
+      - text: An error, because the result set changed between queries
+        correct: false
+        why: >
+          Nothing tracks the reader across queries, so there is nothing to detect. That
+          silence is why the bug is so common.
+
+  - id: q4
+    prompt: >
+      Why does `LIMIT 10 OFFSET 90000` stay slow even with an index that matches the
+      `ORDER BY` exactly?
+    options:
+      - text: >
+          OFFSET is just a number: the only way to skip 90,000 rows is to produce them in
+          order and throw them away, so the index scan still walks 90,010 entries
+        correct: true
+        why: >
+          The index gets the rows in the right order cheaply, but it cannot know where the
+          90,000th one is without counting. EXPLAIN ANALYZE shows `actual rows=90010`
+          under a Limit returning 10. Keyset pagination gives the index a value to seek to
+          instead of a count.
+      - text: Postgres ignores indexes whenever OFFSET is present
+        correct: false
+        why: >
+          The plan uses the index — EXPLAIN shows an Index Scan. The cost is the counting,
+          not the access path.
+      - text: The rows are sorted in memory before the offset is applied
+        correct: false
+        why: >
+          With a matching index there is no sort node at all. The time goes into reading
+          and discarding.
+      - text: It is fast; OFFSET jumps straight to the right leaf page of the index
+        correct: false
+        why: >
+          B-tree pages do not know how many entries come before them, so there is no way
+          to jump by position. That is the whole problem.
+
+  - id: q5
+    prompt: >
+      Why must keyset pagination write `(created_at, id) < (x, y)` rather than
+      `created_at < x AND id < y`?
+    options:
+      - text: >
+          The row comparison means "earlier, or at the same time with a smaller id"; the
+          two-condition version drops rows that tie on `created_at` and rows whose `id`
+          does not follow time order
+        correct: true
+        why: >
+          `(a, b) < (x, y)` is `a < x OR (a = x AND b < y)`. The AND version demands both
+          columns be smaller, which is a different and much stricter condition. It also
+          lets Postgres use an index on exactly (created_at, id) as a single seek.
+      - text: They are equivalent; the row form is just shorter
+        correct: false
+        why: >
+          They agree only while ids happen to increase in time order and no timestamps
+          tie. A backdated import or two posts in the same second breaks the AND form.
+      - text: The AND form is correct but cannot use an index
+        correct: false
+        why: >
+          It is not correct: it skips rows. Index use is the smaller issue.
+      - text: Postgres does not support comparing columns with `AND` in a `WHERE`
+        correct: false
+        why: >
+          It supports it fine — the query runs and returns the wrong rows, silently.

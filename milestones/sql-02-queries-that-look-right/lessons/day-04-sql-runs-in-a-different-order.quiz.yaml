@@ -1,0 +1,165 @@
+# Answer key for day 04. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      `SELECT amount * 2 AS doubled FROM orders WHERE doubled > 100` fails with "column
+      doubled does not exist", while `… ORDER BY doubled` on the same query works. Why?
+    options:
+      - text: >
+          `WHERE` runs before `SELECT`, so the alias has not been created yet; `ORDER BY`
+          runs after `SELECT`, so it has
+        correct: true
+        why: >
+          The logical order is FROM, WHERE, GROUP BY, HAVING, SELECT, DISTINCT, ORDER BY,
+          LIMIT, and a clause can only see what earlier steps produced. The alias is born
+          in SELECT. Repeat the expression in WHERE, or wrap the query in a subquery and
+          filter the alias from outside.
+      - text: Aliases are only allowed in `ORDER BY` because the SQL standard forgot `WHERE`
+        correct: false
+        why: >
+          Nothing was forgotten — it follows from the order. `HAVING` cannot see the alias
+          either, for the same reason, while `ORDER BY` can because it runs after `SELECT`.
+      - text: >
+          `WHERE` only accepts real column names, and any expression must be computed in
+          `SELECT` first
+        correct: false
+        why: >
+          `WHERE amount * 2 > 100` is perfectly legal — `WHERE` accepts any expression over
+          the input columns. What it cannot see is a *name* given in a later step.
+      - text: >
+          Postgres evaluates `WHERE` lazily, so the alias is not yet bound when the filter
+          is compiled
+        correct: false
+        why: >
+          This is name resolution, not evaluation timing, and it fails at parse time
+          before anything runs. The physical execution order is the optimizer's business;
+          the rule comes from the logical order.
+
+  - id: q2
+    prompt: >
+      A report should list customers whose **paid** orders total more than 150. Where does
+      `status = 'paid'` go, where does `sum(amount) > 150` go, and what goes wrong if the
+      status condition is left out?
+    options:
+      - text: >
+          Status in `WHERE`, the sum in `HAVING`; without the status filter, cancelled
+          orders are summed and a customer can qualify on money they never paid
+        correct: true
+        why: >
+          A condition on one row belongs in WHERE, so it changes which rows reach the
+          aggregate. A condition on a group belongs in HAVING. Dropping the row filter
+          does not error: it silently counts cancelled orders, which is the expensive
+          kind of mistake.
+      - text: Both go in `HAVING`, because that is where the report's conditions live
+        correct: false
+        why: >
+          `HAVING status = 'paid'` is rejected unless status is grouped on — after
+          grouping there is no single status per customer. Row conditions belong in WHERE.
+      - text: Both go in `WHERE`, with the sum written as `sum(amount) > 150`
+        correct: false
+        why: >
+          Aggregates are not allowed in WHERE: it runs before any group exists, so there
+          is no sum to compare yet. That is precisely the job HAVING exists to do.
+      - text: >
+          Placement does not matter, as the optimizer moves every condition to the best
+          spot
+        correct: false
+        why: >
+          The optimizer may move a condition only where that keeps the answer the same.
+          Filtering rows before summing versus not filtering them at all gives a different
+          answer, so no optimizer will paper over it.
+
+  - id: q3
+    prompt: >
+      In an `EXPLAIN` plan for a grouped query with both a `WHERE` and a `HAVING`, where
+      does each filter appear, and why there?
+    options:
+      - text: >
+          The `WHERE` filter sits on the scan node at the bottom; the `HAVING` filter sits
+          on the aggregate node above it
+        correct: true
+        why: >
+          Plans run from the innermost node outward. WHERE throws away rows as they are
+          read, before grouping; HAVING throws away groups after the aggregate has
+          produced them. The plan puts each filter exactly where the logical order says it
+          belongs.
+      - text: Both appear on the top node, because filters are applied last
+        correct: false
+        why: >
+          Applying a row filter last would mean grouping and summing rows only to discard
+          them, and for WHERE it would even change the result. The scan node carries it.
+      - text: Both appear on the scan node, because filtering early is always fastest
+        correct: false
+        why: >
+          A HAVING condition such as `sum(amount) > 100` cannot be tested on a single row:
+          the sum does not exist until the aggregate has run.
+      - text: Neither appears; filters are not shown in plans, only joins and scans
+        correct: false
+        why: >
+          Plans show filters as `Filter:` lines under the node that applies them. Reading
+          them is one of the most useful things EXPLAIN gives you.
+
+  - id: q4
+    prompt: >
+      `SELECT customer, status, sum(amount) FROM orders GROUP BY customer` is rejected,
+      but grouping by a table's primary key lets you select that table's other columns.
+      What principle explains both?
+    options:
+      - text: >
+          Each selected column must have exactly one value per group; a primary key
+          guarantees that for the rest of its row, while a customer with several statuses
+          has no single one
+        correct: true
+        why: >
+          This is functional dependency. If the grouping columns determine a column, it is
+          the same for the whole group and safe to show. Otherwise the database would have
+          to pick one — which is what MySQL silently did before `ONLY_FULL_GROUP_BY` became
+          the default in 5.7.5.
+      - text: Postgres requires every column to be listed in `GROUP BY` for performance
+        correct: false
+        why: >
+          It is about meaning, not speed — and the primary-key exception shows that
+          listing everything is not actually required.
+      - text: The first query would work if `status` were indexed
+        correct: false
+        why: >
+          An index changes how rows are found, not how many statuses a group has. `bo`
+          still has a paid order and a cancelled one.
+      - text: >
+          Text columns can never be selected alongside an aggregate unless they are grouped
+        correct: false
+        why: >
+          Type has nothing to do with it. Any column that is determined by the grouping —
+          including text columns of the grouped table — can be selected.
+
+  - id: q5
+    prompt: >
+      `SELECT sum(amount) FROM orders WHERE false` and the same query with
+      `GROUP BY customer` added: how many rows does each return, and what is in them?
+    options:
+      - text: >
+          The first returns one row containing NULL; the second returns no rows
+        correct: true
+        why: >
+          Without GROUP BY the whole input is one group, even when it is empty, so you get
+          exactly one row — and the sum of nothing is NULL, not 0. With GROUP BY there are
+          no groups to report. Code that reads "the first row" must handle both shapes,
+          and `coalesce(sum(amount), 0)` turns the NULL into zero.
+      - text: Both return no rows, because nothing matched
+        correct: false
+        why: >
+          True only of the grouped version. An aggregate with no GROUP BY always returns
+          exactly one row — `count(*)` over nothing is 0, and that 0 has to live somewhere.
+      - text: The first returns one row containing 0; the second returns no rows
+        correct: false
+        why: >
+          The row count is right, the value is not. `count` returns 0 on an empty input,
+          but `sum`, `avg`, `min` and `max` return NULL — there is nothing to add up.
+      - text: Both return one row containing NULL
+        correct: false
+        why: >
+          With GROUP BY, one output row is produced per group, and an empty input has no
+          groups.

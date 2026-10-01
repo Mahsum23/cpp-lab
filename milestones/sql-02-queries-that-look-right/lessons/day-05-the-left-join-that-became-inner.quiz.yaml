@@ -1,0 +1,168 @@
+# Answer key for day 05. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      In a `LEFT JOIN`, what is a NULL-extended row, and when does the join produce one?
+    options:
+      - text: >
+          A row made of the left row plus NULLs for every right-hand column, produced
+          when that left row has no pairing that satisfies `ON`
+        correct: true
+        why: >
+          It is how a left join keeps its promise that every left row appears at least
+          once. It is a real row in the result — which is why a later WHERE can delete it
+          and why count(*) counts it.
+      - text: A row whose right-hand columns happen to contain NULL values in the table
+        correct: false
+        why: >
+          NULLs stored in the right table are real data and come through any join. The
+          NULL-extended row is invented by the join itself, for a left row with no match.
+      - text: >
+          A placeholder Postgres adds to every left row, so the result always has one
+          more row than an inner join
+        correct: false
+        why: >
+          Only unmatched left rows get one. A left row with three matches produces three
+          ordinary rows and no extra.
+      - text: A row produced when the `ON` condition itself evaluates to NULL
+        correct: false
+        why: >
+          An ON that evaluates to unknown simply fails to match, exactly like false. If
+          that leaves a left row with no matches at all, then it is NULL-extended — the
+          trigger is "no match", not "a NULL in ON".
+
+  - id: q2
+    prompt: >
+      `customers LEFT JOIN orders ON o.customer_id = c.id WHERE o.status = 'paid'` loses
+      every customer without a paid order. Why does it lose the customers who have no
+      orders at all, and why does it also lose those who have only refunds?
+    options:
+      - text: >
+          No-order customers get a NULL-extended row, and `NULL = 'paid'` is unknown so
+          WHERE drops it; refund-only customers had real matches, which WHERE drops as false
+        correct: true
+        why: >
+          Two different mechanisms, one result: every row that made it a left join is
+          gone, so the outcome is identical to an inner join. Moving the condition into
+          ON fixes both, because it changes what counts as a match before
+          NULL-extension happens.
+      - text: >
+          `LEFT JOIN` only keeps unmatched rows when there is no `WHERE` clause at all
+        correct: false
+        why: >
+          A WHERE on the left table works fine with a left join. The problem is specific
+          to a condition on the right table, which NULL-extended rows can never satisfy.
+      - text: >
+          Both groups have NULL in `o.status`, and NULL comparisons drop the row
+        correct: false
+        why: >
+          True for customers without orders, not for refund-only ones. Their row carries a
+          real status, 'refunded', and the comparison is plainly false. That is why the
+          `IS NULL` patch recovers one group and not the other.
+      - text: The planner reorders the join and the filter, which changes the result
+        correct: false
+        why: >
+          The planner is not allowed to change your result. The query, read in its logical
+          order — join first, then WHERE — already means this. The planner only noticed
+          and planned it as an inner join.
+
+  - id: q3
+    prompt: >
+      To keep customers who have no paid orders, someone changes
+      `WHERE o.status = 'paid'` to `WHERE o.status = 'paid' OR o.status IS NULL`. Why is
+      the result still wrong?
+    options:
+      - text: >
+          It recovers customers with no orders at all, but a customer whose only orders
+          are refunds had real, non-NULL rows that are still filtered out — and nothing
+          remains to NULL-extend
+        correct: true
+        why: >
+          NULL-extension happens inside the join, before WHERE, and only for left rows
+          with no match. A refund-only customer did match, so they never got a NULL row.
+          The patch passes the obvious test and fails the subtle one, which makes it worse
+          than the original bug.
+      - text: >
+          `o.status IS NULL` is always unknown, so the added condition does nothing
+        correct: false
+        why: >
+          `IS NULL` is the one test that is never unknown: it returns true or false. It
+          does bring back customers with no orders.
+      - text: It is correct; this is the standard way to filter the right side of a left join
+        correct: false
+        why: >
+          It is a very common way, and wrong. The standard way is to put the condition in
+          ON.
+      - text: It returns duplicate rows for customers with both paid and refunded orders
+        correct: false
+        why: >
+          Only the paid row of such a customer passes the filter, so there is nothing to
+          duplicate. The problem is a missing customer, not an extra row.
+
+  - id: q4
+    prompt: >
+      You wrote a `LEFT JOIN`, and `EXPLAIN` shows a plain `Nested Loop` or `Hash Join`
+      with no `Left` in it. What does that tell you?
+    options:
+      - text: >
+          Something after the join — usually a `WHERE` on the right table — can never be
+          true for a NULL-extended row, so the planner turned it into an inner join
+        correct: true
+        why: >
+          The planner reduces an outer join to an inner one when a later strict condition
+          would reject every NULL-extended row anyway. It does this for speed, but for you
+          it is a free alarm: the query no longer keeps unmatched rows.
+      - text: >
+          The planner chose a faster join algorithm; the left-join behaviour is preserved
+          internally
+        correct: false
+        why: >
+          The algorithm (nested loop, hash, merge) and the join type (inner, left, anti)
+          are separate things, and EXPLAIN shows both. A left join keeps its type —
+          `Hash Left Join`, `Nested Loop Left Join` — whatever algorithm runs it.
+      - text: There is a bug in Postgres's `EXPLAIN` output
+        correct: false
+        why: >
+          The plan is accurate. It is telling you that your query means an inner join,
+          whatever keyword you typed.
+      - text: The right table had no NULLs, so a left join was unnecessary
+        correct: false
+        why: >
+          NULL-extension is about unmatched left rows, not about NULLs stored in the
+          right table. Whether there are customers without orders is unknown at planning
+          time; whether the WHERE kills their rows is not.
+
+  - id: q5
+    prompt: >
+      After `customers LEFT JOIN orders … GROUP BY c.name`, why does `count(*)` report 1
+      for a customer who has never ordered, and what should be counted instead?
+    options:
+      - text: >
+          The NULL-extended row is a real row, and `count(*)` counts rows; count a
+          right-table column such as `count(o.id)`, which skips NULLs
+        correct: true
+        why: >
+          count(*) means "how many rows are in the group", and the group has one: the
+          invented one. count(column) counts non-NULL values, and o.id is NULL exactly on
+          that row, so it reports 0.
+      - text: >
+          `count(*)` ignores the `GROUP BY` after an outer join; use `count(DISTINCT c.id)`
+        correct: false
+        why: >
+          count(*) respects the grouping perfectly. And counting distinct customers inside
+          one customer's group gives 1 regardless, so the replacement has the same bug.
+      - text: It is a rounding artefact; `count(*)` never returns 0 inside a group
+        correct: false
+        why: >
+          Half right, for the wrong reason. Every group has at least one row, so count(*)
+          is at least 1 — but that is because of the NULL-extended row, not rounding.
+          That is exactly why you count a column instead.
+      - text: >
+          Use `count(c.id)` instead, which counts only customers that matched an order
+        correct: false
+        why: >
+          c.id comes from the left table and is never NULL, not even on the invented
+          row, so it gives the same 1. The column has to come from the right side.

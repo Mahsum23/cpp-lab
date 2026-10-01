@@ -1,0 +1,152 @@
+# Answer key for day 08. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      What is the difference between what `GROUP BY` and a window function do to the rows
+      of a query?
+    options:
+      - text: >
+          `GROUP BY` collapses each group into one output row; a window function computes
+          over a set of related rows and writes the result beside every row, keeping them
+          all
+        correct: true
+        why: >
+          Seven sales in, two region totals out with GROUP BY; seven in, seven out with
+          `sum(amount) OVER (PARTITION BY region)`. That is what lets you show a row next
+          to its group's total, its rank, or its neighbour's value.
+      - text: They do the same thing; `OVER` is newer syntax for `GROUP BY`
+        correct: false
+        why: >
+          The row counts differ, which is the whole point. They also run at different
+          steps: grouping before SELECT, windows inside it.
+      - text: >
+          A window function filters rows to those in the window, while `GROUP BY` keeps
+          them all
+        correct: false
+        why: >
+          Backwards on both counts. A window function never removes a row; GROUP BY always
+          reduces a group to one.
+      - text: Window functions can only be used together with `GROUP BY`
+        correct: false
+        why: >
+          They work on their own, and they can be combined with GROUP BY — in which case
+          they run over the grouped rows.
+
+  - id: q2
+    prompt: >
+      Why is `WHERE rank() OVER (…) = 1` rejected, and what is the standard way to filter
+      on a window function in PostgreSQL?
+    options:
+      - text: >
+          Window functions are computed in the SELECT step, after WHERE has run; compute
+          the rank in a subquery and filter it in the outer query's WHERE
+        correct: true
+        why: >
+          The logical order is FROM, WHERE, GROUP BY, HAVING, then SELECT with its window
+          functions. Some engines add a non-standard QUALIFY clause for this. Postgres
+          does not, and reads `QUALIFY` as a table alias.
+      - text: Window functions are too expensive for WHERE; use HAVING instead
+        correct: false
+        why: >
+          HAVING also runs before SELECT, so window functions are not allowed there either.
+          Cost has nothing to do with it.
+      - text: It is allowed if you add a `PARTITION BY` clause
+        correct: false
+        why: >
+          No window definition makes a window function legal in WHERE. The restriction
+          comes from evaluation order.
+      - text: Use the `QUALIFY` clause, which PostgreSQL added for this
+        correct: false
+        why: >
+          Snowflake, BigQuery and DuckDB have QUALIFY. Postgres parses `FROM sales QUALIFY`
+          as `FROM sales AS qualify`, and errors at the next word.
+
+  - id: q3
+    prompt: >
+      Two sales share the same day. Why does `sum(amount) OVER (ORDER BY day)` give both
+      of them the same running total, and how do you get a true row-by-row running total?
+    options:
+      - text: >
+          With ORDER BY and no frame clause, the frame is `RANGE … CURRENT ROW`, which
+          includes the current row's peers; use `ROWS BETWEEN UNBOUNDED PRECEDING AND
+          CURRENT ROW` and a unique tiebreaker in the ORDER BY
+        correct: true
+        why: >
+          Peers are rows equal on the ORDER BY key. RANGE treats them as a block, so each
+          sees the other's amount. ROWS counts physical rows, and the tiebreaker makes
+          their order defined.
+      - text: Postgres caches the sum per distinct value of `day`
+        correct: false
+        why: >
+          It is not a caching artefact. It is the frame the standard defines as the
+          default, and every conforming database does the same.
+      - text: The sort is unstable, so the two rows swap and both read the later total
+        correct: false
+        why: >
+          No swapping is involved. Each row's frame includes both rows, regardless of the
+          order they come out in.
+      - text: Add `PARTITION BY day`
+        correct: false
+        why: >
+          That restarts the total for every day, which turns a running total into a
+          per-day total.
+
+  - id: q4
+    prompt: >
+      Two rows tie for first place in a partition. What do `row_number`, `rank` and
+      `dense_rank` assign to them, and to the row after them?
+    options:
+      - text: >
+          row_number: 1 and 2 (in an unspecified order), then 3; rank: 1 and 1, then 3;
+          dense_rank: 1 and 1, then 2
+        correct: true
+        why: >
+          row_number always numbers rows consecutively and picks an arbitrary order among
+          ties unless you add a tiebreaker. rank shares the place and leaves a gap, like a
+          race. dense_rank shares it without a gap.
+      - text: All three give 1 and 1, then 2
+        correct: false
+        why: >
+          Only dense_rank does that. row_number never repeats a number, and rank leaves a
+          gap after a tie.
+      - text: row_number gives 1 and 1; rank gives 1 and 2
+        correct: false
+        why: >
+          Swapped. row_number never assigns the same number twice in a partition; rank
+          exists precisely to let ties share one.
+      - text: All three give 1 and 2, decided by the primary key
+        correct: false
+        why: >
+          No function consults the primary key unless you put it into the window's ORDER
+          BY yourself.
+
+  - id: q5
+    prompt: >
+      Why does `last_value(x) OVER (ORDER BY t)` return the current row's own value?
+    options:
+      - text: >
+          The default frame ends at the current row (and its peers), so the last row of
+          the frame is the current one; extend it with `ROWS BETWEEN UNBOUNDED PRECEDING
+          AND UNBOUNDED FOLLOWING`
+        correct: true
+        why: >
+          It is the same default that makes running totals work. `first_value` looks right
+          because the frame always starts at the beginning. `last_value` exposes where it
+          ends.
+      - text: last_value is buggy in PostgreSQL and should not be used
+        correct: false
+        why: >
+          It does exactly what the standard specifies, over the frame it was given. The
+          surprise is the frame, not the function.
+      - text: last_value ignores ORDER BY and returns the row in physical order
+        correct: false
+        why: >
+          It uses ORDER BY to build the frame. The frame simply stops at the current row.
+      - text: It needs a PARTITION BY clause to look past the current row
+        correct: false
+        why: >
+          Partitioning changes which rows are related, not where the frame ends. Without
+          an explicit frame it still stops at the current row.

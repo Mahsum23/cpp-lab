@@ -1,0 +1,147 @@
+# Answer key for day 06. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      An order totalling 100.00 has three item rows. Why does
+      `SELECT sum(o.total) FROM orders o JOIN items i ON i.order_id = o.id` count it as
+      300.00?
+    options:
+      - text: >
+          The join produces one row per item, and each of those rows carries the order's
+          total, so the sum sees it three times
+        correct: true
+        why: >
+          This is fan-out: the "one" side of a one-to-many join is repeated once per
+          match on the "many" side. The join is not wrong — summing a column from the
+          repeated side at that grain is.
+      - text: Postgres double-counts numeric columns across joins unless they are indexed
+        correct: false
+        why: >
+          Indexes affect how rows are found, never which rows exist. The three rows are
+          the correct output of that join.
+      - text: The items' quantities are being multiplied into the total
+        correct: false
+        why: >
+          `qty` never enters the query. The factor is the number of item rows, whatever
+          their quantities are.
+      - text: It is a bug in `sum` over joined tables that `GROUP BY` would fix
+        correct: false
+        why: >
+          `sum` faithfully adds up the rows it is given. Grouping by order would give one
+          group per order — still containing three rows each, still summing to 300.
+
+  - id: q2
+    prompt: >
+      One order has 3 items and 2 payments. When both tables are joined to it in one
+      query, how many rows does that order become, and why?
+    options:
+      - text: "6 — every item is paired with every payment, because neither table relates to the other except through the order"
+        correct: true
+        why: >
+          Two independent one-to-many joins multiply: 3 × 2. Every aggregate over that
+          result is wrong by a different factor — the order total ×6, payments ×3, item
+          counts ×2.
+      - text: "5 — three item rows plus two payment rows"
+        correct: false
+        why: >
+          Joins do not stack rows side by side like a UNION. Each output row combines one
+          item and one payment for the same order, and all combinations survive the ON
+          conditions.
+      - text: "3 — the larger of the two child tables decides the row count"
+        correct: false
+        why: >
+          That would require pairing each payment with only some items. Nothing in the ON
+          conditions says which item a payment belongs to, so every pairing is kept.
+      - text: "2 — the join stops at the smaller table"
+        correct: false
+        why: >
+          No join type works that way. Row counts in an inner join come only from which
+          pairings satisfy ON.
+
+  - id: q3
+    prompt: >
+      A report joins orders to both items and payments and shows inflated payment totals.
+      Why is changing `sum(p.amount)` to `sum(DISTINCT p.amount)` not a fix?
+    options:
+      - text: >
+          DISTINCT removes equal *values*, not duplicated *rows*, so two real payments of
+          the same amount are counted once
+        correct: true
+        why: >
+          A split payment of 50 + 50 becomes 50. Rows are identified by keys, not by what
+          they contain. The real fix is to aggregate payments per order before joining,
+          so nothing is duplicated in the first place.
+      - text: "`sum(DISTINCT …)` is not valid SQL"
+        correct: false
+        why: >
+          It is valid, which is what makes it dangerous — it runs and returns a
+          plausible number.
+      - text: It is a correct fix but too slow for large tables
+        correct: false
+        why: >
+          Speed is not the problem; correctness is. It returns the wrong total whenever
+          two genuine payments share an amount.
+      - text: DISTINCT applies to the whole row, so it removes nothing
+        correct: false
+        why: >
+          Inside an aggregate, DISTINCT applies only to that aggregate's argument. That
+          is exactly why it collapses equal amounts.
+
+  - id: q4
+    prompt: >
+      What does "the grain of a result" mean, and what rule about grain prevents fan-out?
+    options:
+      - text: >
+          What one row of the result stands for; bring every table to the report's grain
+          (aggregate it) before joining it
+        correct: true
+        why: >
+          If the report is one row per customer, items and payments must be reduced to
+          one row per order or per customer first. Then every join is one-to-one and
+          nothing can multiply. Kimball's design process puts declaring the grain second,
+          right after choosing the business process.
+      - text: The level of detail of a column's data type, like `numeric(10,2)`
+        correct: false
+        why: >
+          Grain is about rows, not values: what a single row means. Precision is a
+          different thing.
+      - text: The number of rows in a table; join the smallest tables first
+        correct: false
+        why: >
+          Join order is the planner's job and does not change the result. Fan-out comes
+          from joining tables whose rows mean different things.
+      - text: The primary key of each table; always select it
+        correct: false
+        why: >
+          Keys help you *detect* the grain, but selecting them changes nothing. What
+          matters is aggregating down to the intended grain before joining.
+
+  - id: q5
+    prompt: >
+      How can `EXPLAIN ANALYZE` show you that a join has fanned out?
+    options:
+      - text: >
+          It reports the actual row count of every node, so you can see a join emitting
+          more rows than there are entities you meant to report on
+        correct: true
+        why: >
+          Two orders entering and seven rows leaving the join is fan-out you can read
+          directly off the plan. A quick confirmation is to compare count(*) with
+          count(DISTINCT key) over the same join.
+      - text: It prints a warning line when a join duplicates rows
+        correct: false
+        why: >
+          There is no such warning. Fan-out is legitimate join behaviour; only you know
+          that you did not want it.
+      - text: "It shows `Fanout: true` on the join node"
+        correct: false
+        why: >
+          No such field exists. You infer fan-out from the `rows=` numbers.
+      - text: It cannot — fan-out is only visible in the final result
+        correct: false
+        why: >
+          EXPLAIN ANALYZE's `actual rows` is the clearest place to see it, node by node,
+          before any aggregate has hidden it.

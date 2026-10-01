@@ -12,6 +12,7 @@
   import TaskCheck from '../../components/TaskCheck.svelte';
   import type { MentorFocus } from '../../lib/mentor';
   import { taskDone, TRACKS, type ItemVerdict, type Track } from '../../lib/types';
+  import { inlineHtml } from '../../lib/inline';
 
   interface Props {
     day: Day;
@@ -82,9 +83,6 @@
     met: 'met', partial: 'partial', missing: 'missing', unclear: "can't tell",
   };
 
-  /** The checklist is authored as light markdown: `code` and *emphasis*, nothing else. */
-  const itemHtml = (item: string) =>
-    item.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
   let notes = $state('');
   let hydrated = $state(false);
@@ -209,7 +207,7 @@
               <span class="box" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
               </span>
-              <span class="prose-inline">{@html itemHtml(item)}</span>
+              <span class="inline-md">{@html inlineHtml(item)}</span>
               {#if verdicts}
                 <span class="verdict {verdicts[i]}" title="The reviewer's verdict on this item">{VERDICT_WORD[verdicts[i]]}</span>
               {/if}
@@ -447,13 +445,6 @@
     stroke-linejoin: round;
   }
 
-  .prose-inline :global(code) {
-    font-family: var(--font-mono);
-    font-size: 0.87em;
-    background: var(--surface-2);
-    border-radius: 5px;
-    padding: 0.1em 0.34em;
-  }
 
   textarea {
     width: 100%;

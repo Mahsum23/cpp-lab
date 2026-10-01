@@ -489,6 +489,26 @@ one-liner a stranger can run (`docker run --rm -e POSTGRES_PASSWORD=x -p 5432:54
 postgres:16`), and lean on the things Postgres will show you that others won't: `ctid`,
 `xmin`/`xmax`, `EXPLAIN (ANALYZE, BUFFERS)`, `pageinspect`, `pg_stat_*`.
 
+**SQL weeks lean on fundamentals, taught through the errors people actually make.** He said
+he can still make mistakes in the basics, so the second week (`sql-02-queries-that-look-right`)
+takes things everyone believes they know — clause order, LEFT JOIN, fan-out, ORDER BY,
+window frames, numeric types, time — and finds the exact place the belief and the engine
+part company, ending each day in a short **Carry this** list of habits. Keep that shape:
+every day shows the plausible wrong query running *without an error*, then the fix, then
+the fix people reach for that is also wrong. Every SQL day from this week on:
+
+- starts in its own schema (`DROP SCHEMA IF EXISTS dayNN CASCADE; CREATE SCHEMA dayNN;
+  SET search_path = dayNN;`), so the days never collide and a lesson can be rerun;
+- labels every output block ```` ```text ````, because an unlabelled fence is highlighted
+  as C++ (`markdown.ts` falls back to it);
+- passes `tools/check-sql-lesson.py`, which runs the lesson top to bottom in a fresh
+  database and fails on any output block that is not what psql prints. Where a number
+  depends on cache state or timing, give an invariant and let the checker ignore it.
+
+Quiz, drill and checklist text may use `code`, **bold** and *emphasis*, and nothing else:
+`inline.ts` renders exactly those, escaped. `test-inline.mjs` fails if any string the app
+ships would still show its backticks.
+
 ## The Go track is a beginner track, and stays one
 
 Go is being learned from the beginning, so lessons assume general programming competence
