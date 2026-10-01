@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "title": "slowpath",
-  "generatedAt": "2026-09-28T10:18:27.140Z",
+  "generatedAt": "2026-10-01T09:25:19.255Z",
   "weeks": [
     {
       "id": "week-01",
@@ -34,6 +34,17 @@
       "availableDays": 3,
       "url": "content/weeks/week-sql-01.json",
       "contentHash": "sha256:7a9611b0df212cf56d703cb22c421420",
+      "available": true
+    },
+    {
+      "id": "week-sql-02",
+      "title": "Queries That Look Right",
+      "milestone": "sql-02-queries-that-look-right",
+      "track": "sql",
+      "days": 7,
+      "availableDays": 7,
+      "url": "content/weeks/week-sql-02.json",
+      "contentHash": "sha256:0b09983fb6f42953c293a99d2f4257ba",
       "available": true
     }
   ]

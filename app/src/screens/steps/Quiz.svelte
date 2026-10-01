@@ -3,6 +3,7 @@
   import { app } from '../../lib/app.svelte';
   import Button from '../../components/Button.svelte';
   import { answerKeys } from '../../lib/shortcuts.svelte';
+  import { inlineHtml } from '../../lib/inline';
 
   interface Props {
     day: Day;
@@ -84,7 +85,7 @@
       </button>
     {/if}
   </div>
-  <h1>{q.prompt}</h1>
+  <h1 class="inline-md">{@html inlineHtml(q.prompt)}</h1>
 
   <ul class="options">
     {#each q.options as option, i}
@@ -105,7 +106,7 @@
               <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg>
             {/if}
           </span>
-          <span class="text">{option.text}</span>
+          <span class="text inline-md">{@html inlineHtml(option.text)}</span>
         </button>
       </li>
     {/each}
@@ -117,12 +118,12 @@
         <!-- His answer first: the misconception is the thing that needs correcting. -->
         <div class="why bad">
           <p class="lbl">Why that one's wrong</p>
-          <p>{q.options[picked!].why}</p>
+          <p class="inline-md">{@html inlineHtml(q.options[picked!].why)}</p>
         </div>
       {/if}
       <div class="why ok">
         <p class="lbl">{gotIt ? 'Right — and here’s the whole of it' : 'The answer'}</p>
-        <p>{q.options[correctIndex].why}</p>
+        <p class="inline-md">{@html inlineHtml(q.options[correctIndex].why)}</p>
       </div>
     </div>
 

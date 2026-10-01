@@ -1,0 +1,124 @@
+# The phone half of day 05. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running it on PostgreSQL 16, against the
+# lesson's tables:
+#   customers: (1,ana) (2,bo) (3,cy) (4,dee)
+#   orders:    (10, ana, paid) (11, ana, refunded) (12, bo, refunded) (13, cy, paid)
+steps:
+  - id: d1
+    kind: predict
+    prompt: How many rows does this return?
+    code: |
+      SELECT c.name, o.id
+      FROM customers c
+      LEFT JOIN orders o
+        ON o.customer_id = c.id AND c.name = 'bo';
+    options:
+      - text: "4 — every customer, with only `bo` matched to order 12"
+        correct: true
+        why: >
+          A condition on the left table inside ON cannot remove left rows; a left join
+          keeps every one of them. It only restricts which of them may match. So ana, cy
+          and dee come back NULL-extended (ana's two real orders included), and bo gets
+          their refund. To report only bo, the condition belongs in WHERE.
+      - text: "1 — only `bo`'s row"
+        correct: false
+        why: >
+          That is what you get with `WHERE c.name = 'bo'`. In ON, the condition only
+          decides what counts as a match. It never decides which customers appear.
+      - text: "5 — the same rows as the plain left join"
+        correct: false
+        why: >
+          The plain left join gives 5 because ana matches twice. Here ana is not allowed
+          to match at all, so ana collapses into one NULL-extended row.
+      - text: It fails, because `ON` may only compare columns of the two tables
+        correct: false
+        why: >
+          ON accepts any boolean expression, including constants and single-table tests.
+          It is legal, and its effect is easy to misread.
+
+  - id: d2
+    kind: find
+    prompt: >
+      Products and their reviews: kettle has two reviews, mug has one, teapot has none.
+      What is wrong with this result?
+    code: |
+      SELECT p.name, count(*) AS reviews, round(avg(r.stars), 1) AS avg_stars
+      FROM products p
+      LEFT JOIN reviews r ON r.product_id = p.id
+      GROUP BY p.name
+      ORDER BY p.name;
+
+        name  | reviews | avg_stars
+      --------+---------+-----------
+       kettle |       2 |       4.5
+       mug    |       1 |       3.0
+       teapot |       1 |
+    options:
+      - text: >
+          teapot shows 1 review; `count(*)` counted its NULL-extended row. It should be
+          `count(r.id)`
+        correct: true
+        why: >
+          The tell is in the same row: avg_stars is blank, because avg skips NULLs and
+          there were no real stars to average. One column says one review, the other says
+          none. count(r.id) skips the NULL just as avg does, and reports 0.
+      - text: >
+          mug's average should be 3, not 3.0 — `round` adds a spurious decimal
+        correct: false
+        why: >
+          `round(x, 1)` returns numeric with one decimal place by design. That is
+          formatting, not a wrong number.
+      - text: Nothing; teapot has one review whose star rating is missing
+        correct: false
+        why: >
+          That would print the same way, which is what makes this convincing — but by the
+          setup teapot has no reviews. The extra row came from the join, not from the data.
+      - text: kettle should show 1, because `GROUP BY p.name` collapses duplicates
+        correct: false
+        why: >
+          Grouping collapses kettle's two rows into one group, and counting the group's
+          rows gives 2 — correct. The fan-out from the join is exactly what you want to
+          count here.
+
+  - id: d3
+    kind: choose
+    prompt: Which of these return exactly the customers who have never placed any order?
+    code: |
+      -- A
+      SELECT c.name FROM customers c
+      LEFT JOIN orders o ON o.customer_id = c.id AND o.status = 'paid'
+      WHERE o.id IS NULL;
+
+      -- B
+      SELECT c.name FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      WHERE o.id IS NULL;
+
+      -- C
+      SELECT c.name FROM customers c
+      WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+    options:
+      - text: "C only — it returns `dee`"
+        correct: true
+        why: >
+          C asks exactly the question. A answers a different one: by moving the status
+          into ON it finds customers with no *paid* order, so it returns bo and dee. B is
+          an inner join, which never produces NULL-extended rows, so `o.id IS NULL` is
+          never true and it returns nothing.
+      - text: "A and C"
+        correct: false
+        why: >
+          A's ON condition narrows what counts as a match to paid orders. bo has an order,
+          a refund, but no paid one, so bo is NULL-extended and passes `IS NULL`. A
+          returns bo and dee.
+      - text: "All three"
+        correct: false
+        why: >
+          B uses an inner join, and an inner join only ever produces matched rows, whose
+          o.id is never NULL. B returns zero rows.
+      - text: "A only"
+        correct: false
+        why: >
+          A is right about dee and wrong about bo. The `IS NULL` anti-join pattern
+          inherits whatever the ON condition says a "match" is.

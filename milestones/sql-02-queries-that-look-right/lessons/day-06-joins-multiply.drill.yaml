@@ -1,0 +1,122 @@
+# The phone half of day 06. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running it on PostgreSQL 16 with the
+# lesson's three tables: orders(id, customer, total), items(order_id, sku, qty),
+# payments(order_id, amount).
+steps:
+  - id: d1
+    kind: predict
+    prompt: >
+      Order 3 belongs to `cy`, totals 40.00, has 2 item rows, and was paid in 4 payments
+      of 10.00. What does this report show for `cy`?
+    code: |
+      SELECT o.customer,
+             sum(o.total)  AS revenue,
+             sum(p.amount) AS paid,
+             count(i.sku)  AS lines
+      FROM orders o
+      JOIN items    i ON i.order_id = o.id
+      JOIN payments p ON p.order_id = o.id
+      GROUP BY o.customer;
+    options:
+      - text: "revenue 320.00, paid 80.00, lines 8"
+        correct: true
+        why: >
+          2 items × 4 payments = 8 rows. The total is on every row (40 × 8 = 320), each
+          payment appears once per item (40 × 2 = 80), and each item once per payment
+          (2 × 4 = 8). Each column is wrong by a different factor, which is why one
+          "looks a bit high" check never catches it.
+      - text: "revenue 40.00, paid 40.00, lines 2"
+        correct: false
+        why: >
+          The truth, and what a pre-aggregated version returns. With both children joined
+          directly, the order becomes 8 rows before anything is summed.
+      - text: "revenue 240.00, paid 60.00, lines 6"
+        correct: false
+        why: >
+          That treats the join as 2 + 4 = 6 rows. Joins multiply, they don't add.
+      - text: "revenue 160.00, paid 40.00, lines 4"
+        correct: false
+        why: >
+          That is fan-out from the payments join alone. The items join multiplies it a
+          second time.
+
+  - id: d2
+    kind: find
+    prompt: >
+      Order 4 has two item rows, both for `mug` (qty 1 and qty 2), and two payments of
+      15.00. The fan-out was "fixed" with `count(DISTINCT i.sku)`. What does it report?
+    code: |
+      SELECT o.id, count(DISTINCT i.sku) AS lines
+      FROM orders o
+      JOIN items    i ON i.order_id = o.id
+      JOIN payments p ON p.order_id = o.id
+      GROUP BY o.id;
+    options:
+      - text: "1 — the two `mug` lines share a SKU, so DISTINCT merges them"
+        correct: true
+        why: >
+          `count(DISTINCT sku)` counts distinct *products*, not lines. It looked like a fix
+          only because every earlier order happened to use different SKUs. To count lines
+          you need something that identifies a line — a line id — or to count the items
+          table before joining.
+      - text: "2 — DISTINCT removes the payment duplication and keeps both lines"
+        correct: false
+        why: >
+          DISTINCT inside count looks only at the value `sku`. It cannot tell a duplicated
+          row from a second, genuine line with the same SKU.
+      - text: "4 — DISTINCT has no effect inside an aggregate"
+        correct: false
+        why: >
+          It has an effect, and here too much of one: 4 joined rows, 1 distinct SKU.
+      - text: It fails, because DISTINCT cannot be combined with GROUP BY
+        correct: false
+        why: >
+          Aggregate DISTINCT and GROUP BY combine freely. It runs, which is the problem.
+
+  - id: d3
+    kind: choose
+    prompt: >
+      `ana` has two orders (100.00 paid as 50 + 50, and 60.00 paid once); `bo` has one
+      (80.00, paid once). Order 1 also has 3 items. Which queries report `ana`'s total
+      paid as 160.00?
+    code: |
+      -- A
+      SELECT o.customer, sum(p.amount) FROM orders o
+      JOIN items i ON i.order_id = o.id
+      JOIN payments p ON p.order_id = o.id
+      GROUP BY o.customer;
+
+      -- B
+      SELECT o.customer, sum(DISTINCT p.amount) FROM orders o
+      JOIN payments p ON p.order_id = o.id
+      GROUP BY o.customer;
+
+      -- C
+      SELECT o.customer, sum(p.amount) FROM orders o
+      JOIN payments p ON p.order_id = o.id
+      GROUP BY o.customer;
+    options:
+      - text: "C only"
+        correct: true
+        why: >
+          C joins one "many" table and sums that table's own column. Each payment row
+          appears exactly once, so the sum is right; only the order columns repeat, and
+          C does not sum them. A gives 360.00, because the items join triples order 1's
+          payments. B gives 110.00: the distinct amounts are 50 and 60, so one real 50 is
+          lost.
+      - text: "B and C"
+        correct: false
+        why: >
+          B has no fan-out to fix and still breaks: ana's distinct payment amounts are 50
+          and 60, so it reports 110.00.
+      - text: "A and C"
+        correct: false
+        why: >
+          A joins items as well, which turns order 1's two payments into six rows: 300 +
+          60 = 360.00.
+      - text: "None — any join to payments inflates the payment total"
+        correct: false
+        why: >
+          A one-to-many join repeats the "one" side, not the "many" side. Summing a column
+          of the many side, with no other many-side join, counts each of its rows once.

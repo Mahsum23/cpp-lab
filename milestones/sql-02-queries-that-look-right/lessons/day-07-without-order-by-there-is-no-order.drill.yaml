@@ -1,0 +1,105 @@
+# The phone half of day 07. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running it on PostgreSQL 16.
+steps:
+  - id: d1
+    kind: predict
+    prompt: >
+      Scores: ana 90, bo 80, cy 80, dee 80, eli 70. How many rows does this return?
+    code: |
+      SELECT name, score
+      FROM scores
+      ORDER BY score DESC
+      FETCH FIRST 2 ROWS WITH TIES;
+    options:
+      - text: "4 — ana, then all three players on 80"
+        correct: true
+        why: >
+          The second row is someone on 80, and WITH TIES keeps going while the next row
+          ties with the last one taken. All three 80s share second place, so asking for 2
+          returns 4. That is the point: it refuses to pick an arbitrary winner among ties.
+      - text: "2 — ana and one of the players on 80"
+        correct: false
+        why: >
+          That is plain `LIMIT 2`, and which 80 you get would depend on the plan. WITH
+          TIES exists to avoid exactly that.
+      - text: "3 — ties count as one row, so ana, bo and cy"
+        correct: false
+        why: >
+          No row is ever merged. The count you ask for decides where the cut falls; WITH
+          TIES then extends the cut past every row equal to the last one.
+      - text: "5 — WITH TIES returns every row that has a duplicate score"
+        correct: false
+        why: >
+          eli on 70 ties with nobody and comes after the cut, so eli is not included.
+
+  - id: d2
+    kind: find
+    prompt: >
+      Page 1 of this feed ended at the post with `created_at = 10:05` and `id = 7`. The
+      rows: (8, 10:09), (7, 10:05), (6, 10:05), (9, 10:01), (5, 10:00). Page 2 should
+      start with id 6. What does this query return instead?
+    code: |
+      SELECT id FROM feed
+      WHERE created_at < '2026-05-01 10:05+00'
+      ORDER BY created_at DESC, id DESC
+      LIMIT 2;
+    options:
+      - text: "9 and 5 — post 6 is skipped, because it shares 10:05 with the last row of page 1"
+        correct: true
+        why: >
+          Comparing the timestamp alone with `<` throws away every row at exactly 10:05,
+          including the unseen post 6. With `<=` you would get post 7 again instead. The
+          fix is the row comparison, `(created_at, id) < ('…10:05', 7)`, which returns 6
+          and 9.
+      - text: "6 and 9 — the correct next page"
+        correct: false
+        why: >
+          That is what the row comparison returns. This query compares only the
+          timestamp, and 6's timestamp is not strictly less than 10:05.
+      - text: "7 and 6 — the boundary row is repeated"
+        correct: false
+        why: >
+          That would happen with `<=`. Strict `<` excludes everything at 10:05, the seen
+          row and the unseen one alike.
+      - text: Nothing — the ORDER BY includes `id`, which the WHERE does not mention
+        correct: false
+        why: >
+          ORDER BY and WHERE are independent. The query runs, and quietly skips a post.
+
+  - id: d3
+    kind: choose
+    prompt: >
+      `players(id PRIMARY KEY, name, score)`, where two players share the top score.
+      Which queries are guaranteed to return the same row every time?
+    code: |
+      -- A
+      SELECT name FROM players LIMIT 1;
+
+      -- B
+      SELECT name FROM players ORDER BY score DESC LIMIT 1;
+
+      -- C
+      SELECT name FROM players ORDER BY score DESC, id LIMIT 1;
+    options:
+      - text: "C only"
+        correct: true
+        why: >
+          A has no ORDER BY, so any row may come first: an UPDATE, a plan change or a
+          synchronized scan can change it. B orders by a column that ties at the top, so
+          the winner is unspecified. Only C ends on a unique key, making the order total.
+      - text: "B and C"
+        correct: false
+        why: >
+          B has a tie exactly where LIMIT cuts. A seq scan plus sort and an index scan can
+          pick different winners for the same data.
+      - text: "All three, as long as nobody writes to the table"
+        correct: false
+        why: >
+          Even with no writes, A and B depend on the plan, and synchronized scans can
+          start A partway through a large table.
+      - text: "None — LIMIT is never deterministic"
+        correct: false
+        why: >
+          LIMIT is perfectly deterministic over a total order. C's order is total because
+          its last key is unique.

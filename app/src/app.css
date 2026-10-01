@@ -267,6 +267,17 @@ html.mentor-docked .screen {
   word-break: break-word;
 }
 
+/* Quiz, drill and checklist text: short strings with `code` and **bold** in them
+   (inline.ts). Same quiet treatment as inline code in a lesson. */
+.inline-md code {
+  font-family: var(--font-mono);
+  font-size: 0.87em;
+  background: var(--surface-2);
+  border-radius: 5px;
+  padding: 0.1em 0.34em;
+  word-break: break-word;
+}
+
 .prose pre.code {
   font-family: var(--font-mono);
   font-size: 13.5px;

@@ -1,0 +1,108 @@
+# The phone half of day 04. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running it on PostgreSQL 16, against the
+# lesson's `orders` table:
+#   (1,'ana','paid',120), (2,'ana','paid',40), (3,'bo','cancelled',500),
+#   (4,'bo','paid',30), (5,'cy','paid',90), (6,'cy','paid',25)
+steps:
+  - id: d1
+    kind: find
+    prompt: Does this run on PostgreSQL, and if not, what stops it?
+    code: |
+      SELECT customer, sum(amount) AS total
+      FROM orders
+      GROUP BY customer
+      HAVING total > 150;
+    options:
+      - text: >
+          It fails: `column "total" does not exist`, pointing at the `HAVING` line
+        correct: true
+        why: >
+          HAVING runs after GROUP BY but before SELECT, and the alias is created in
+          SELECT. Postgres lets ORDER BY use an alias because ORDER BY runs later. Write
+          `HAVING sum(amount) > 150`. Some other databases accept the alias here as an
+          extension, which is exactly why this catches people who move between them.
+      - text: It runs and returns `ana 160.00` and `bo 530.00`
+        correct: false
+        why: >
+          Those are the right rows for `HAVING sum(amount) > 150`. With the alias, though,
+          the query never gets as far as running.
+      - text: >
+          It fails: `aggregate functions are not allowed in HAVING`
+        correct: false
+        why: >
+          Aggregates in HAVING are the whole point of HAVING. The aggregate-ban error
+          belongs to WHERE, which runs before any group exists.
+      - text: It runs and returns no rows, because `total` is NULL at that point
+        correct: false
+        why: >
+          Postgres does not quietly treat an unknown name as NULL. An unresolvable name is
+          a hard error at parse time, which in this case is a kindness.
+
+  - id: d2
+    kind: predict
+    prompt: No order is over 1000. What does this return?
+    code: |
+      SELECT count(*) AS n, sum(amount) AS total
+      FROM orders
+      WHERE amount > 1000;
+    options:
+      - text: "One row: `n` is 0 and `total` is NULL (blank in psql)"
+        correct: true
+        why: >
+          With no GROUP BY the whole input is a single group, even when it is empty, so
+          exactly one row comes back. count of nothing is 0; sum of nothing is NULL. Add
+          `coalesce(sum(amount), 0)` if a dashboard is going to add this to something.
+      - text: "No rows at all"
+        correct: false
+        why: >
+          That is what you get once you add `GROUP BY` — no input, no groups, no rows.
+          Without GROUP BY there is always exactly one.
+      - text: "One row: `n` is 0 and `total` is 0"
+        correct: false
+        why: >
+          The most natural guess, and the one that causes the bug. Only count returns 0 on
+          an empty input; sum, avg, min and max return NULL, and NULL then poisons any
+          arithmetic it is added to.
+      - text: "One row: both `n` and `total` are NULL"
+        correct: false
+        why: >
+          count is the exception: counting nothing is a well-defined 0. It is the
+          aggregates that need at least one value to compute that return NULL.
+
+  - id: d3
+    kind: find
+    prompt: >
+      This is meant to find the customer who has paid the most. What does it return, and
+      what is wrong with that?
+    code: |
+      SELECT customer, sum(amount) AS total
+      FROM orders
+      GROUP BY customer
+      ORDER BY total DESC
+      LIMIT 1;
+    options:
+      - text: >
+          `bo 530.00` — the cancelled 500 is summed, because nothing filters out unpaid
+          orders before grouping
+        correct: true
+        why: >
+          The query is valid and the answer is confident and wrong. bo has paid 30. Add
+          `WHERE status = 'paid'` so the cancelled row never reaches the sum, and the top
+          customer becomes ana with 160.00. Nothing in the database can catch this for you.
+      - text: "`ana 160.00`"
+        correct: false
+        why: >
+          That is the right answer to the question, and what you get with
+          `WHERE status = 'paid'` added. Without that line, bo's cancelled order outweighs
+          everything.
+      - text: It fails, because `ORDER BY` cannot use the alias `total`
+        correct: false
+        why: >
+          ORDER BY runs after SELECT, so the alias exists by then. Of all the places an
+          alias can go, this is the one that works.
+      - text: "`bo 30.00` — Postgres skips cancelled rows when summing"
+        correct: false
+        why: >
+          The database has no idea what "cancelled" means to you. A status is just text
+          until a WHERE clause gives it meaning.

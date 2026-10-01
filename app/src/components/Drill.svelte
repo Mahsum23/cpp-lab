@@ -16,6 +16,7 @@
   import { highlight } from '../lib/markdown';
   import Button from './Button.svelte';
   import { answerKeys } from '../lib/shortcuts.svelte';
+  import { inlineHtml } from '../lib/inline';
 
   interface Props {
     day: Day;
@@ -92,7 +93,7 @@
     <pre class="code"><code class="hljs language-{lang}">{@html highlight(step.code, lang)}</code></pre>
   {/if}
 
-  <h2 class="prompt">{step.prompt}</h2>
+  <h2 class="prompt inline-md">{@html inlineHtml(step.prompt)}</h2>
 
   <ul class="options">
     {#each step.options as option, i}
@@ -113,7 +114,7 @@
               <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg>
             {/if}
           </span>
-          <span class="text">{option.text}</span>
+          <span class="text inline-md">{@html inlineHtml(option.text)}</span>
         </button>
       </li>
     {/each}
@@ -124,12 +125,12 @@
       {#if !gotIt}
         <div class="why bad">
           <p class="lbl">Why that one's wrong</p>
-          <p>{step.options[picked!].why}</p>
+          <p class="inline-md">{@html inlineHtml(step.options[picked!].why)}</p>
         </div>
       {/if}
       <div class="why ok">
         <p class="lbl">{gotIt ? 'Right — and here’s the whole of it' : 'The answer'}</p>
-        <p>{step.options[correctIndex].why}</p>
+        <p class="inline-md">{@html inlineHtml(step.options[correctIndex].why)}</p>
       </div>
     </div>
 

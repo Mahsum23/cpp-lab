@@ -1,0 +1,98 @@
+# The phone half of day 09. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running it on PostgreSQL 16.
+steps:
+  - id: d1
+    kind: predict
+    prompt: >
+      `ratings.score` is an `int` column holding 4, 5 and 5. What does this return?
+    code: |
+      SELECT sum(score) / count(*) AS average
+      FROM ratings;
+    options:
+      - text: "4"
+        correct: true
+        why: >
+          sum of int is bigint and count is bigint, so `/` is integer division: 14 / 3 is
+          4, with the remainder thrown away. `avg(score)` would have returned
+          4.6666666666666667, because avg returns numeric. Hand-rolled averages are where
+          this bug lives.
+      - text: "4.6666666666666667"
+        correct: false
+        why: >
+          That is `avg(score)`. Dividing the two aggregates yourself gives an integer
+          division.
+      - text: "5"
+        correct: false
+        why: >
+          Integer division in Postgres truncates toward zero; it never rounds up. 14 / 3
+          is 4.
+      - text: "4.67"
+        correct: false
+        why: >
+          Nothing here asks for two decimal places, and nothing here is decimal at all.
+
+  - id: d2
+    kind: find
+    prompt: >
+      To check a float tolerance bug, someone runs the first query in psql and it returns
+      `t`, so they close the ticket. The second query, against the real `float8` column,
+      still returns no rows. Why did the check prove nothing?
+    code: |
+      -- the check, typed into psql
+      SELECT 0.1 + 0.2 = 0.3;
+
+      -- production: readings.v is float8, holding 0.1::float8 + 0.2::float8
+      SELECT * FROM readings WHERE v = 0.3;
+    options:
+      - text: >
+          The literals in the check are `numeric`, which adds exactly; the column is
+          float8, where the sum is 0.30000000000000004
+        correct: true
+        why: >
+          In Postgres an unadorned 0.1 is numeric. To test float behaviour you have to say
+          so: `SELECT 0.1::float8 + 0.2::float8 = 0.3::float8` returns f. The fix in
+          production is a tolerance, `abs(v - 0.3) < 1e-9`, or a numeric column.
+      - text: psql rounds results for display, so it showed `t` by mistake
+        correct: false
+        why: >
+          A boolean is not rounded. The check really was true — for numeric arithmetic.
+      - text: The WHERE clause needs `::float8` on 0.3 to compare at all
+        correct: false
+        why: >
+          Postgres converts it on its own, and the comparison runs. It is just false,
+          because the stored value is not 0.3.
+      - text: The production row must have been deleted
+        correct: false
+        why: >
+          The row is there. Its value is 0.30000000000000004, which equality with 0.3
+          will never match.
+
+  - id: d3
+    kind: choose
+    prompt: >
+      Pick types for three columns: an order total in euros, a temperature reading from
+      a sensor, and the primary key of an events table that gains millions of rows a day.
+    options:
+      - text: "`numeric(12,2)`, `float8`, `bigint`"
+        correct: true
+        why: >
+          Money must be exact, so numeric (or integer cents). A sensor reading is already
+          an approximation with its own measurement error, and float8 is fast and more
+          than precise enough. A busy table's id will pass 2,147,483,647 — Basecamp 3
+          went read-only for about five hours in 2018 when an `int` id ran out.
+      - text: "`float8`, `float8`, `int`"
+        correct: false
+        why: >
+          Floats for money accumulate representation error, and an `int` key on a table
+          growing by millions a day runs out within a few years.
+      - text: "`money`, `numeric`, `int`"
+        correct: false
+        why: >
+          `money` is discouraged (locale-dependent output, fixed precision). numeric for
+          a sensor is harmless but slower and buys nothing. `int` is the outage.
+      - text: "`numeric(12,2)`, `real`, `int`"
+        correct: false
+        why: >
+          The total is right. `real` can be acceptable for coarse sensor data, but its 24
+          bits accumulate error fast in aggregates, and `int` is still the outage.

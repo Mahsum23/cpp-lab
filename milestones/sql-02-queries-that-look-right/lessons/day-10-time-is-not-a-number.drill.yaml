@@ -1,0 +1,104 @@
+# The phone half of day 10. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running it on PostgreSQL 16 with the
+# session TimeZone set to UTC.
+steps:
+  - id: d1
+    kind: predict
+    prompt: What does this return?
+    code: |
+      SELECT date '2026-01-31'
+             + interval '1 month'
+             + interval '1 month' AS renewal;
+    options:
+      - text: "`2026-03-28 00:00:00`"
+        correct: true
+        why: >
+          The first month clamps January 31st to February 28th, because February has no
+          31st. The second month adds to the 28th and lands on March 28th; the 31st is
+          gone for good. `+ interval '2 months'` in one step gives March 31st. Compute
+          each renewal from the original start date, not from the last renewal.
+      - text: "`2026-03-31 00:00:00`"
+        correct: false
+        why: >
+          That is `+ interval '2 months'` added in one step. Added one month at a time,
+          the clamp to the 28th carries forward.
+      - text: "`2026-03-03 00:00:00` — February overflows into March"
+        correct: false
+        why: >
+          Some languages' date libraries roll an invalid February 31st over into March.
+          Postgres clamps to the last day of the month instead.
+      - text: "An error: February 31st does not exist"
+        correct: false
+        why: >
+          Interval arithmetic never builds an invalid date; it clamps. You only get that
+          error when you write an impossible date literal yourself.
+
+  - id: d2
+    kind: find
+    prompt: >
+      Two consecutive weekly reports are run, and their totals add up to more than the
+      events that actually happened. Which events are counted twice?
+    code: |
+      -- week 1
+      SELECT count(*) FROM events
+      WHERE at BETWEEN '2026-06-01' AND '2026-06-08';
+
+      -- week 2
+      SELECT count(*) FROM events
+      WHERE at BETWEEN '2026-06-08' AND '2026-06-15';
+    options:
+      - text: "Events at exactly `2026-06-08 00:00:00`, which satisfy both ranges"
+        correct: true
+        why: >
+          BETWEEN includes both ends, so the shared boundary instant belongs to both
+          weeks. Half-open ranges (`>= '2026-06-01' AND < '2026-06-08'`, then
+          `>= '2026-06-08' AND < '2026-06-15'`) tile time with no overlap and no gap.
+      - text: Every event on June 8th
+        correct: false
+        why: >
+          Week 1's upper bound is the single instant 2026-06-08 00:00:00. An event at
+          10:00 on the 8th is only in week 2.
+      - text: Events on June 1st and June 15th
+        correct: false
+        why: >
+          Those are each inside only one range. Double-counting needs an instant that
+          both ranges include.
+      - text: None — the totals differ because of time-zone conversion
+        correct: false
+        why: >
+          The literals are read in the session's zone, consistently in both queries. The
+          overlap is purely BETWEEN's inclusive ends.
+
+  - id: d3
+    kind: choose
+    prompt: >
+      Pick a representation for three things: when a payment happened, a shop's daily
+      opening time (09:00 in every branch), and a webinar next year at 10:00 in a named
+      city.
+    options:
+      - text: >
+          `timestamptz`; a plain `time`; the local `timestamp` together with the zone's
+          name (e.g. `'Europe/Berlin'`)
+        correct: true
+        why: >
+          A payment is an instant that happened, which is what timestamptz is for. "09:00
+          wherever the shop is" is a wall-clock time, deliberately not an instant. A future
+          local-time event is an intention: storing the local time and zone name keeps it
+          at 10:00 there even if the zone's rules change before it happens — Jon Skeet's
+          argument in "Storing UTC is not a silver bullet".
+      - text: "`timestamptz` for all three"
+        correct: false
+        why: >
+          Right for the payment. A daily opening time is not one instant. And a future
+          event pinned to UTC drifts off 10:00 local if the zone's rules change first.
+      - text: "`timestamp` for all three"
+        correct: false
+        why: >
+          A plain timestamp for a payment loses which instant it was. The Postgres wiki's
+          "Don't Do This" page says not to store instants that way.
+      - text: "`text` for all three, formatted as ISO 8601"
+        correct: false
+        why: >
+          Text sorts, compares and calculates badly, and validates nothing — '2025-02-29'
+          would be accepted. Use the types that know what a date is.

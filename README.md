@@ -17,7 +17,7 @@ you, because that is the part that actually changes what you can do.
 | Track | Milestone available now | For |
 |---|---|---|
 | **C++ systems** | `01-raw-sockets` — 8 days | You write C++ but have never opened a socket, set up CMake or CI by hand |
-| **PostgreSQL** | `sql-01-what-the-database-does` — 3 days | You write SQL that works but have never looked at what the engine does with it |
+| **PostgreSQL** | `sql-01-what-the-database-does` — 3 days, then `sql-02-queries-that-look-right` — 7 days | You write SQL that works but have never looked at what the engine does with it, or at the exact places a plausible query goes wrong |
 | **Go** | `go-01-from-zero` — 6 days | You can program, and know nothing about Go yet |
 
 Each milestone lives in `milestones/<name>/`: a spec in its `README.md` and the daily
@@ -36,8 +36,8 @@ About 25 minutes, in five steps:
    and each one says why it is wrong.
 3. **Drill.** Two to four exercises you can do on a phone — predict the output, find the
    bug, choose the right call. The day is done when the drill is done, so a day away from
-   a computer is still a real day. *(The Go days have drills; the C++ and SQL drills are
-   still being written.)*
+   a computer is still a real day. *(The Go days and the second SQL week have drills; the
+   C++ drills and the first SQL week's are still being written.)*
 4. **Task.** A small piece of code that needs a machine. It waits in a queue until you are
    at one — see `./lab` below. When you have written it, paste or pick the file in the app
    and it is reviewed against the checklist item by item and graded *Solid*, *Almost* or
@@ -164,5 +164,6 @@ milestones/<name>/README.md     a milestone's spec
 milestones/<name>/lessons/      one .md per day, plus its .quiz.yaml, .drill.yaml, week.yaml
 app/                            the PWA (Svelte), built from the lesson files
 tools/lab.mjs, ./lab            the task launcher
+tools/check-sql-lesson.py       runs a SQL lesson top to bottom and checks every output block
 PROGRESS.md                     the running log: what got done, and what was confusing
 ```

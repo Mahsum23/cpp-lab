@@ -1,0 +1,119 @@
+# The phone half of day 08. Question text lives in the .md; the reasoning lives here.
+#
+# Every expected output below was produced by running it on PostgreSQL 16. d2 and d3 use
+# the lesson's `sales` table: north 100, 50, 70, 30 (total 250); south 200, 200, 10.
+steps:
+  - id: d1
+    kind: predict
+    prompt: >
+      Rows: (1, Apr 1, 10), (2, Apr 1, 20), (3, Apr 2, 5). What is the `running` column?
+    code: |
+      SELECT id, amount,
+             sum(amount) OVER (ORDER BY day) AS running
+      FROM t
+      ORDER BY id;
+    options:
+      - text: "30, 30, 35"
+        correct: true
+        why: >
+          With ORDER BY and no frame, the frame is RANGE up to the current row *and its
+          peers*. Rows 1 and 2 share a day, so each one's frame contains both: 30. For a
+          row-by-row total, write ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW and add
+          id to the window's ORDER BY.
+      - text: "10, 30, 35"
+        correct: false
+        why: >
+          The running total most people expect, and what ROWS with a tiebreaker gives. The
+          default frame does not separate rows that tie on the ORDER BY key.
+      - text: "35, 35, 35"
+        correct: false
+        why: >
+          That is `sum(amount) OVER ()`, with no ORDER BY: every row sees the whole
+          partition. ORDER BY is what makes the total run.
+      - text: "10, 20, 5"
+        correct: false
+        why: >
+          That would be a frame of just the current row. The default frame starts at
+          UNBOUNDED PRECEDING.
+
+  - id: d2
+    kind: find
+    prompt: >
+      This is meant to list each region's top sale. It returns one row per region. What
+      is wrong with it?
+    code: |
+      SELECT region, id, amount
+      FROM (
+        SELECT region, id, amount,
+               row_number() OVER (PARTITION BY region ORDER BY amount DESC) AS rn
+        FROM sales
+      ) s
+      WHERE rn = 1;
+    options:
+      - text: >
+          South has two sales of 200, and nothing decides which one gets row number 1, so
+          the winner is arbitrary and can change between runs
+        correct: true
+        why: >
+          row_number always picks exactly one, and among ties it picks arbitrarily. Decide
+          what a tie means: two winners (use rank) or one winner by a rule (add `, id` to
+          the window's ORDER BY).
+      - text: >
+          `rn` cannot be used in the outer `WHERE`, because it is a window function
+        correct: false
+        why: >
+          Filtering a window result from an outer query is exactly the right pattern. By
+          the time the outer WHERE runs, rn is an ordinary column.
+      - text: Nothing — row_number always gives 1 to the row with the lowest id
+        correct: false
+        why: >
+          Nothing in the window mentions id. Postgres adds no tiebreaker of its own.
+      - text: It returns both of south's 200s
+        correct: false
+        why: >
+          That is what rank would do. row_number numbers the two 200s as 1 and 2, and only
+          one survives `rn = 1`.
+
+  - id: d3
+    kind: choose
+    prompt: >
+      List only `north`'s sales, each with its percentage of the **whole table's** total
+      (660). Which queries do that?
+    code: |
+      -- A
+      SELECT id, round(100.0 * amount / sum(amount) OVER (), 1) AS pct
+      FROM sales WHERE region = 'north';
+
+      -- B
+      SELECT id, pct FROM (
+        SELECT id, region, round(100.0 * amount / sum(amount) OVER (), 1) AS pct
+        FROM sales
+      ) s
+      WHERE region = 'north';
+
+      -- C
+      SELECT id, round(100.0 * amount / (SELECT sum(amount) FROM sales), 1) AS pct
+      FROM sales WHERE region = 'north';
+    options:
+      - text: "B and C"
+        correct: true
+        why: >
+          The window in A runs after WHERE, so it only sees north's rows and divides by
+          250: 40.0, 20.0, 28.0, 12.0. B computes the window over every row first and
+          filters outside it. C divides by a scalar subquery over the whole table. Both
+          give 15.2, 7.6, 10.6, 4.5.
+      - text: "A only"
+        correct: false
+        why: >
+          `OVER ()` means all rows that reached the SELECT step, and WHERE has already
+          removed south. A computes each sale's share of north.
+      - text: "C only"
+        correct: false
+        why: >
+          C is right, and B is too. Filtering in the outer query happens after the inner
+          window has seen every row.
+      - text: "All three"
+        correct: false
+        why: >
+          A divides by 250, not 660. Its numbers add up to exactly 100 within north, which
+          is the giveaway.

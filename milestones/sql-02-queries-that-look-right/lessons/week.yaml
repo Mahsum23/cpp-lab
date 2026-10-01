@@ -1,0 +1,95 @@
+# Week manifest for the second SQL week. Day ids continue from week one (sql-day-04
+# onwards) because ids must be unique across every week in the repo, and the day numbers
+# continue with them so the track reads as one path.
+#
+# Teasers are hooks, not tables of contents.
+id: week-sql-02
+title: Queries That Look Right
+milestone: sql-02-queries-that-look-right
+track: sql
+intro: >
+  SQL almost never fails loudly. A misplaced filter, a join that multiplies rows or an
+  integer division does not throw an error. It returns a plausible, well-formatted, wrong
+  answer, and that answer ends up in a dashboard or an invoice. This week takes the
+  fundamentals everyone believes they already know — the order a query runs in, what a
+  LEFT JOIN promises, what ORDER BY guarantees, what a number or a timestamp really holds
+  — and finds the exact place where that belief and the engine disagree. Same setup as
+  before: PostgreSQL 16 in a container and a psql prompt.
+
+days:
+  - id: sql-day-04
+    day: 4
+    title: SQL does not run in the order you write it
+    estMinutes: 25
+    teaser: The alias that exists in ORDER BY and doesn't exist in WHERE, one line apart
+    teachBack: >
+      Using the order the clauses are evaluated in, explain why `WHERE total > 100` fails
+      with "column total does not exist" while `ORDER BY total` on the same query works,
+      and why `WHERE sum(amount) > 100` is refused outright. Then say what `HAVING` can do
+      that `WHERE` cannot, and what goes wrong if a row condition is left out of `WHERE`.
+
+  - id: sql-day-05
+    day: 5
+    title: The LEFT JOIN that became an INNER JOIN
+    estMinutes: 25
+    teaser: One condition, one line too low, and half the customers vanish from the report
+    teachBack: >
+      A `LEFT JOIN` from customers to orders, followed by `WHERE o.status = 'paid'`,
+      loses every customer without a paid order. Walk through what the join produced for
+      such a customer, what the `WHERE` did to that row and why, and why moving the
+      condition into `ON` fixes it. Then explain why adding `OR o.status IS NULL` does not.
+
+  - id: sql-day-06
+    day: 6
+    title: Joins multiply
+    estMinutes: 30
+    teaser: Revenue nearly quadrupled overnight, and nobody sold anything
+    teachBack: >
+      An order with three items and two payments is joined to both tables, and the report
+      shows six times its total. Explain where each of the six rows comes from, why
+      `sum(DISTINCT amount)` is not a fix, and how restructuring the query makes every
+      number right.
+
+  - id: sql-day-07
+    day: 7
+    title: Without ORDER BY there is no order
+    estMinutes: 30
+    teaser: The leaderboard that changed its mind when someone added an index
+    teachBack: >
+      Explain why page 2 of an `OFFSET`-paginated feed can show a post that was already
+      on page 1, and why a deep `OFFSET` stays slow even with a perfect index. Then explain
+      what keyset pagination remembers instead, and why the tiebreaker column is not
+      optional.
+
+  - id: sql-day-08
+    day: 8
+    title: "Window functions: aggregates that keep the rows"
+    estMinutes: 30
+    teaser: A running total that jumps two rows at once, caused by a default you never wrote
+    teachBack: >
+      Explain what happens to the rows under `GROUP BY` and under a window function, and
+      why a window function cannot be used in `WHERE`. Then explain why
+      `sum(amount) OVER (ORDER BY day)` gives two rows from the same day the same running
+      total, and what changes when you write `ROWS BETWEEN UNBOUNDED PRECEDING AND
+      CURRENT ROW`.
+
+  - id: sql-day-09
+    day: 9
+    title: Numbers that round, truncate and overflow
+    estMinutes: 25
+    teaser: Add 0.1 a million times, get 100,958 — and a conversion rate that was 0% for a year
+    teachBack: >
+      Explain why a conversion rate written as `converted / total * 100` comes out as 0
+      in PostgreSQL, why `0.1::float8 + 0.2::float8 = 0.3` is false while
+      `0.1 + 0.2 = 0.3` is true, and which type you would store money in, with the reason.
+
+  - id: sql-day-10
+    day: 10
+    title: Time is not a number
+    estMinutes: 30
+    teaser: A timestamptz stores no time zone at all, and that is exactly why you want it
+    teachBack: >
+      Explain what a `timestamptz` actually stores and what the session's `TimeZone`
+      setting changes about it. Then explain why
+      `WHERE at BETWEEN '2026-06-01' AND '2026-06-07'` loses almost a whole day of data,
+      and what to write instead.

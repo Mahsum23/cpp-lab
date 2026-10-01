@@ -1,0 +1,153 @@
+# Answer key for day 10. Question text lives in the .md; the reasoning lives here.
+#
+# Option order carries no information — build-content.mjs shuffles each question
+# deterministically, so authoring the correct one first is safe.
+questions:
+  - id: q1
+    prompt: >
+      What does a `timestamptz` value actually store, and what does the session's
+      `TimeZone` setting change about it?
+    options:
+      - text: >
+          A single instant (an 8-byte count of microseconds anchored in UTC) and no zone;
+          TimeZone decides how offset-less input is interpreted and how the value is
+          displayed
+        correct: true
+        why: >
+          The "with time zone" in the name describes conversion on the way in and out,
+          not storage. pg_column_size shows 8 bytes, the same as a plain timestamp. The
+          same row displays as 12:00+00, 17:00+05 or 08:00-04 depending only on the
+          session.
+      - text: The instant plus the name of the zone it was entered in
+        correct: false
+        why: >
+          That is a common reading of the type's name, and it is wrong. There is no room
+          for a zone in 8 bytes, and the original zone is lost on input.
+      - text: The local wall-clock time, plus a flag saying a zone applies
+        correct: false
+        why: >
+          That describes neither type. A plain timestamp stores a wall-clock time with no
+          zone at all; timestamptz stores an instant.
+      - text: TimeZone changes the stored value when the setting is altered
+        correct: false
+        why: >
+          Stored values never change. Changing TimeZone only changes how they are shown,
+          and how new offset-less text is read.
+
+  - id: q2
+    prompt: >
+      The text `'2026-03-29 12:00:00'`, with no offset, is inserted into a `timestamptz`
+      column from two sessions, one with `TimeZone` set to UTC and one set to
+      `America/New_York`. Are the stored values the same?
+    options:
+      - text: >
+          No — offset-less input is read in the session's zone, so the two rows are four
+          hours apart
+        correct: true
+        why: >
+          Noon in New York that day is 16:00 UTC. The same text became two different
+          instants. Send timestamps with an explicit offset or `Z`, and run servers in
+          UTC, so the meaning never depends on who connected.
+      - text: Yes — timestamptz always assumes UTC for input without an offset
+        correct: false
+        why: >
+          It assumes the session's TimeZone, which is UTC only if someone set it so.
+      - text: No — the New York row is rejected because the offset is missing
+        correct: false
+        why: >
+          Missing offsets are accepted silently. That silence is why the bug survives.
+      - text: Yes, but they display differently
+        correct: false
+        why: >
+          Display differences come from the reader's session. Here the stored instants
+          themselves differ, so they display differently in every session.
+
+  - id: q3
+    prompt: >
+      Why does `WHERE at BETWEEN '2026-06-01' AND '2026-06-07'` miss most of June 7th on
+      a timestamp column, and what should be written instead?
+    options:
+      - text: >
+          The upper bound becomes `2026-06-07 00:00:00` and BETWEEN is inclusive, so
+          everything after midnight on the 7th is excluded; write
+          `at >= '2026-06-01' AND at < '2026-06-08'`
+        correct: true
+        why: >
+          A date literal compared with a timestamp means the start of that day. Moving the
+          upper bound to the 8th instead includes events at exactly midnight on the 8th
+          in two weeks at once. A half-open range has neither problem, at any precision.
+      - text: BETWEEN is exclusive at both ends, so the 7th itself is excluded
+        correct: false
+        why: >
+          BETWEEN is inclusive at both ends. The problem is that the end is a single
+          instant, midnight, not the whole day.
+      - text: BETWEEN ignores the time part of timestamps
+        correct: false
+        why: >
+          It compares full timestamps. That is precisely why 10:00 on the 7th is greater
+          than 00:00 on the 7th and is excluded.
+      - text: Use `BETWEEN '2026-06-01' AND '2026-06-07 23:59:59'` instead
+        correct: false
+        why: >
+          That misses 23:59:59.5. Timestamps have microsecond precision, and any closed
+          upper bound leaves a sliver. A half-open range never does.
+
+  - id: q4
+    prompt: >
+      On the day Berlin moves its clocks forward an hour, what is the difference between
+      adding `interval '1 day'` and adding `interval '24 hours'` to 01:00 that morning
+      (with the session in Berlin time)?
+    options:
+      - text: >
+          `1 day` gives 01:00 the next day, the same wall-clock time; `24 hours` gives
+          02:00 the next day, because that day only had 23 hours
+        correct: true
+        why: >
+          A day interval means "same local time tomorrow"; an hour interval means a fixed
+          number of seconds. They disagree on exactly the two DST days a year, which is how
+          a daily job ends up an hour off for half the year.
+      - text: Nothing — both are 86,400 seconds
+        correct: false
+        why: >
+          That is only true of `24 hours`. `1 day` is calendar arithmetic in the session's
+          zone.
+      - text: "`1 day` raises an error because 02:00–03:00 does not exist that day"
+        correct: false
+        why: >
+          The gap is between 02:00 and 03:00 on the transition day; neither result falls
+          inside it, and Postgres adjusts nonexistent times rather than erroring anyway.
+      - text: "`24 hours` gives 00:00 the next day"
+        correct: false
+        why: >
+          The lost hour makes elapsed time land *later* on the wall clock, not earlier:
+          02:00.
+
+  - id: q5
+    prompt: >
+      Why can a daily revenue report built on `date_trunc('day', created_at)` give
+      different totals when run from different servers?
+    options:
+      - text: >
+          On a timestamptz, date_trunc cuts at midnight in the session's time zone, so a
+          late-evening sale lands on different days for servers in different zones; pass
+          the zone as the third argument
+        correct: true
+        why: >
+          22:30 UTC is June 1st by UTC and June 2nd in Tashkent. The stored instants never
+          change; the day boundaries do. `date_trunc('day', created_at, 'UTC')` fixes the
+          boundaries regardless of who runs it.
+      - text: Different servers have different clocks, so `created_at` differs
+        correct: false
+        why: >
+          The rows are the same rows, with the same stored instants. What differs is the
+          session zone used to cut them into days.
+      - text: date_trunc is non-deterministic on timestamptz
+        correct: false
+        why: >
+          It is deterministic for a given session TimeZone. That is the problem: the
+          session setting is an input you did not write down.
+      - text: Only if the servers run different Postgres versions
+        correct: false
+        why: >
+          Version is irrelevant. Two connections to the same server with different
+          TimeZone settings disagree too.
