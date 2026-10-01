@@ -2,7 +2,9 @@
   /**
    * The review deck: old material, dealt back at you.
    *
-   * Three kinds of card, deliberately mixed so a session never settles into a rhythm.
+   * Five kinds of card, deliberately mixed so a session never settles into a rhythm.
+   * A write card hands you a database and a goal and makes you type the query from
+   * memory; it is run in a PostgreSQL on this device and judged by the rows it returns.
    * A quiz card is one you already answered weeks ago, replayed from the stored bank —
    * it needs no network and no key, which is what keeps the deck usable on a train. A
    * teach-back card asks you to explain a mechanism and is graded. A forged card is
@@ -23,6 +25,10 @@
   import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
   import MentorSheet from '../components/MentorSheet.svelte';
   import { codeBlocksFor, isDue, pickNext, type CardRef } from '../lib/review';
+  import { sql } from '../lib/sqlrun.svelte';
+  import { compareResults, isOrdered, type ResultTable, type Verdict } from '../lib/writecheck';
+  import type { TableInfo } from '../lib/sqlcore';
+  import ResultGrid from '../components/ResultGrid.svelte';
   import { today } from '../lib/date';
   import {
     collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripMarkers,
@@ -60,6 +66,21 @@
   let solution = $state<string[]>([]);
   let checked = $state(false);
 
+  // Write card: a query typed from memory, run for real.
+  type Attempt =
+    | { kind: 'right'; sql: string; table: ResultTable }
+    | { kind: 'wrong'; sql: string; table: ResultTable; verdict: Exclude<Verdict, { ok: true }> }
+    | { kind: 'error'; sql: string; message: string };
+  let writeSql = $state('');
+  let target = $state<ResultTable | null>(null);
+  let tables = $state<TableInfo[] | null>(null);
+  let attempts = $state<Attempt[]>([]);
+  let running = $state(false);
+  let hinted = $state(false);
+  let revealed = $state(false);
+  /** The first run (or a hint, or giving up) is what the schedule hears; later tries are free. */
+  let writeGraded = $state(false);
+
   // Graded cards.
   let challenge = $state('');
   let answer = $state('');
@@ -87,10 +108,25 @@
     return context.day.quiz?.find((q) => q.id === card!.questionId) ?? null;
   });
 
+  const wc = $derived.by(() => {
+    if (card?.kind !== 'write' || !context) return null;
+    return context.day.write?.challenges.find((c) => c.id === card!.questionId) ?? null;
+  });
+  const writeSetup = $derived(context?.day.write?.setup ?? '');
+  /** Whether row order is part of this answer. */
+  const wOrdered = $derived(wc ? (wc.ordered ?? isOrdered(wc.verify ?? wc.solution)) : false);
+  const solved = $derived(attempts.some((a) => a.kind === 'right'));
+
   /** Graded cards need the mentor; without a key the deck falls back to quiz cards. */
   const graded = $derived(card?.kind === 'explain' || card?.kind === 'forge');
+  // Write cards need neither a key nor a network, only the SQL engine — which, if it
+  // could not be fetched and was never cached, is simply absent from the deck.
   const answerable = $derived(
-    app.deck.filter((c) => c.kind === 'quiz' || c.kind === 'parsons' || app.mentorReady),
+    app.deck.filter((c) =>
+      c.kind === 'write'
+        ? sql.state !== 'failed'
+        : c.kind === 'quiz' || c.kind === 'parsons' || app.mentorReady,
+    ),
   );
 
   /**
@@ -134,6 +170,26 @@
             .join('\n\n') || '(nothing yet)'),
       };
     }
+    if (card.kind === 'write' && wc) {
+      const fence = (q: string) => `\`\`\`sql\n${q}\n\`\`\``;
+      const tried = attempts
+        .map((a, i) => {
+          const what =
+            a.kind === 'right' ? 'it returned the target' : a.kind === 'error' ? `Postgres said: ${a.message}` : `wrong rows (${a.verdict.reason})`;
+          return `Attempt ${i + 1} — ${what}:\n\n${fence(a.sql)}`;
+        })
+        .join('\n\n');
+      return {
+        label: 'Write the query',
+        question: wc.prompt,
+        outcome: [solved ? 'Your query returned the target ✓' : revealed ? 'You asked for the answer ✗' : ''].filter(Boolean),
+        brief:
+          `A write-the-query card: they had to type this query from memory and have it run against a real database.\n\n` +
+          `The task: ${wc.prompt}\n\nThe reference answer:\n\n${fence(wc.solution)}\n\n` +
+          (tried ? `What they ran:\n\n${tried}` : 'They did not run anything.') +
+          (hinted ? '\n\nThey asked for the hint.' : ''),
+      };
+    }
     if (card.kind === 'parsons' && solution.length) {
       const block = (lines: string[]) => `\`\`\`${lang}\n${lines.join('\n')}\n\`\`\``;
       return {
@@ -152,7 +208,7 @@
     graded && !verdict && turns.filter((t) => t.role === 'user').length === MAX_REVIEW_MESSAGES - 1,
   );
 
-  const answered = $derived(picked !== null || verdict !== null || checked);
+  const answered = $derived(picked !== null || verdict !== null || checked || solved || revealed);
 
   /**
    * Openers for the sheet, shaped by the card you just answered.
@@ -191,17 +247,132 @@
     turns = [];
     verdict = null;
     error = null;
+    writeSql = '';
+    target = null;
+    tables = null;
+    attempts = [];
+    running = false;
+    hinted = false;
+    revealed = false;
+    writeGraded = false;
   }
 
   async function deal() {
+    const previous = card?.kind;
     reset();
     // In practice mode nothing is "due", so every card is fair game; `seen` still
     // stops the same one coming round twice in a sitting.
     const on = practice ? '9999-12-31' : today();
-    const next = pickNext(answerable, app.progress.review, on, Math.random, seen);
+    const next = pickNext(answerable, app.progress.review, on, Math.random, seen, previous);
     card = next;
     if (next?.kind === 'forge') await forge();
     if (next?.kind === 'parsons') setupParsons(next);
+    if (next?.kind === 'write') await setupWrite(next);
+  }
+
+  /**
+   * Get a write card ready: the engine up, the tables drawn, and the reference answer run
+   * to make the target. All three come from the engine rather than from the card file, so
+   * what you are shown is always what the reference actually returns.
+   *
+   * A card that cannot be set up is dropped, not graded. If the engine will not start (no
+   * network the first time) that is not a wrong answer, and if the card's own setup is
+   * broken that is the lesson's bug — it is reported to the console for whoever wrote it.
+   */
+  async function setupWrite(ref: CardRef) {
+    const day = findDay(ref.dayId);
+    const c = day?.write?.challenges.find((x) => x.id === ref.questionId);
+    if (!day?.write || !c) return setAside(ref);
+    loading = true;
+    codeMode = true;
+    try {
+      if (!(await sql.warm())) return setAside(ref);
+      const [t, ref_] = await Promise.all([
+        sql.describe(day.write.setup),
+        sql.run({ setup: day.write.setup, sql: c.solution, verify: c.verify ?? undefined }),
+      ]);
+      if (card?.id !== ref.id) return; // dealt past while it was loading
+      if (!ref_.ok) {
+        console.error(`[write] ${ref.id}: the reference answer failed (${ref_.stage}): ${ref_.error}`);
+        return setAside(ref);
+      }
+      tables = t;
+      target = ref_.table;
+    } finally {
+      loading = false;
+    }
+    await tick();
+    area?.focus();
+  }
+
+  /** Put a card aside without grading it, and deal another. */
+  async function setAside(ref: CardRef) {
+    seen = new Set([...seen, ref.id]);
+    loading = false;
+    await deal();
+  }
+
+  async function runWrite() {
+    const text = writeSql.trim();
+    if (!text || running || solved || revealed || !wc || !target) return;
+    running = true;
+    error = null;
+    const res = await sql.run({ setup: writeSetup, sql: text, verify: wc.verify ?? undefined });
+    running = false;
+    // The engine or the card is at fault, not the query: say so, and don't count it.
+    if (!res.ok && (res.stage === 'engine' || res.stage === 'setup')) {
+      error = res.error;
+      return;
+    }
+    let attempt: Attempt;
+    if (!res.ok) {
+      attempt = { kind: 'error', sql: text, message: res.error };
+    } else {
+      const v = compareResults(res.table, target, wOrdered);
+      attempt = v.ok ? { kind: 'right', sql: text, table: res.table } : { kind: 'wrong', sql: text, table: res.table, verdict: v };
+    }
+    attempts = [...attempts, attempt];
+    if (!writeGraded) {
+      writeGraded = true;
+      await settle(attempt.kind === 'right' && !hinted ? 'good' : 'again');
+    }
+    if (attempt.kind !== 'right') {
+      await tick();
+      area?.focus();
+    }
+  }
+
+  /** Giving up is a miss — but it ends the card with the answer on the screen. */
+  async function showAnswer() {
+    if (revealed || solved) return;
+    revealed = true;
+    if (!writeGraded) {
+      writeGraded = true;
+      await settle('again');
+    }
+  }
+
+  /** information_schema's long type names, the way a person writes them in a CREATE TABLE. */
+  const SHORT: Record<string, string> = {
+    integer: 'int',
+    'double precision': 'float8',
+    'timestamp with time zone': 'timestamptz',
+    'timestamp without time zone': 'timestamp',
+    'character varying': 'varchar',
+    boolean: 'bool',
+  };
+  const shortType = (t: string) => SHORT[t] ?? t;
+
+  /** What was wrong with a result, in a sentence. */
+  function whyWrong(v: Exclude<Verdict, { ok: true }>): string {
+    if (v.reason === 'columns') {
+      return `Your query returns ${v.got} column${v.got === 1 ? '' : 's'}; the target has ${v.want}.`;
+    }
+    if (v.reason === 'order') return 'Right rows, wrong order — this answer is sorted.';
+    const parts: string[] = [];
+    if (v.missing.length) parts.push(`${v.missing.length} row${v.missing.length === 1 ? '' : 's'} of the target ${v.missing.length === 1 ? 'is' : 'are'} missing`);
+    if (v.extra.length) parts.push(`${v.extra.length} row${v.extra.length === 1 ? '' : 's'} ${v.extra.length === 1 ? "shouldn't" : "shouldn't"} be there`);
+    return `${parts.join(', and ')}.`;
   }
 
   /** Shuffle a block's lines. A shuffle that changes nothing isn't a puzzle. */
@@ -383,12 +554,21 @@
     count: () => question?.options.length ?? 0,
     canChoose: () => card?.kind === 'quiz' && Boolean(question) && picked === null && !loading,
     choose: (i) => void choose(i),
-    canAdvance: () => answered && !streaming,
+    canAdvance: () => answered && !streaming && !running,
     advance: () => void deal(),
   }));
 
   $effect(() => {
     if (app.ready && !card && !seen.size) void deal();
+  });
+
+  // Let the engine go when the deck is left: it is the heaviest thing the app ever holds.
+  $effect(() => () => sql.release());
+
+  // The engine is a few MB and takes a few seconds to start, so start it as the deck opens
+  // rather than when the first write card is dealt. After the first time it comes from cache.
+  $effect(() => {
+    if (app.ready && app.deck.some((c) => c.kind === 'write')) void sql.warm();
   });
 
   // Opening the deck spends the day's interruption, however it was reached.
@@ -445,12 +625,20 @@
         {#if card.kind === 'quiz'}from the quiz
         {:else if card.kind === 'explain'}explain it
         {:else if card.kind === 'parsons'}rebuild it
+        {:else if card.kind === 'write'}write it
         {:else}fresh challenge{/if}
       </span>
     </p>
 
     {#if loading}
-      <div class="card wait"><span class="dot"></span> Writing you a challenge…</div>
+      <div class="card wait">
+        <span class="dot"></span>
+        {card.kind === 'write' ? 'Starting PostgreSQL — it runs on this device…' : 'Writing you a challenge…'}
+      </div>
+      {#if card.kind === 'write'}
+        <p class="fine">The first time this downloads about 5 MB. After that it starts from the device.</p>
+        <button class="link" onclick={() => card && void setAside(card)}>Skip this card</button>
+      {/if}
     {:else if card.kind === 'quiz' && question}
       <div class="card">
         <h2 class="q inline-md">{@html inlineHtml(question.prompt)}</h2>
@@ -473,6 +661,78 @@
           {/each}
         </div>
       </div>
+    {:else if card.kind === 'write' && wc && target}
+      <div class="card">
+        <h2 class="q inline-md">{@html inlineHtml(wc.prompt)}</h2>
+
+        {#if tables}
+          <div class="schema">
+            {#each tables as t}
+              <p><strong>{t.name}</strong>({t.columns.map((c) => `${c.name} ${shortType(c.type)}`).join(', ')})</p>
+            {/each}
+          </div>
+          <details class="data">
+            <summary>Sample data</summary>
+            {#each tables as t}
+              <p class="tname">{t.name} · {t.rowCount} row{t.rowCount === 1 ? '' : 's'}</p>
+              <ResultGrid columns={t.columns.map((c) => c.name)} rows={t.rows} limit={8} caption={t.name} />
+            {/each}
+          </details>
+        {/if}
+
+        <p class="sub">Your query should return{wOrdered ? ' (in this order)' : ''}:</p>
+        <ResultGrid columns={target.columns} rows={target.rows} caption="The target result" />
+
+        {#if hinted && wc.hint}
+          <p class="hint"><strong>Hint.</strong> {wc.hint}</p>
+        {/if}
+      </div>
+
+      {#if !solved && !revealed}
+        <div class="answer">
+          <CodeArea
+            bind:this={area}
+            bind:value={writeSql}
+            bind:codeMode
+            lang="sql"
+            placeholder="Write the query from memory…"
+            ariaLabel="Your query"
+            maxHeight={220}
+            onsubmit={() => void runWrite()}
+          />
+        </div>
+        <p class="fine">
+          {attempts.length ? 'Fix it and run it again — only the first run counts towards the schedule.' : 'The first run counts. Ctrl/Cmd+Enter runs it.'}
+        </p>
+      {/if}
+
+      {#each attempts.slice(-1) as a}
+        <div class="card try" class:right={a.kind === 'right'} class:wrong={a.kind !== 'right'}>
+          {#if a.kind === 'right'}
+            <p class="verdict">✓ That returns the target.</p>
+          {:else if a.kind === 'error'}
+            <p class="verdict">✗ PostgreSQL says:</p>
+            <pre class="pgerr">{a.message}</pre>
+          {:else}
+            <p class="verdict">✗ Not quite. {whyWrong(a.verdict)}</p>
+          {/if}
+          {#if a.kind !== 'error'}
+            <ResultGrid
+              columns={a.table.columns}
+              rows={a.table.rows}
+              mark={a.kind === 'wrong' && a.verdict.reason === 'rows' ? new Set(a.verdict.extra.map((r) => JSON.stringify(r))) : undefined}
+              caption="What your query returned"
+            />
+          {/if}
+        </div>
+      {/each}
+
+      {#if answered}
+        <div class="card">
+          <p class="lbl2">{solved ? 'The reference answer — yours may differ and still be right' : 'The answer'}</p>
+          <pre class="ref"><code>{@html highlight(wc.solution, 'sql')}</code></pre>
+        </div>
+      {/if}
     {:else if card.kind === 'parsons'}
       <div class="card">
         <h2 class="q">Put this back in order</h2>
@@ -559,7 +819,7 @@
     {#if error}
       <div class="err">
         <p>{error}</p>
-        <button class="link" onclick={() => void skip()}>Skip this card</button>
+        <button class="link" onclick={() => (card?.kind === 'write' ? void setAside(card) : void skip())}>Skip this card</button>
       </div>
     {/if}
 
@@ -572,6 +832,14 @@
           Check
         </Button>
         <Button variant="ghost" size="sm" onclick={() => void skip()}>Skip</Button>
+      {:else if card.kind === 'write' && wc && target}
+        <Button onclick={() => void runWrite()} disabled={!writeSql.trim() || running}>
+          {running ? 'Running…' : 'Run ▶'}
+        </Button>
+        {#if wc.hint && !hinted}
+          <Button variant="ghost" size="sm" onclick={() => (hinted = true)}>Hint</Button>
+        {/if}
+        <Button variant="ghost" size="sm" disabled={running} onclick={() => void showAnswer()}>Show answer</Button>
       {:else if graded && prompt}
         <Button onclick={() => void submit()} disabled={!answer.trim() || streaming}>
           {streaming ? 'Thinking…' : turns.length ? 'Reply' : 'Submit'}
@@ -972,5 +1240,88 @@
     margin-top: 4px;
     /* Room for the floating Ask pill, which sits over this corner. */
     padding-bottom: 56px;
+  }
+  /* Write card */
+  .schema {
+    margin: 12px 0 4px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  .schema p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .data summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 8px 0;
+  }
+
+  .tname {
+    margin: 10px 0 5px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-faint);
+  }
+
+  .hint {
+    margin: 14px 0 0;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+
+  .try {
+    border-left: 4px solid var(--border);
+  }
+
+  .try.right {
+    border-left-color: var(--ok);
+  }
+
+  .try.wrong {
+    border-left-color: var(--bad);
+  }
+
+  .verdict {
+    margin: 0 0 10px;
+    font-weight: 600;
+    font-size: 14.5px;
+  }
+
+  .pgerr {
+    margin: 0;
+    white-space: pre-wrap;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--bad);
+  }
+
+  .lbl2 {
+    margin: 0 0 8px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .ref {
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.55;
   }
 </style>

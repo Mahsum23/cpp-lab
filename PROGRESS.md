@@ -562,3 +562,21 @@ still found, since the service worker ignores the query), and old per-week bundl
 on a device are joined into one path, so the map shows all ten days even mid-migration.
 Also, at his request, the map's "new days are written on request" line and copy button
 are gone; it ends with "Coming up", the plan from `tracks.yaml`.
+
+**Write-the-query cards in review (2026-10-01).** He was getting a lot of reorder cards and
+wanted to *write* queries from memory so the syntax sticks. SQL days now carry
+`day-NN-<slug>.write.yaml` (38 challenges across days 1–10), and review deals a card that
+shows the tables and the target result and makes him type the query. It is judged by running
+it, in a real PostgreSQL compiled to WebAssembly (PGlite, ~5 MB, cached after first use,
+works offline), comparing rows with the reference's, so any correct spelling passes. No model,
+key or network needed. Things the build turned up:
+- PGlite cannot be interrupted: `statement_timeout` is ignored and an unterminated recursive
+  CTE hung the process for good. Queries run in a worker that is thrown away after 6 s.
+- `SELECT 1` passed a challenge whose answer was the count `1`; the test now fails any card a
+  trivial query can pass, and that card asks for ids instead.
+- The solution I wrote for `WITH TIES` added a tie-break column, which makes ties impossible
+  and defeated the point of the card; caught by reading the output (4 rows expected, 3 given).
+- The browser engine is PostgreSQL 18, the lessons are 16; every card's answer was compared
+  with a real 16 and all 38 agree. Cards avoid plan text, ids and sizes for that reason.
+The deck also no longer deals the same kind of card twice in a row. Not done: the same card
+for Go and C++ (needs model grading), and a setting to hold off the 5 MB download on mobile data.

@@ -11,9 +11,10 @@
     "content": "node scripts/build-content.mjs",
     "icons": "node scripts/gen-icons.mjs",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "node scripts/test-streak.mjs && node scripts/test-merge.mjs && node scripts/test-markdown.mjs && node scripts/test-latex.mjs && node scripts/test-mentor.mjs && node scripts/test-compose.mjs && node scripts/test-review.mjs && node scripts/test-lab.mjs && node scripts/test-drill.mjs && node scripts/test-checklist.mjs && node scripts/test-shortcuts.mjs && node scripts/test-inline.mjs"
+    "test": "node scripts/test-streak.mjs && node scripts/test-merge.mjs && node scripts/test-markdown.mjs && node scripts/test-latex.mjs && node scripts/test-mentor.mjs && node scripts/test-compose.mjs && node scripts/test-review.mjs && node scripts/test-lab.mjs && node scripts/test-drill.mjs && node scripts/test-checklist.mjs && node scripts/test-shortcuts.mjs && node scripts/test-inline.mjs && node scripts/test-write.mjs"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "highlight.js": "^11.11.1",
     "idb": "^8.0.3",
     "marked": "^15.0.12"

@@ -1,0 +1,71 @@
+setup: |
+  CREATE TABLE sales (id int PRIMARY KEY, region text NOT NULL, day date NOT NULL, amount int NOT NULL);
+  INSERT INTO sales VALUES
+    (1, 'north', '2026-03-01', 100),
+    (2, 'north', '2026-03-02',  50),
+    (3, 'north', '2026-03-02',  70),
+    (4, 'north', '2026-03-03',  30),
+    (5, 'south', '2026-03-01', 200),
+    (6, 'south', '2026-03-02', 200),
+    (7, 'south', '2026-03-03',  10);
+
+challenges:
+  - id: share
+    prompt: >
+      For every sale return `id` and its percentage of its **region's** total, rounded
+      to one decimal place (so 100 of north's 250 is `40.0`). Keep all seven rows.
+      Ordered by id.
+    hint: A window over each region keeps the rows; `100.0` avoids integer division.
+    solution: |
+      SELECT id, round(100.0 * amount / sum(amount) OVER (PARTITION BY region), 1) AS pct
+      FROM sales
+      ORDER BY id;
+
+  - id: top-per-region
+    prompt: >
+      Each region's biggest sale — `region`, `id`, `amount` — keeping **both** when two
+      sales tie for first. Ordered by region, then id. You can't filter on a window
+      function in `WHERE`.
+    hint: Rank in a subquery, filter the rank outside it.
+    solution: |
+      SELECT region, id, amount
+      FROM (
+        SELECT region, id, amount,
+               rank() OVER (PARTITION BY region ORDER BY amount DESC) AS r
+        FROM sales
+      ) ranked
+      WHERE r = 1
+      ORDER BY region, id;
+
+  - id: running-total
+    prompt: >
+      A running total of north's sales in order of day then id: return `id` and
+      `running`, ordered by id. Two sales share a day, so the default frame would get
+      it wrong.
+    hint: Count rows, not peers — and give the frame explicitly.
+    solution: |
+      SELECT id,
+             sum(amount) OVER (ORDER BY day, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running
+      FROM sales
+      WHERE region = 'north'
+      ORDER BY id;
+
+  - id: day-change
+    prompt: >
+      Total sales per day, and how much each day changed from the day before: `day`,
+      `total`, `change` (NULL for the first day). Ordered by day.
+    hint: One window function reads a value from the previous row.
+    solution: |
+      SELECT day, total, total - lag(total) OVER (ORDER BY day) AS change
+      FROM (SELECT day, sum(amount) AS total FROM sales GROUP BY day) d
+      ORDER BY day;
+
+  - id: one-per-region
+    prompt: >
+      Exactly one top sale per region (the lowest id wins a tie): `region`, `id`,
+      `amount`, ordered by region. Use the PostgreSQL-specific shortcut, not a subquery.
+    hint: DISTINCT with an ON list, and an ORDER BY that starts with the same column.
+    solution: |
+      SELECT DISTINCT ON (region) region, id, amount
+      FROM sales
+      ORDER BY region, amount DESC, id;

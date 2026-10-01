@@ -1,0 +1,39 @@
+setup: |
+  CREATE TABLE visits (id int PRIMARY KEY, converted boolean NOT NULL);
+  INSERT INTO visits SELECT n, n % 8 = 0 FROM generate_series(1, 200) AS n;
+  CREATE TABLE m (id int, v float8);
+  INSERT INTO m VALUES (1, 0.1::float8 + 0.2::float8), (2, 0.3), (3, 0.4);
+
+challenges:
+  - id: conversion-rate
+    prompt: >
+      The conversion rate of `visits` as a percentage rounded to two decimals, in one
+      column. Beware: counts are integers, and integer division throws the remainder away.
+    hint: Start the arithmetic with a number that is not an integer.
+    solution: |
+      SELECT round(100.0 * count(*) FILTER (WHERE converted) / count(*), 2) AS rate FROM visits;
+
+  - id: tolerance
+    prompt: >
+      Which rows of `m` hold the value 0.3? Row 1 stores `0.1 + 0.2` as a `float8`, so
+      `v = 0.3` finds only row 2 — compare with a tolerance of `1e-9` instead, and return
+      the matching `id`s in order.
+    hint: The absolute difference, against a small number.
+    solution: |
+      SELECT id FROM m WHERE abs(v - 0.3) < 1e-9 ORDER BY id;
+
+  - id: exact-sum
+    prompt: >
+      Add 0.1 up a thousand times and get exactly the answer, in decimal arithmetic.
+      Use `generate_series` for the thousand rows, and return the single sum.
+    hint: Cast the 0.1 to the exact decimal type before summing.
+    solution: |
+      SELECT sum(0.1::numeric) AS total FROM generate_series(1, 1000);
+
+  - id: no-overflow
+    prompt: >
+      `SELECT 2147483647 + 1` fails with `integer out of range`. Return that sum
+      successfully, by making the arithmetic happen in the wider integer type.
+    hint: Cast one side to the 8-byte integer type.
+    solution: |
+      SELECT 2147483647::bigint + 1 AS fine;

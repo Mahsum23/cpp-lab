@@ -1,0 +1,41 @@
+setup: |
+  CREATE TABLE users(id int, name text, city text);
+  INSERT INTO users VALUES (1, 'ana', 'Tashkent'), (2, 'bo', NULL), (3, 'cy', 'Oslo');
+  CREATE TABLE orders(id int, user_id int);
+  INSERT INTO orders VALUES (10, 1), (11, NULL);
+  CREATE TABLE n(v int);
+  INSERT INTO n VALUES (1), (2), (NULL);
+
+challenges:
+  - id: never-ordered
+    prompt: >
+      Which users have never placed an order? Return their names. `orders.user_id` can
+      be NULL, so don't use `NOT IN`.
+    hint: Ask about the existence of rows, not about the equality of values.
+    solution: |
+      SELECT name FROM users
+      WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id);
+
+  - id: counting-nulls
+    prompt: >
+      From `n`, return in one row: how many rows there are, how many of them have a
+      non-NULL `v`, and the average of `v`.
+    hint: One form of `count` counts rows, the other counts values.
+    solution: |
+      SELECT count(*), count(v), avg(v) FROM n;
+
+  - id: is-distinct
+    prompt: >
+      Return every row of `n` whose `v` is not 1 — **including** the row where `v` is
+      NULL. `v <> 1` drops it.
+    hint: There is a comparison operator that treats unknowns as comparable.
+    solution: |
+      SELECT * FROM n WHERE v IS DISTINCT FROM 1;
+
+  - id: fallback
+    prompt: >
+      Return each user's name and city, showing `'unknown'` where the city is NULL.
+      Order by `id`.
+    hint: One function returns its first non-NULL argument.
+    solution: |
+      SELECT name, coalesce(city, 'unknown') AS city FROM users ORDER BY id;

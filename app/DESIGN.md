@@ -681,6 +681,40 @@ the week and keeps its old id because earned badges are stored under it. The men
 examiner are told track, topic and day, and only the next few days rather than every day
 to the end of a path that grows on request.
 
+## 8.9 Write the query (2026-10-01)
+
+Reorder cards (§8.7) train the order of lines, not the ability to produce them, and for SQL
+the thing worth drilling is the syntax. So the deck has a sixth card kind, `write`: the tables,
+the result you are aiming at, and an editor.
+
+- **Judged by running it.** The answer is executed in PGlite — the real PostgreSQL compiled to
+  WebAssembly, about 5 MB over the wire — and its rows are compared with the reference
+  solution's (`writecheck.ts`). Column names are ignored, row order only when the reference sorts
+  at the top level, and numbers compare by value (`120.00` = `120`, but `0.30000000000000004` is
+  not `0.3`). Nothing is compared as text, so every correct spelling passes, and no model or
+  network is involved.
+- **The target is computed, not authored.** The card file holds `setup` and `solution`; the
+  deck runs the solution to draw the target and reads the tables' columns and rows from the
+  engine, so what is on screen can never disagree with the reference.
+- **The engine cannot be interrupted.** PGlite has no timer to deliver a cancel, so
+  `statement_timeout` does nothing and an unterminated `WITH RECURSIVE` never returns. It runs in
+  a worker (`sqlrun.worker.ts`) and a query unfinished after 6 s gets the worker terminated and
+  replaced; the learner is told it ran too long. Starting is bounded too (90 s), the engine is
+  released when the deck is left, and a card that cannot be set up is put aside, never graded.
+- **A clean database per run.** Each run rolls back, resets settings, drops every schema, pins
+  the time zone to UTC and rebuilds the card's tables, so a `COMMIT`, a stray schema or an
+  aborted transaction cannot reach the next card.
+- **Caching.** The engine's files are kept out of the install-time precache (it stays at ~480 KiB)
+  and cached on first use, so a phone that never reaches a write card never pays for it, and
+  one that has works with no network.
+- **Grading.** The first run counts: a wrong answer, an error, a hint or "show answer" is a
+  miss, a clean first run is a pass, and fixing it afterwards is free.
+
+Verified in three places: `test-write.mjs` (comparison rules; every shipped card against the
+engine; isolation between runs; the engine's answers against a real PostgreSQL 16's),
+`tools/check-write-cards.py` (every solution on a real server) and Chromium (a wrong answer,
+a syntax error, a runaway query, a different correct spelling, offline).
+
 ## 9. Offline & local storage
 
 - **Content cache:** Cache API / IndexedDB — loaded weeks fully offline.
