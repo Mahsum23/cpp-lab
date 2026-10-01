@@ -526,3 +526,15 @@ the ready week and offers to load it.
 Not done: the checker flags week 1's SQL lessons as not runnable top to bottom, because
 several blocks re-create the same table, so a reader's numbers drift from the printed ones.
 Week 1 also still has no drills.
+
+**Streak said 1 the day after a finished day (2026-10-01).** He finished a day yesterday
+and another today, and the celebration said "1 day streak". The streak was a stored
+counter, and on sync the device that had been active most recently won it outright. If a
+device finished a day before it had pulled the other's progress (pull still in flight or
+failed, or a tab left open since before), it computed 1 from its own stale counter, and
+the merge then kept that 1 permanently, even though both finished days were sitting in
+the merged record. Now the streak is replayed from the days' `completedAt` dates
+(`deriveStreak`), the same way XP has always been derived. That happens on merge, on
+finishing a day and on load, so a counter the old code broke heals on the next launch.
+Reproduced in `test-streak.mjs` before fixing, and checked in a browser: a broken
+"1" becomes 2 on reload, and finishing a day on a stale device celebrates a 2-day streak.

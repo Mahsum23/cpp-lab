@@ -1,4 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb';
+import { deriveStreak } from './streak';
 import {
   defaultProgress,
   emptySecrets,
@@ -201,5 +202,8 @@ function migrate(p: Progress): Progress {
     }
     merged.days[id] = day;
   }
+  // A counter left wrong by the old merge (see deriveStreak) is rebuilt from the days on
+  // the next launch, so nobody has to finish another day to get their streak back.
+  merged.streak = deriveStreak(Object.values(merged.days), merged.streak);
   return merged;
 }

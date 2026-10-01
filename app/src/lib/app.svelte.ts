@@ -24,7 +24,7 @@ import * as cloud from './cloud';
 import { gradeOf, listModels, normalizeKey, PROVIDERS, type ModelChoice } from './mentor';
 import { mergeProgress } from './merge';
 import { fetchCurriculum, fetchWeek, SchemaTooNewError } from './content';
-import { completeDay as advanceStreak, displayedStreak, atRisk } from './streak';
+import { deriveStreak, displayedStreak, atRisk } from './streak';
 import { evaluate as evaluateBadges } from './badges';
 import { deriveXp, XP_CLEAN_SWEEP, XP_SESSION } from './xp';
 import { localDateOf, today } from './date';
@@ -530,8 +530,12 @@ class AppStore {
     // disagree if there's only a ledger.
     this.progress.xp = deriveXp(Object.values($state.snapshot(this.progress).days));
 
-    const outcome = advanceStreak($state.snapshot(this.progress.streak), today());
-    this.progress.streak = outcome.streak;
+    // Replayed from the days, the same as the merge does, so a counter this device got
+    // wrong before it pulled can't be carried forward into today.
+    this.progress.streak = deriveStreak(
+      Object.values($state.snapshot(this.progress).days),
+      $state.snapshot(this.progress.streak),
+    );
 
     const earned = evaluateBadges({
       progress: $state.snapshot(this.progress),

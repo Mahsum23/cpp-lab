@@ -1,5 +1,5 @@
 import type { StreakState } from './types';
-import { daysBetween } from './date';
+import { daysBetween, localDateOf } from './date';
 
 export const MAX_FREEZES = 2;
 const FREEZE_EVERY = 7;
@@ -82,4 +82,32 @@ export function displayedStreak(s: StreakState, date: string): number {
 /** True when today would break the run unless a session gets done. */
 export function atRisk(s: StreakState, date: string): boolean {
   return s.count > 0 && s.lastActiveDate !== null && daysBetween(s.lastActiveDate, date) === 1;
+}
+
+const NO_STREAK: StreakState = { count: 0, longest: 0, lastActiveDate: null, freezes: 0, freezesEarnedAt: 0 };
+
+/**
+ * The streak, rebuilt from the finished days themselves.
+ *
+ * The stored counter can't be merged across devices: it is a running total, and a device
+ * that finished a day before pulling the other's record computes its total from a stale
+ * one. Choosing "the most recently active device" then keeps that wrong total for good —
+ * a day finished on the phone yesterday and one on the laptop today came out as a streak
+ * of 1. The days, though, merge exactly (each keeps its earliest completedAt), so the
+ * streak is replayed from them through the same rules as above, freezes and all. Like
+ * XP, it is derived from the ledger rather than incremented beside it, so the two can
+ * never disagree.
+ *
+ * `prev` only contributes `longest`, a high-water mark: a run counted before the ledger
+ * could lose a date (a day finished twice keeps its earlier date) should not shrink.
+ */
+export function deriveStreak(
+  days: Iterable<{ completedAt: string | null }>,
+  prev: StreakState = NO_STREAK,
+): StreakState {
+  const dates = new Set<string>();
+  for (const d of days) if (d.completedAt) dates.add(localDateOf(d.completedAt));
+  let s = NO_STREAK;
+  for (const date of [...dates].sort()) s = completeDay(s, date).streak;
+  return { ...s, longest: Math.max(s.longest, prev.longest) };
 }

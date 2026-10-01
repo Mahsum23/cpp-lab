@@ -501,10 +501,14 @@ session done on the phone that morning. Specifics worth knowing:
 
 - **XP is derived from the day records, not merged.** An accumulator can't merge:
   summing double-counts a shared session, maxing loses one. The days are the ledger.
-- **The streak is chosen, not merged** — it's history neither record stores. The
-  device that acted most recently wins the count, so a phone left in a drawer on a
-  12-day streak can't resurrect it a week after it broke. `longest` takes the max,
-  because that's what a high-water mark means.
+- **The streak is derived from the day records too, not chosen.** It used to be: the
+  device that acted most recently won the count. That broke the ordinary case — a day
+  finished on the phone yesterday, then one on the laptop today *before* the laptop had
+  pulled — because the laptop computed 1 from its own stale counter, and "most recent
+  wins" kept the 1 for good. Each day's `completedAt` merges exactly (earliest wins), so
+  `deriveStreak` replays the streak rules over those dates instead, freezes included. A
+  phone in a drawer still can't resurrect a broken run: the gap is in the dates, whoever
+  holds them. `longest` takes the max, because that's what a high-water mark means.
 - **Settings and `loadedWeeks` stay local.** Syncing theme would flip the laptop when
   someone switches the phone to dark at night; syncing `loadedWeeks` would convince a fresh
   install it already holds content it hasn't downloaded.
