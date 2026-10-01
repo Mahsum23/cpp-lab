@@ -1,19 +1,17 @@
-# Week manifest for the Go track. Same shape as the other weeks; `track` is what puts it
-# on its own side of the switcher.
+# A topic: one run of consecutive days inside a track. The app shows a track as a single
+# path of days; topics are only the quiet dividers on it, never a unit you finish or load.
 #
-# Day ids are prefixed because they must be unique across *every* week in the repo, not
-# just within one: progress, review cards and mentor chat threads are all flat maps keyed
-# by day id. build-content.mjs fails the build if two weeks ever collide.
+# Day ids must be unique across the whole repo (progress, review cards and chat threads
+# are flat maps keyed by them), and day numbers keep counting up through a track: the
+# next topic in a track starts where the last one stopped. build-content.mjs fails on
+# either mistake.
 #
-# Teasers are hooks, not tables of contents. "slices, len, cap, append" says nothing the
-# title doesn't; "the append that silently rewrites a slice you never passed in" does.
-id: week-go-01
+# Teasers are hooks, not tables of contents.
 title: Go, From Zero
-milestone: go-01-from-zero
 track: go
 intro: >
   Go is a small language built almost entirely out of arguments about what to leave out.
-  This week goes from an empty file to goroutines, stopping at the three or four places
+  These days go from an empty file to goroutines, stopping at the three or four places
   where Go behaves differently from what your instincts predict — and explaining why it
   was designed that way, because the reason is usually the part worth remembering.
   Everything here runs with nothing but the Go toolchain installed.

@@ -1,0 +1,33 @@
+# The tracks, in the order the app offers them. Each one is a single path of days built
+# from every topic (milestones/*/lessons/topic.yaml) that names it, in directory order.
+#
+# There is no fixed length and no "end of week". New days are written when the path
+# runs short, and the plan for what comes next lives in each track's `next:` list —
+# written down so the next session of planning starts from it rather than from memory.
+cpp:
+  title: C++ systems
+  intro: >
+    The layer underneath the libraries: sockets by hand first, then the async models
+    built on top of them, then the tooling that makes a C++ codebase survivable.
+  next:
+    - Asio and C++20 coroutines — the echo server again, without the blocking
+    - Many clients at once, and where the real design problems live
+sql:
+  title: PostgreSQL
+  intro: >
+    What the database does with the SQL you write, and the exact places a plausible
+    query returns a wrong answer without an error. Everything is run against
+    PostgreSQL 16 in a container.
+  next:
+    - Transactions and isolation — what two sessions see of each other, and the
+      anomalies each level allows
+    - Constraints as the database's own tests — CHECK, UNIQUE, foreign keys, exclusion
+    - Reading EXPLAIN ANALYZE properly — estimates against actuals, and when they lie
+go:
+  title: Go
+  intro: >
+    A small language built out of arguments about what to leave out, learned from zero
+    with the reason behind each refusal.
+  next:
+    - A real program — an HTTP service, with context cancellation and graceful shutdown
+    - Testing in Go — table tests, the race detector, and benchmarks that mean something

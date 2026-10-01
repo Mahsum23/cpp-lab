@@ -16,6 +16,11 @@
 
   const found = $derived(app.findDay(weekId, dayId));
   const day = $derived(found?.day ?? null);
+  // A link from before tracks names a week that no longer exists. findDay finds the day
+  // anyway; rewrite the address so every step below works with the path it lives on.
+  $effect(() => {
+    if (found && found.week.id !== weekId) router.replace(sessionPath(found.week.id, dayId, step));
+  });
   const hasQuiz = $derived(Boolean(day?.quiz?.length));
   // The teach-back is a step, not an afterthought on the task screen — but only on
   // days that actually pose a question, so a day without one still ends on the task.

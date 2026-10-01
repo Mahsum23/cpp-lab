@@ -538,3 +538,15 @@ the merged record. Now the streak is replayed from the days' `completedAt` dates
 finishing a day and on load, so a counter the old code broke heals on the next launch.
 Reproduced in `test-streak.mjs` before fixing, and checked in a browser: a broken
 "1" becomes 2 on reload, and finishing a day on a stale device celebrates a 2-day streak.
+
+**No more weeks: one track per subject, lessons on request (2026-10-01).** He asked to drop
+weeks: a track per subject, a new lesson every day, and more material when he asks for it,
+planned by me. The content folders stay (they are now **topics**, with `topic.yaml`), but
+the build joins every topic of a track into one path, so the app shows C++, PostgreSQL and
+Go as one continuous run of days each, with topics as dividers. Gone: "Load week", "Week
+clear", the per-week bar. New: days arrive on their own and Today says "N new days" once;
+at two written days left it warns; at zero it says "All caught up" with a one-tap copy of a
+request for more lessons; the end of the map shows what is planned next, from the new
+`milestones/tracks.yaml`. Existing installs migrate on launch (old week bundles deleted,
+track paths fetched, progress untouched, old session links redirected), checked in Chromium
+against a seeded install that held the old weeks.

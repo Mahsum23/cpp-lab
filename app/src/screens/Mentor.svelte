@@ -69,7 +69,7 @@
           { label: "I'm stuck on the task. Here's what I tried:", send: false },
         ]
       : [
-          { label: 'What should I understand before starting week one?', send: true },
+          { label: 'What should I understand before I start?', send: true },
           { label: 'How is this curriculum structured?', send: true },
         ],
   );

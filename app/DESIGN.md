@@ -194,6 +194,9 @@ back to Today.
 
 ### 3.3 Week map (the path)
 
+> Superseded by §8.8: the map is now one path per track with topic dividers, and nothing
+> is loaded by hand.
+
 The whole week as a vertical path — done / current / locked. Lets you jump back to a
 finished day to re-read or re-drill its quiz (spaced repetition). Days ahead are
 locked to preserve the one-a-day rhythm (unlockable via a small "peek ahead" if you
@@ -314,6 +317,9 @@ The index the app checks for what weeks exist.
 
 ### 6.2 Week — `content/weeks/week-01.json`
 
+> Superseded by §8.8: one of these per track (`track-sql.json`), same shape plus `topics`
+> and `next`.
+
 ```json
 {
   "id": "week-01",
@@ -378,6 +384,9 @@ to review in git. **Open for your call (§11).**
 ---
 
 ## 7. Update mechanism
+
+> Superseded by §8.8: new and changed paths are fetched without asking; there is no
+> "Week N available" step.
 
 1. Content JSON is hosted at a stable URL — the same host as the PWA (GitHub Pages /
    Vercel / Netlify), so no CORS or extra infra.
@@ -636,6 +645,34 @@ attempting a problem *before* being taught the method. The app currently forbids
 exactly that: tomorrow's task is locked behind tomorrow's theory. Letting someone
 attempt the *task* of a locked day without unlocking its *theory* is both what the
 evidence supports and what was actually asked for — the struggle without the spoiler.
+
+## 8.8 Tracks, not weeks (2026-10-01)
+
+Asked for directly: no weeks, a track per subject, a new lesson every day, and more
+material written whenever it runs short. The week had been doing three jobs, and each
+went somewhere better:
+
+- **A unit of content.** The build now joins every topic of a track, in directory order,
+  into one path (`content/weeks/track-<t>.json`, keeping the `Week` shape so an install
+  that hasn't updated can still read it). Topics (`milestones/<m>/lessons/topic.yaml`)
+  are only how the source is organised; on the path they are quiet dividers. Day numbers
+  keep counting up through a track, and the build fails if a topic restarts them.
+- **A unit of download.** Gone. Any path that is new or whose hash changed is fetched on
+  launch, and bundles the manifest no longer lists — the old per-week ones — are deleted,
+  so a day can never show up twice. Today says "N new days" once, after they arrive.
+- **A finish line.** "Week clear" read as *you're done* when it meant *nothing more is
+  written yet*. Now running out is a normal, visible state: at two written days left Today
+  says so, and at zero it says "All caught up" with a button that copies a ready-made
+  request for more (track, last day finished, what is planned next). The plan itself is
+  `milestones/tracks.yaml` → `next:`, shown at the end of the map as "After that".
+
+Nothing keyed by week moved, because almost nothing was: progress, review cards, chat
+threads, XP and the streak are all keyed by day id. The exceptions were the session URL
+(an old `/session/week-sql-01/...` link still opens the day, and the address is rewritten
+to its track) and one badge, "Raw Sockets, Done", which now checks the topic rather than
+the week and keeps its old id because earned badges are stored under it. The mentor and
+examiner are told track, topic and day, and only the next few days rather than every day
+to the end of a path that grows on request.
 
 ## 9. Offline & local storage
 

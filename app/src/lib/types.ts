@@ -57,6 +57,15 @@ export interface Day {
    */
   drill: DrillStep[] | null;
   task: DayTask | null;
+  /** The topic this day belongs to (its source directory), shown as a divider on the path. */
+  topic?: string;
+}
+
+/** A run of consecutive days inside a track. Only ever a divider, never a unit to finish. */
+export interface Topic {
+  id: string;
+  title: string;
+  intro: string;
 }
 
 /**
@@ -99,6 +108,13 @@ export const TRACKS: Record<Track, { label: string; lang: string; blurb: string 
 
 export const isTrack = (v: unknown): v is Track => v === 'cpp' || v === 'sql' || v === 'go';
 
+/**
+ * A track's path of days. Still called Week because that is what the content and the
+ * stored records have always called it: content used to arrive one week at a time, and
+ * now arrives as exactly one of these per track (`track-sql`), holding every topic in
+ * order. Keeping the shape is what lets an installed copy that has not updated yet go on
+ * reading the new content.
+ */
 export interface Week {
   schemaVersion: number;
   id: string;
@@ -107,6 +123,10 @@ export interface Week {
   track: Track;
   intro: string;
   days: Day[];
+  /** The topics on this path, in order. Absent on content built before tracks. */
+  topics?: Topic[];
+  /** What is planned after the last written day, in plain words. */
+  next?: string[];
 }
 
 export interface WeekRef {

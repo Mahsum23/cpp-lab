@@ -1,17 +1,14 @@
-# Week manifest for milestone 01. The build script (app/scripts/build-content.mjs)
-# reads this plus each day-NN-*.md (+ .quiz.yaml) and emits the app's week JSON.
+# A topic: one run of consecutive days inside a track. The app shows a track as a single
+# path of days; topics are only the quiet dividers on it, never a unit you finish or load.
 #
-# A day with a matching day-NN-*.md is "available". A day listed here without one is
-# "upcoming": the app shows the title and teaser, locked, so the map reads as a real
-# path instead of a cliff. Every day of a milestone is written up front, so moving on
-# never waits on asking for the next lesson; the app paces them one a day.
+# Day ids must be unique across the whole repo (progress, review cards and chat threads
+# are flat maps keyed by them), and day numbers keep counting up through a track: the
+# next topic in a track starts where the last one stopped. build-content.mjs fails on
+# either mistake.
 #
-# Teasers are hooks, not tables of contents. "struct sockaddr_in, htons, INADDR_ANY"
-# says nothing the day title doesn't; "why this struct carries eight bytes of
-# deliberate padding" makes him want to open it.
-id: week-01
+# Teasers are hooks, not tables of contents.
 title: Raw Sockets
-milestone: 01-raw-sockets
+track: cpp
 intro: >
   If you write C++ but have never opened a socket by hand, this is the layer underneath
   the libraries you already use. Eight sessions, and by the last one you're assembling

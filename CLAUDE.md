@@ -223,9 +223,9 @@ because it shows the field as something still being argued rather than a list to
 Verify each such claim by search before it ships; attribute a *position* rather than a
 quotation unless the quotation itself is confirmed. Never invent a company anecdote.
 
-**Day ids must be unique across every week in the repo, not just within one.** Progress,
+**Day ids must be unique across the whole repo, not just within a track.** Progress,
 review cards and the mentor's chat threads are all flat maps keyed by day id, so two
-weeks both calling a day `day-01` merges them into a single record — finishing one
+topics both calling a day `day-01` merges them into a single record — finishing one
 finishes the other. Prefix a new track's ids (`sql-day-01`). `build-content.mjs` fails
 the build if it ever happens again.
 
@@ -258,7 +258,7 @@ theory on screen. A question that only makes sense immediately after reading the
 it is asked. Write each one so it stands alone with the day's title as its only context.
 The same goes for `teachBack`: it gets asked again months later, cold.
 
-**Teasers in `week.yaml` are hooks, not tables of contents.** "struct sockaddr_in,
+**Teasers in `topic.yaml` are hooks, not tables of contents.** "struct sockaddr_in,
 htons, INADDR_ANY" repeats the title back at him. "Why this struct carries eight bytes
 of deliberate padding" makes him open it.
 
@@ -272,14 +272,10 @@ option's position yourself, question by question.
 
 The phone app (`app/`, see `app/DESIGN.md`) is built from these files, so:
 
-- Keep `milestones/<m>/lessons/week.yaml` current — it's the week roster (day ids,
+- Keep `milestones/<m>/lessons/topic.yaml` current — it's the topic's roster (day ids,
   titles, `estMinutes`, one-line `teaser`, optional `teachBack`). Days listed there
-  without a `.md` yet render as locked, titled steps on the app's map, which is how
-  the path looks whole. Write every day of the *current* milestone up front, so he can
-  keep moving without having to ask for the next one — being blocked on a prompt to me
-  is friction the app exists to remove. Milestone *specs* are still written one at a
-  time (see README.md): the calibration that matters is between milestones, not
-  between days of a milestone whose shape is already decided.
+  without a `.md` yet render as locked, titled steps on the app's map. See **There are
+  no weeks** below for how topics become a track's path and when new days get written.
 - In `## Task`, use the parsed conventions so the app can build real UI from them:
   `- File: \`path\``, `- Compile: \`command\``, and a `### Checklist` of `- [ ]`
   items. Everything else in the section stays free prose.
@@ -336,7 +332,7 @@ explaining something yourself produces measurably better retention than being to
 correctly. Don't skip this step because it feels redundant.
 
 **Every day carries a teach-back question, and it is graded, not self-certified.** In
-`week.yaml` each day gets a `teachBack:` prompt — a specific "explain this mechanism"
+`topic.yaml` each day gets a `teachBack:` prompt — a specific "explain this mechanism"
 question, never "summarise the day". In the app it's the fourth step of the session: a
 real conversation with the model under an examiner prompt, which probes the weakest part
 of his answer and then rules `solid` or `gaps`. That ruling is what closes the fourth arc
@@ -420,6 +416,34 @@ Explain steps (the mentor there would be the answer key, or would hand over what
 is measuring) and an unanswered review card. Elsewhere it opens the Mentor tab. So a new place
 that hides the mentor must not register `mentorKey`, and must not be reachable by `M`.
 
+## There are no weeks: each subject is one track, and lessons come on request
+
+He asked for this directly: no weeks, just a track per subject and a new lesson every
+day. So the app shows each subject (C++, PostgreSQL, Go) as one continuous path of days,
+with no week to clear, nothing to load and no "end". The source is still organised into
+**topics** — `milestones/<m>/lessons/topic.yaml`, a run of consecutive days — but a topic
+is only a quiet divider on the path. `build-content.mjs` joins every topic of a track, in
+directory order, into one path (`track-sql`); day numbers keep counting up through the
+whole track, and the build fails if a topic restarts them.
+
+**Planning his learning is my job, and he trusts it.** He said so: when he needs more
+material he asks, and I investigate and plan as I see best. So when he asks for more, I
+don't hand him a menu. I decide what comes next, research it, and write it, the same way I
+decide the day's slice. The plan lives in `milestones/tracks.yaml` (each track's `next:`
+list), where the app shows it under "After that" and where the next planning session
+starts from. Update it every time days are written: drop what got written, add what the
+material taught me should come next.
+
+When asked for more, write a whole topic of **five to eight days** at once, each verified
+like any other lesson, so he has a run of days without waiting. Write the spec
+(`milestones/<m>/README.md`, with its **Worth knowing:** hooks) before the days. The app
+warns him at two written days left, and shows a one-tap "copy a request for new lessons"
+when he runs out, so a request may arrive as that pasted text.
+
+Improvements are welcome without asking first. He said he trusts my judgement on the app
+and the curriculum, so a change that clearly serves the daily habit can just be made and
+explained, rather than proposed and waited on.
+
 ## Every day has two halves, and the phone half is not optional
 
 A task needs a machine, and not having one is the most common reason a day stalls
@@ -445,7 +469,7 @@ exists to collapse it: it scaffolds the day's file at the path the lesson names,
 checklist as a comment header, and prints the run command. This has a consequence for
 authoring. A task's `- File:` and `- Run:` lines are not decoration; they are what the
 launcher builds from, so every task needs them and they must be exactly right. A day that
-genuinely has no single file (the sockets week's server-and-client days) is fine — the
+genuinely has no single file (the sockets topic's server-and-client days) is fine — the
 launcher says so and still offers the run command — but that should be the exception.
 
 ## The practice task is checked, not self-certified
@@ -489,13 +513,13 @@ one-liner a stranger can run (`docker run --rm -e POSTGRES_PASSWORD=x -p 5432:54
 postgres:16`), and lean on the things Postgres will show you that others won't: `ctid`,
 `xmin`/`xmax`, `EXPLAIN (ANALYZE, BUFFERS)`, `pageinspect`, `pg_stat_*`.
 
-**SQL weeks lean on fundamentals, taught through the errors people actually make.** He said
-he can still make mistakes in the basics, so the second week (`sql-02-queries-that-look-right`)
+**SQL lessons lean on fundamentals, taught through the errors people actually make.** He said
+he can still make mistakes in the basics, so the second topic (`sql-02-queries-that-look-right`)
 takes things everyone believes they know — clause order, LEFT JOIN, fan-out, ORDER BY,
 window frames, numeric types, time — and finds the exact place the belief and the engine
 part company, ending each day in a short **Carry this** list of habits. Keep that shape:
 every day shows the plausible wrong query running *without an error*, then the fix, then
-the fix people reach for that is also wrong. Every SQL day from this week on:
+the fix people reach for that is also wrong. Every SQL day from that topic on:
 
 - starts in its own schema (`DROP SCHEMA IF EXISTS dayNN CASCADE; CREATE SCHEMA dayNN;
   SET search_path = dayNN;`), so the days never collide and a lesson can be rerun;
