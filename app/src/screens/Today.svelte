@@ -11,8 +11,8 @@
   const current = $derived(app.current);
   // One path per track. Track-scoped, so a subject that hasn't loaded yet never shows
   // the other subject's path in its header.
-  const week = $derived(current?.week ?? app.path);
-  const topic = $derived(current ? app.topicTitle(current.week, current.day) : null);
+  const week = $derived(app.path);
+  const topic = $derived(current ? app.topicTitle(current.day) : null);
   /** Days written so far on this track, and how many are finished. */
   const written = $derived(app.availableDays.length);
   const finished = $derived(written - app.runway);

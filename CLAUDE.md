@@ -430,8 +430,10 @@ whole track, and the build fails if a topic restarts them.
 material he asks, and I investigate and plan as I see best. So when he asks for more, I
 don't hand him a menu. I decide what comes next, research it, and write it, the same way I
 decide the day's slice. The plan lives in `milestones/tracks.yaml` (each track's `next:`
-list), where the app shows it under "After that" and where the next planning session
-starts from. Update it every time days are written: drop what got written, add what the
+list), where the app shows it at the end of the map under "Coming up" and where the next
+planning session starts from. The map just lists the plan: he asked for the "written on
+request" line and its copy button to go from there, so asking for more lives only on
+Today, where running out actually happens. Update it every time days are written: drop what got written, add what the
 material taught me should come next.
 
 When asked for more, write a whole topic of **five to eight days** at once, each verified

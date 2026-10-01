@@ -1,7 +1,6 @@
 <script lang="ts">
   import { app } from '../lib/app.svelte';
   import { router, sessionPath } from '../lib/router.svelte';
-  import MoreLessons from '../components/MoreLessons.svelte';
   import type { Day } from '../lib/types';
 
   /**
@@ -80,18 +79,15 @@
       <p class="pending">The locked ones are planned but not written yet.</p>
     {/if}
 
-    <!-- The end of the path is not an end. What comes next is planned in plain words, and
-         asking for it is one tap. -->
-    <section class="ahead">
-      <h2>After that</h2>
-      {#if path.next?.length}
+    <!-- What comes next on this track, in plain words, when a plan exists. -->
+    {#if path.next?.length}
+      <section class="ahead">
+        <h2>Coming up</h2>
         <ul>
           {#each path.next as item}<li>{item}</li>{/each}
         </ul>
-      {/if}
-      <p class="how">New days are written on request and appear here on their own.</p>
-      <MoreLessons showNext={false} />
-    </section>
+      </section>
+    {/if}
   {/if}
 
   {#if !app.trackWeeks.length && app.ready}
@@ -284,18 +280,13 @@
   }
 
   .ahead ul {
-    margin: 0 0 10px;
+    margin: 0;
     padding-left: 18px;
     font-size: 14px;
     line-height: 1.55;
     color: var(--text-dim);
   }
 
-  .ahead .how {
-    font-size: 13px;
-    color: var(--text-faint);
-    margin: 0 0 12px;
-  }
 
   .pending {
     font-size: 12.5px;
