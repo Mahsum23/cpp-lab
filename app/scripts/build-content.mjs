@@ -35,6 +35,11 @@ const outDir = join(appDir, 'public', 'content');
 
 const warnings = [];
 const warn = (msg) => warnings.push(msg);
+/** A mistake that would corrupt progress or cards: stop the build. */
+const fail = (msg) => {
+  console.error(`\n  ✗ ${msg}\n`);
+  process.exit(1);
+};
 
 /** Split a markdown doc into its top-level `## ` sections, keyed by lowercased title. */
 function splitSections(md) {
@@ -279,12 +284,15 @@ const DRILL_KINDS = new Set(['predict', 'find', 'choose']);
 function loadDrill(path, dayId) {
   if (!existsSync(path)) return null;
   const doc = parseYaml(readFileSync(path, 'utf8'));
-  const steps = doc?.steps ?? [];
+  return parseDrill(doc?.steps ?? [], path, dayId, { max: 4, salt: 'drill' });
+}
+
+function parseDrill(steps, path, dayId, { max, salt }) {
   if (!Array.isArray(steps) || steps.length === 0) {
     warn(`${dayId}: ${path} has no steps`);
     return null;
   }
-  if (steps.length > 4) {
+  if (steps.length > max) {
     warn(`${dayId}: ${steps.length} drill steps — this is the short half of the day, keep it to 2–4`);
   }
   const parsed = steps.map((q, qi) => {
@@ -317,7 +325,7 @@ function loadDrill(path, dayId) {
 
   // Shuffled by the same deterministic placement the quiz uses, so the correct answer
   // does not sit in the same slot every day and teach position instead of content.
-  return placeOptions(parsed, `${dayId}-drill`);
+  return placeOptions(parsed, `${dayId}-${salt}`);
 }
 
 /**
@@ -337,7 +345,10 @@ const AUTHORING_ONLY = ['harness', 'expect', 'good', 'bad'];
 
 function loadWrite(path, dayId) {
   if (!existsSync(path)) return null;
-  const doc = parseYaml(readFileSync(path, 'utf8'));
+  return parseWrite(parseYaml(readFileSync(path, 'utf8')), path, dayId);
+}
+
+function parseWrite(doc, path, dayId) {
   const lang = String(doc?.lang ?? 'sql');
   if (!['sql', 'go', 'cpp'].includes(lang)) warn(`${dayId}: ${path} has lang "${lang}" — expected sql, go or cpp`);
   const shape = lang !== 'sql';
@@ -375,7 +386,15 @@ function loadWrite(path, dayId) {
         warn(`${dayId} write ${id}: needs at least one "bad" example the pattern must reject`);
       }
     }
-    for (const key of AUTHORING_ONLY) if (!shape && c[key] !== undefined) warn(`${dayId} write ${id}: "${key}" is for Go/C++ cards`);
+    // SQL cards may carry `bad` (classic wrong answers check-write-cards.py proves wrong);
+    // the harness keys only mean something for a compiled language.
+    for (const key of AUTHORING_ONLY) if (!shape && key !== 'bad' && c[key] !== undefined) warn(`${dayId} write ${id}: "${key}" is for Go/C++ cards`);
+    if (!shape) {
+      // A SQL forbid is a regular expression over the query, matched case-insensitively.
+      for (const f of forbids) {
+        try { new RegExp(f.match, 'i'); } catch { warn(`${dayId} write ${id}: forbid "${f.say}" is not a valid regular expression`); }
+      }
+    }
     return {
       id,
       prompt: String(c.prompt ?? '').trim(),
@@ -391,6 +410,40 @@ function loadWrite(path, dayId) {
     };
   });
   return { lang, setup, defs, challenges };
+}
+
+/**
+ * `day-NN-<slug>.practice.yaml`: the day's practice bank — fresh questions on the same
+ * concept, dealt in rounds on the days after the lesson until it has landed (practice.ts).
+ *
+ *   write:   challenges, the same shape as a .write.yaml (its own setup/lang/defs, or the
+ *            day's write file's when left out)
+ *   drill:   steps, the same shape as a .drill.yaml (any number)
+ *
+ * Ids must not repeat the day's own write or drill ids: they share a card namespace.
+ */
+function loadPractice(path, dayId, write, drill) {
+  if (!existsSync(path)) return null;
+  const doc = parseYaml(readFileSync(path, 'utf8')) ?? {};
+  let w = null;
+  if (doc.write?.length) {
+    w = parseWrite({
+      lang: doc.lang ?? write?.lang ?? 'sql',
+      setup: doc.setup ?? write?.setup ?? '',
+      defs: { ...(write?.defs ?? {}), ...(doc.defs ?? {}) },
+      challenges: doc.write,
+    }, path, dayId);
+  }
+  const d = doc.drill?.length ? parseDrill(doc.drill, path, dayId, { max: 999, salt: 'practice' }) : null;
+  const clash = (mine, theirs, what) => {
+    const ids = new Set((theirs ?? []).map((x) => x.id));
+    for (const x of mine ?? []) if (ids.has(x.id)) fail(`${dayId}: practice ${what} id "${x.id}" is also in the day's own ${what} file — they share card ids`);
+  };
+  clash(w?.challenges, write?.challenges, 'write');
+  clash(d, drill, 'drill');
+  const total = (w?.challenges.length ?? 0) + (d?.length ?? 0);
+  if (total && total < 20) warn(`${dayId}: practice bank has ${total} items — aim for 25–40 so rounds don't repeat`);
+  return total ? { write: w, drill: d ?? [] } : null;
 }
 
 function buildTopic(milestone) {
@@ -425,6 +478,7 @@ function buildTopic(milestone) {
     const quiz = loadQuiz(join(lessonsDir, mdName.replace(/\.md$/, '.quiz.yaml')), d.id);
     const drill = loadDrill(join(lessonsDir, mdName.replace(/\.md$/, '.drill.yaml')), d.id);
     const write = loadWrite(join(lessonsDir, mdName.replace(/\.md$/, '.write.yaml')), d.id);
+    const practice = loadPractice(join(lessonsDir, mdName.replace(/\.md$/, '.practice.yaml')), d.id, write, drill);
     if (!write) {
       warn(`${d.id}: no .write.yaml — this day has nothing to type from memory in the review deck`);
     }
@@ -446,6 +500,7 @@ function buildTopic(milestone) {
       theoryMarkdown: sections.theory ?? null,
       drill,
       write,
+      practice,
       quiz,
       task: parseTask(sections.task),
     };

@@ -126,7 +126,7 @@ export function clearedOn(state: ReviewState, on: string): number {
 
 // --- what cards exist -----------------------------------------------------
 
-export type CardKind = 'quiz' | 'explain' | 'forge' | 'parsons' | 'write';
+export type CardKind = 'quiz' | 'explain' | 'forge' | 'parsons' | 'write' | 'drill';
 
 export interface CardRef {
   id: string;
@@ -136,7 +136,7 @@ export interface CardRef {
   questionId?: string;
 }
 
-const KINDS = new Set<string>(['quiz', 'explain', 'forge', 'parsons', 'write']);
+const KINDS = new Set<string>(['quiz', 'explain', 'forge', 'parsons', 'write', 'drill']);
 
 export const cardId = (kind: CardKind, dayId: string, questionId?: string) =>
   questionId ? `${kind}:${dayId}:${questionId}` : `${kind}:${dayId}`;
@@ -170,6 +170,21 @@ export function cardsFor(day: Day, progress: DayProgress | undefined, lang = 'cp
     for (const c of day.write?.challenges ?? []) {
       cards.push({ id: cardId('write', day.id, c.id), kind: 'write', dayId: day.id, questionId: c.id });
     }
+  }
+  // Drill steps, once answered — the day's own and the practice bank's.
+  for (const s of day.drill ?? []) {
+    if (s.id in (progress.drill?.correct ?? {})) {
+      cards.push({ id: cardId('drill', day.id, s.id), kind: 'drill', dayId: day.id, questionId: s.id });
+    }
+  }
+  // Practice-bank items join the deck once a round has dealt them, so the deck grows with
+  // practice instead of cycling the same dozen cards.
+  const first = progress.practice?.first ?? {};
+  for (const c of day.practice?.write?.challenges ?? []) {
+    if (`write:${c.id}` in first) cards.push({ id: cardId('write', day.id, c.id), kind: 'write', dayId: day.id, questionId: c.id });
+  }
+  for (const s of day.practice?.drill ?? []) {
+    if (`drill:${s.id}` in first) cards.push({ id: cardId('drill', day.id, s.id), kind: 'drill', dayId: day.id, questionId: s.id });
   }
   if (progress.theoryDone && day.teachBack) {
     cards.push({ id: cardId('explain', day.id), kind: 'explain', dayId: day.id });

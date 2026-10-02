@@ -28,6 +28,7 @@ import { deriveStreak, displayedStreak, atRisk } from './streak';
 import { evaluate as evaluateBadges } from './badges';
 import { deriveXp, XP_CLEAN_SWEEP, XP_SESSION } from './xp';
 import { localDateOf, today } from './date';
+import { emptyPractice, finishRound, needsPractice, recordFirst } from './practice';
 
 export type DayState = 'done' | 'current' | 'unlocked' | 'locked' | 'upcoming';
 
@@ -187,6 +188,59 @@ class AppStore {
     return this.availableDays.find(({ day }) => !this.progress.days[day.id]?.completedAt) ?? null;
   }
 
+  /**
+   * The concept being practised, if any: the most recently finished lesson on this track,
+   * when it has a practice bank that has not landed yet. While there is one, Today offers
+   * a practice round instead of the next lesson.
+   *
+   * Only the latest lesson can hold things up. A bank written later for a day finished
+   * weeks ago is offered, never imposed — it would be odd to stop someone mid-track for
+   * something they moved past long ago.
+   */
+  get practising(): { week: Week; day: Day } | null {
+    let latest: { week: Week; day: Day; at: string } | null = null;
+    for (const { week, day } of this.availableDays) {
+      const at = this.progress.days[day.id]?.completedAt;
+      if (at && (!latest || at > latest.at)) latest = { week, day, at };
+    }
+    if (!latest || !needsPractice(latest.day, this.progress.days[latest.day.id]?.practice)) return null;
+    return { week: latest.week, day: latest.day };
+  }
+
+  /** Finished a practice round on this track today. */
+  get practisedToday(): boolean {
+    const t = today();
+    return this.availableDays.some(({ day }) =>
+      (this.progress.days[day.id]?.practice?.rounds ?? []).some((r) => localDateOf(r.at) === t),
+    );
+  }
+
+  /** Record an item's first attempt in a practice round. */
+  async recordPractice(day: Day, weekId: string, card: CardRef, right: boolean) {
+    const p = this.mutable(day.id, weekId);
+    p.practice = recordFirst($state.snapshot(p.practice) ?? emptyPractice(), card, right);
+    await this.persist();
+  }
+
+  /** Close a practice round: it counts for the streak, and may land the concept. */
+  async finishPracticeRound(day: Day, weekId: string, asked: number, right: number) {
+    const p = this.mutable(day.id, weekId);
+    p.practice = finishRound($state.snapshot(p.practice) ?? emptyPractice(), asked, right);
+    this.progress.streak = deriveStreak(
+      Object.values($state.snapshot(this.progress).days),
+      $state.snapshot(this.progress.streak),
+    );
+    await this.persist();
+    return p.practice;
+  }
+
+  /** Open the next lesson without the concept having landed. The bank stays available. */
+  async moveOn(day: Day, weekId: string) {
+    const p = this.mutable(day.id, weekId);
+    p.practice = { ...($state.snapshot(p.practice) ?? emptyPractice()), movedOn: true };
+    await this.persist();
+  }
+
   get streakCount(): number {
     return displayedStreak(this.progress.streak, today());
   }
@@ -205,6 +259,7 @@ class AppStore {
    */
   get completedToday(): boolean {
     const t = today();
+    if (this.practisedToday) return true;
     return this.availableDays.some(({ day }) => {
       const at = this.progress.days[day.id]?.completedAt;
       return at && localDateOf(at) === t;
