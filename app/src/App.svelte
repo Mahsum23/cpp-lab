@@ -64,7 +64,10 @@
   {:else if route.name === 'mentor'}
     <Mentor />
   {:else if route.name === 'review'}
-    <Review practice={route.practice} />
+    <!-- Keyed: a round and the deck are different sittings, and must not share state. -->
+    {#key `${route.practice}:${route.round}`}
+      <Review practice={route.practice} round={route.round} />
+    {/key}
   {:else if route.name === 'settings'}
     <Settings />
   {:else}

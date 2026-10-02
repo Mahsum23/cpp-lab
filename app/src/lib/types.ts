@@ -58,8 +58,13 @@ export interface Day {
    * against a claim about what the code would do.
    */
   drill: DrillStep[] | null;
-  /** Queries to write from memory in the review deck. SQL days only, for now. */
+  /** Things to write from memory in the review deck. */
   write?: WriteSet | null;
+  /**
+   * The practice bank: fresh questions on this day's concept, dealt in rounds on the
+   * days after the lesson until the concept has landed (practice.ts).
+   */
+  practice?: PracticeSet | null;
   task: DayTask | null;
   /** The topic this day belongs to (its source directory), shown as a divider on the path. */
   topic?: string;
@@ -97,6 +102,30 @@ export interface WriteSet {
   /** Go/C++: named pattern fragments the challenges' patterns may use as `@name`. */
   defs: Record<string, string>;
   challenges: WriteChallenge[];
+}
+
+/** A day's practice bank. Same shapes as the day's own write and drill files. */
+export interface PracticeSet {
+  write: WriteSet | null;
+  drill: DrillStep[];
+}
+
+/** One finished practice round. */
+export interface PracticeRound {
+  at: string;
+  /** Items dealt in the round, and how many were right at the first attempt. */
+  asked: number;
+  right: number;
+}
+
+export interface PracticeState {
+  /** item id (`write:<id>` / `drill:<id>`) -> right at the first attempt ever. */
+  first: Record<string, boolean>;
+  rounds: PracticeRound[];
+  /** Set when a round clears the bar; the next lesson waits for this (or `movedOn`). */
+  landedAt: string | null;
+  /** "Move on anyway" — the next lesson opens, the bank stays available. */
+  movedOn: boolean;
 }
 
 /** A run of consecutive days inside a track. Only ever a divider, never a unit to finish. */
@@ -242,6 +271,8 @@ export interface DayProgress {
   /** Only meaningful on a day that carries a teachBack prompt. */
   teachBackDone: boolean;
   completedAt: string | null;
+  /** Absent until the first practice round; older records and devices never have it. */
+  practice?: PracticeState;
 }
 
 /**

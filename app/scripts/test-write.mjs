@@ -28,7 +28,7 @@ async function load(entry, name) {
   return import(outfile);
 }
 
-const { compareResults, isOrdered, normalize, cellText } = await load('../src/lib/writecheck.ts', 'writecheck.mjs');
+const { compareResults, isOrdered, normalize, cellText, forbiddenHit } = await load('../src/lib/writecheck.ts', 'writecheck.mjs');
 const { createCore } = await load('../src/lib/sqlcore.ts', 'sqlcore.mjs');
 const { PGlite } = await import('@electric-sql/pglite');
 
@@ -65,16 +65,27 @@ ok('a subquery\'s ORDER BY does not either', !isOrdered('SELECT * FROM (SELECT a
 ok('the words in a string are not SQL', !isOrdered("SELECT 'order by' AS x"));
 ok('but one after a window is', isOrdered('SELECT sum(a) OVER (ORDER BY b) FROM t ORDER BY 1'));
 
+console.log('\n— cards about how a query is written —');
+const noCast = [{ say: 'a cast on created_at', match: 'created_at\\s*::' }];
+ok('a forbid catches the spelling the card is about', forbiddenHit('SELECT 1 FROM t WHERE created_at::date = $1', noCast) === 'a cast on created_at');
+ok('…case-insensitively', forbiddenHit('select 1 from t where CREATED_AT :: date = 1', noCast) !== null);
+ok('…and not in a comment', forbiddenHit('SELECT 1 FROM t -- not created_at::date\nWHERE created_at >= $1', noCast) === null);
+ok('a broken pattern never fails the learner', forbiddenHit('SELECT 1', [{ say: 'x', match: '(' }]) === null);
+
 console.log('\n— the engine, against every card the app ships —');
 const weeksDir = new URL('../public/content/weeks/', import.meta.url).pathname;
 const cards = [];
 for (const f of readdirSync(weeksDir)) {
   for (const day of JSON.parse(readFileSync(join(weeksDir, f), 'utf8')).days) {
-    if ((day.write?.lang ?? 'sql') !== 'sql') continue; // Go and C++ cards are judged by shape: test-shape.mjs and check-shape-cards.mjs
-    for (const c of day.write?.challenges ?? []) cards.push({ day: day.id, setup: day.write.setup, ...c });
+    // Go and C++ cards are judged by shape: test-shape.mjs and check-shape-cards.mjs.
+    for (const set of [day.write, day.practice?.write]) {
+      if (!set || (set.lang ?? 'sql') !== 'sql') continue;
+      for (const c of set.challenges) cards.push({ day: day.id, setup: set.setup, ...c });
+    }
   }
 }
 ok(`there are write cards to test (${cards.length})`, cards.length > 0);
+for (const c of cards) if (c.forbids?.length) ok(`${c.day}/${c.id}: the reference answer passes its own forbids`, forbiddenHit(c.solution, c.forbids) === null);
 
 const db = new PGlite();
 await db.waitReady;

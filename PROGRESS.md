@@ -591,3 +591,16 @@ a statement without its `;` accepted, `anything::printf(` satisfying `printf(`, 
 that did not contain all three packages, code inside `**bold**` showing literal asterisks. Reorder
 cards now sit out about half of the deals. Not done: SQL days 1–3 and every C++ day still lack
 drills.
+
+**Pacing: a concept stays until it lands (2026-10-02).** He said it felt too fast — indexes
+one day, clause order the next — and the review deck kept repeating the same questions,
+which was tiring. He wants "a piece of information to digest and then a solid amount of
+practice". We planned it together; he chose: stay on a concept until it's landed (≈80% right
+first time on a fresh round, with "move on anyway" always available), practice mostly
+writing, SQL first. Built: practice rounds of 10 (7 written, 3 quick), fresh items first,
+first attempts recorded, landing opens the next lesson, rounds keep the streak, and practice
+mode in the deck stops instead of cycling. Banks written for **indexes** (33 items) and
+**clause order** (31 items), every write card checked on PG16 with its classic wrong answers
+proven wrong — which forced twelve data fixes. Next: banks for the other eight SQL days
+(nulls and LEFT JOIN first), then Go, then C++.
+

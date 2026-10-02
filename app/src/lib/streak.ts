@@ -102,11 +102,16 @@ const NO_STREAK: StreakState = { count: 0, longest: 0, lastActiveDate: null, fre
  * could lose a date (a day finished twice keeps its earlier date) should not shrink.
  */
 export function deriveStreak(
-  days: Iterable<{ completedAt: string | null }>,
+  days: Iterable<{ completedAt: string | null; practice?: { rounds: { at: string }[] } }>,
   prev: StreakState = NO_STREAK,
 ): StreakState {
   const dates = new Set<string>();
-  for (const d of days) if (d.completedAt) dates.add(localDateOf(d.completedAt));
+  for (const d of days) {
+    if (d.completedAt) dates.add(localDateOf(d.completedAt));
+    // A finished practice round is a day's work too: staying on a concept must not
+    // cost the streak that moving on would have kept.
+    for (const r of d.practice?.rounds ?? []) dates.add(localDateOf(r.at));
+  }
   let s = NO_STREAK;
   for (const date of [...dates].sort()) s = completeDay(s, date).streak;
   return { ...s, longest: Math.max(s.longest, prev.longest) };

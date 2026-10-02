@@ -1,0 +1,676 @@
+# Practice bank for "An index is a sorted copy": dealt in rounds after the lesson until it
+# lands (app/src/lib/practice.ts). Write cards run in the browser's PostgreSQL and are
+# checked on a real PostgreSQL 16 by tools/check-write-cards.py, which also proves every
+# `bad` example wrong. Drill outputs were run on PostgreSQL 16.13.
+setup: |
+  CREATE TABLE users (
+    id       int PRIMARY KEY,
+    email    text NOT NULL,
+    country  text NOT NULL,
+    deleted  boolean NOT NULL DEFAULT false
+  );
+  INSERT INTO users VALUES
+    (1, 'ana@mail.io', 'DE', false),
+    (2, 'bo@mail.io',  'FR', false),
+    (3, 'cy@mail.io',  'US', false),
+    (4, 'dee@mail.io', 'UZ', false),
+    (5, 'eli@mail.io', 'DE', true),
+    (6, 'fay@mail.io', 'FR', false),
+    (7, 'deena@mail.io', 'UZ', false);
+
+  CREATE TABLE orders (
+    id          int PRIMARY KEY,
+    user_id     int NOT NULL REFERENCES users,
+    status      text NOT NULL,
+    amount      numeric(10,2) NOT NULL,
+    code        text NOT NULL,
+    created_at  timestamptz NOT NULL
+  );
+  INSERT INTO orders
+  SELECT g,
+         g % 6 + 1,
+         (ARRAY['paid', 'paid', 'pending', 'cancelled', 'paid'])[g % 5 + 1],
+         (g * 37 % 200) + 0.50,
+         (ARRAY['AB', 'CBX', 'BX'])[g % 3 + 1] || lpad(g::text, 4, '0'),
+         -- two orders per timestamp: ties are what make paging and ranges honest
+         timestamptz '2026-03-01 08:00+00' + ((g + 1) / 2) * interval '14 hours'
+  FROM generate_series(1, 24) g;
+  CREATE INDEX orders_status_idx ON orders (status);
+
+write:
+  # --- building the right index -------------------------------------------------
+  - id: fk-index
+    prompt: >
+      Every page of the app loads a user's orders with `WHERE user_id = $1`, and
+      PostgreSQL does not index a foreign key for you. Create the index on `orders`
+      that serves that lookup.
+    hint: A foreign key constrains the column; it does not make it searchable.
+    solution: |
+      CREATE INDEX ON orders (user_id);
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes
+      WHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')
+      ORDER BY 1;
+    bad:
+      - CREATE INDEX ON orders (id);
+      - CREATE INDEX ON users (id);
+      - CREATE INDEX ON orders (user_id, status);
+
+  - id: unique-email
+    prompt: >
+      Two accounts must never share an email. Enforce it on `users.email` with an index.
+    hint: An index can refuse duplicates as well as find things.
+    solution: |
+      CREATE UNIQUE INDEX ON users (email);
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes WHERE tablename = 'users' AND indexname <> 'users_pkey'
+      ORDER BY 1;
+    bad:
+      - CREATE INDEX ON users (email);
+      - CREATE UNIQUE INDEX ON users (email, country);
+
+  - id: unique-any-case
+    prompt: >
+      `Ana@Mail.io` and `ana@mail.io` are the same mailbox. Make it impossible for two
+      users to have emails that differ only in letter case.
+    hint: The uniqueness has to be about a value computed from the column.
+    solution: |
+      CREATE UNIQUE INDEX ON users (lower(email));
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes WHERE tablename = 'users' AND indexname <> 'users_pkey'
+      ORDER BY 1;
+    bad:
+      - CREATE UNIQUE INDEX ON users (email);
+      - CREATE INDEX ON users (lower(email));
+
+  - id: filter-then-sort
+    prompt: >
+      The hottest query is `WHERE user_id = $1 ORDER BY created_at`. Create the one
+      two-column index that serves both the filter and the sort, so no sort step is
+      needed.
+    hint: The column you test with `=` goes first; within one user, the rows then come out sorted by the second.
+    solution: |
+      CREATE INDEX ON orders (user_id, created_at);
+    verify: |
+      SELECT string_agg(a.attname, ', ' ORDER BY k.ord) AS key_columns
+      FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+      WHERE i.indrelid = 'orders'::regclass AND c.relname NOT IN ('orders_pkey', 'orders_status_idx')
+      GROUP BY c.relname;
+    bad:
+      - CREATE INDEX ON orders (created_at, user_id);
+      - CREATE INDEX ON orders (user_id);
+
+  - id: mixed-directions
+    prompt: >
+      A report runs `ORDER BY user_id, created_at DESC`. A plain `(user_id, created_at)`
+      index can't produce that order, so Postgres sorts. Create a two-column index that
+      can produce it directly.
+    hint: Each column of an index has its own direction. Read it forwards or backwards — what order do you need?
+    solution: |
+      CREATE INDEX ON orders (user_id, created_at DESC);
+    verify: |
+      SELECT string_agg(a.attname, ', ' ORDER BY k.ord) AS key_columns,
+             (i.indoption[0] & 1) <> (i.indoption[1] & 1) AS directions_differ
+      FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+      WHERE i.indrelid = 'orders'::regclass AND c.relname NOT IN ('orders_pkey', 'orders_status_idx')
+      GROUP BY c.relname, i.indoption;
+    bad:
+      - CREATE INDEX ON orders (user_id, created_at);
+      - CREATE INDEX ON orders (user_id DESC, created_at DESC);
+      - CREATE INDEX ON orders (created_at DESC, user_id);
+
+  - id: pending-only
+    prompt: >
+      Only *pending* orders are ever looked up by `created_at`, and they are a small slice
+      of the table. Create an index on `created_at` that contains pending orders and
+      nothing else.
+    hint: An index can carry a WHERE clause of its own.
+    solution: |
+      CREATE INDEX ON orders (created_at) WHERE status = 'pending';
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes
+      WHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')
+      ORDER BY 1;
+    bad:
+      - CREATE INDEX ON orders (created_at);
+      - CREATE INDEX ON orders (status, created_at);
+      - CREATE INDEX ON orders (created_at) WHERE status <> 'pending';
+
+  - id: one-cart
+    prompt: >
+      A user may have any number of paid orders but at most **one** order with status
+      `'cart'`. Enforce that with a single index.
+    hint: Unique, but only among some of the rows.
+    solution: |
+      CREATE UNIQUE INDEX ON orders (user_id) WHERE status = 'cart';
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes
+      WHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')
+      ORDER BY 1;
+    bad:
+      - CREATE UNIQUE INDEX ON orders (user_id, status);
+      - CREATE UNIQUE INDEX ON orders (user_id);
+      - CREATE INDEX ON orders (user_id) WHERE status = 'cart';
+
+  - id: carry-amount
+    prompt: >
+      `SELECT amount FROM orders WHERE user_id = $1` should be answered from the index
+      alone, with no trip to the table. Create one index keyed on `user_id` that also
+      carries `amount` — without making `amount` part of the sort key.
+    hint: There is a clause for columns that ride along in the leaf pages.
+    solution: |
+      CREATE INDEX ON orders (user_id) INCLUDE (amount);
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes
+      WHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')
+      ORDER BY 1;
+    bad:
+      - CREATE INDEX ON orders (user_id, amount);
+      - CREATE INDEX ON orders (amount) INCLUDE (user_id);
+
+  - id: pattern-ops
+    prompt: >
+      `WHERE code LIKE 'AB%'` has to use an index whatever the database's collation is,
+      and you may not change the column's collation. Create that index on `code`.
+    hint: An index column can name an operator class that compares byte by byte.
+    solution: |
+      CREATE INDEX ON orders (code text_pattern_ops);
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes
+      WHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')
+      ORDER BY 1;
+    bad:
+      - CREATE INDEX ON orders (code);
+      - CREATE INDEX ON orders (lower(code));
+
+  - id: index-a-day
+    prompt: >
+      Reports filter with `WHERE (created_at AT TIME ZONE 'UTC')::date = $1`. Create an
+      index on exactly that expression, spelled the same way. (Try `created_at::date`
+      first if you like — and read the error.)
+    hint: An index expression must give the same answer whatever the session's time zone is.
+    solution: |
+      CREATE INDEX ON orders (((created_at AT TIME ZONE 'UTC')::date));
+    verify: |
+      SELECT regexp_replace(indexdef, 'INDEX \S+ ON ', 'INDEX ON ') AS definition
+      FROM pg_indexes
+      WHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')
+      ORDER BY 1;
+    bad:
+      - CREATE INDEX ON orders ((created_at::date));
+      - CREATE INDEX ON orders (created_at);
+
+  - id: drop-unused
+    prompt: >
+      `orders_status_idx` has never been used by a single query, and every insert still
+      pays to maintain it. Remove it.
+    hint: Indexes are dropped by name.
+    solution: |
+      DROP INDEX orders_status_idx;
+    verify: |
+      SELECT (SELECT string_agg(indexname, ', ' ORDER BY indexname) FROM pg_indexes WHERE tablename = 'orders') AS indexes,
+             (SELECT count(*) FROM information_schema.columns WHERE table_name = 'orders') AS columns;
+    bad:
+      - DROP INDEX orders_pkey;
+      - ALTER TABLE orders DROP COLUMN status;
+
+  - id: list-indexes
+    prompt: >
+      Before adding anything, look at what is already there: return the name and the
+      definition of every index on `orders`, by name.
+    hint: There is a system view that holds one row per index, with its CREATE statement.
+    solution: |
+      SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'orders' ORDER BY indexname;
+    bad:
+      - SELECT indexname FROM pg_indexes WHERE tablename = 'orders' ORDER BY indexname;
+      - SELECT indexname, indexdef FROM pg_indexes ORDER BY indexname;
+
+  # --- writing the query so the index can be used -------------------------------
+  - id: a-whole-day
+    prompt: >
+      Return `id` and `created_at` of the orders placed on 5 March 2026 (UTC), oldest
+      first (then by id). `created_at` is indexed, so leave the column bare: no function or cast
+      wrapped around it.
+    hint: A day is a half-open range — from its midnight, up to but not including the next one.
+    solution: |
+      SELECT id, created_at FROM orders
+      WHERE created_at >= '2026-03-05' AND created_at < '2026-03-06'
+      ORDER BY created_at, id;
+    forbids:
+      - say: a function or cast applied to created_at
+        match: 'created_at\s*::|(date|date_trunc|date_part|extract|to_char|cast)\s*\(|at\s+time\s+zone'
+    bad:
+      - SELECT id, created_at FROM orders WHERE created_at::date = '2026-03-05' ORDER BY created_at, id;
+      - SELECT id, created_at FROM orders WHERE created_at BETWEEN '2026-03-05' AND '2026-03-06' ORDER BY created_at, id;
+
+  - id: from-a-date
+    prompt: >
+      Someone wrote `WHERE to_char(created_at, 'YYYY-MM-DD') >= '2026-03-06'`. Return the
+      same orders' `id`s, in id order, with a condition on the bare column instead.
+    hint: Compare the timestamp with a timestamp.
+    solution: |
+      SELECT id FROM orders WHERE created_at >= '2026-03-06' ORDER BY id;
+    forbids:
+      - say: a function or cast applied to created_at
+        match: 'created_at\s*::|(date|date_trunc|date_part|extract|to_char|cast)\s*\(|at\s+time\s+zone'
+    bad:
+      - SELECT id FROM orders WHERE created_at > '2026-03-06' ORDER BY id;
+      - SELECT id FROM orders WHERE created_at >= '2026-03-07' ORDER BY id;
+
+  - id: tax-on-the-other-side
+    prompt: >
+      `WHERE amount * 1.2 > 124.2` hides `amount` from its index. Return `id` and `amount`
+      of the same orders, in id order, with `amount` alone on its side of the comparison.
+    hint: Do the arithmetic once, to the constant.
+    solution: |
+      SELECT id, amount FROM orders WHERE amount > 103.5 ORDER BY id;
+    forbids:
+      - say: arithmetic on the amount column
+        match: 'amount\s*[*/+-]|[*/+-]\s*amount'
+    bad:
+      - SELECT id, amount FROM orders WHERE amount >= 103.5 ORDER BY id;
+      - SELECT id, amount FROM orders WHERE amount > 149.04 ORDER BY id;
+
+  - id: prefix-as-range
+    prompt: >
+      `WHERE left(code, 2) = 'BX'` can't use an index on `code`. Return the same `code`s,
+      sorted, with a prefix match the planner can turn into a range.
+    hint: The pattern-matching operator, with a wildcard only at the end.
+    solution: |
+      SELECT code FROM orders WHERE code LIKE 'BX%' ORDER BY code;
+    forbids:
+      - say: cutting the string up with a function
+        match: '(left|substr|substring|position|strpos|starts_with|split_part)\s*\('
+    bad:
+      - SELECT code FROM orders WHERE code LIKE '%BX%' ORDER BY code;
+      - SELECT code FROM orders WHERE code LIKE 'BX' ORDER BY code;
+
+  - id: no-cast-key
+    prompt: >
+      To silence a type error, someone wrote `WHERE id::text = '17'`. Return that order's
+      `id` and `status` with a condition the primary key can actually use.
+    hint: Compare the integer with an integer.
+    solution: |
+      SELECT id, status FROM orders WHERE id = 17;
+    forbids:
+      - say: casting the key to text
+        match: '::\s*(text|varchar|character)|cast\s*\(|\btext\s*\('
+    bad:
+      - SELECT id, status FROM orders WHERE id::text = '17';
+      - SELECT id, status FROM orders WHERE id = 71;
+
+  - id: no-lower-needed
+    prompt: >
+      Emails are stored in lowercase already and only `users.email` itself is indexed.
+      Return `id` and `email` of the user with email `dee@mail.io`, without wrapping the
+      column in a function.
+    hint: If the data is already normalised, compare it directly.
+    solution: |
+      SELECT id, email FROM users WHERE email = 'dee@mail.io';
+    forbids:
+      - say: a function around email, or a case-insensitive operator
+        match: '(lower|upper|initcap)\s*\(|\bilike\b|~\*'
+    bad:
+      - SELECT id, email FROM users WHERE lower(email) = 'dee@mail.io';
+      - SELECT id, email FROM users WHERE email LIKE 'dee%';
+
+  - id: interval-moves-over
+    prompt: >
+      `WHERE created_at + interval '2 days' >= '2026-03-06'` puts the column inside an
+      expression. Return the same orders' `id`s, in id order, with `created_at` alone.
+    hint: Move the interval across to the constant side, flipping its sign.
+    solution: |
+      SELECT id FROM orders WHERE created_at >= timestamptz '2026-03-06' - interval '2 days' ORDER BY id;
+    forbids:
+      - say: arithmetic on created_at
+        match: 'created_at\s*[+-]'
+    bad:
+      - SELECT id FROM orders WHERE created_at >= timestamptz '2026-03-06' + interval '2 days' ORDER BY id;
+      - SELECT id FROM orders WHERE created_at + interval '2 days' >= '2026-03-06' ORDER BY id;
+
+  # --- query shapes an index makes cheap ----------------------------------------
+  - id: latest-three
+    prompt: >
+      Return the three most recent orders of user 4: `id` and `created_at`, newest first
+      (ties: higher id first).
+      (With an index on `(user_id, created_at)` this reads three index entries and stops.)
+    hint: Sort, then cut.
+    solution: |
+      SELECT id, created_at FROM orders WHERE user_id = 4 ORDER BY created_at DESC, id DESC LIMIT 3;
+    bad:
+      - SELECT id, created_at FROM orders WHERE user_id = 4 ORDER BY created_at LIMIT 3;
+      - SELECT id, created_at FROM orders WHERE user_id = 4 LIMIT 3;
+
+  - id: keyset-page
+    prompt: >
+      Orders are listed by `(created_at, id)`, five per page. The last row of the
+      previous page had `created_at = '2026-03-04 06:00+00'` and `id = 9`. Return the
+      next page — `id`, `created_at` — without `OFFSET`, which reads and throws away every
+      earlier row.
+    hint: Two columns can be compared as one, left to right — `(a, b) > (x, y)`.
+    solution: |
+      SELECT id, created_at FROM orders
+      WHERE (created_at, id) > ('2026-03-04 06:00+00', 9)
+      ORDER BY created_at, id
+      LIMIT 5;
+    forbids:
+      - say: OFFSET, which still reads every row it skips
+        match: '\boffset\b'
+    bad:
+      - SELECT id, created_at FROM orders WHERE created_at >= '2026-03-04 06:00+00' ORDER BY created_at, id LIMIT 5;
+      - SELECT id, created_at FROM orders WHERE created_at > '2026-03-04 06:00+00' ORDER BY created_at, id LIMIT 5;
+
+drill:
+  - id: not-deleted
+    kind: predict
+    code: |
+      -- 200,000 rows; 1% have deleted = true. There is an index on (deleted).
+      EXPLAIN (COSTS OFF) SELECT * FROM t WHERE deleted = false;
+    prompt: Which plan comes back on PostgreSQL 16?
+    options:
+      - text: "`Seq Scan on t` with `Filter: (NOT deleted)`"
+        correct: true
+        why: >
+          99% of the table matches. Reading it straight through is far cheaper than one
+          index lookup and one random heap jump per row, so the planner ignores the index —
+          correctly. The same index *is* used for `deleted = true`, the rare value.
+      - text: "`Index Scan using t_deleted` — there is an index on exactly that column"
+        correct: false
+        why: >
+          An index existing is not a reason to use it. For 198,000 matching rows, 198,000
+          random heap fetches lose to one sequential pass.
+      - text: "`Bitmap Heap Scan` — a middle gear for many rows"
+        correct: false
+        why: >
+          A bitmap scan is for a few thousand rows. At 99% of the table there is nothing
+          to gain from sorting the locations first: every page is needed anyway.
+
+  - id: leading-column
+    kind: choose
+    code: |
+      CREATE INDEX ON t (country, created_at);
+    prompt: Which condition lets PostgreSQL 16 jump straight to the matching entries of this index?
+    options:
+      - text: "`WHERE country = 'DE' AND created_at > '2026-04-01'`"
+        correct: true
+        why: >
+          The index is sorted by country first, then by created_at within each country. An
+          equality on the first column and a range on the second is one contiguous run of
+          entries: descend once, read until the range ends.
+      - text: "`WHERE created_at > '2026-04-01'`"
+        correct: false
+        why: >
+          Matching created_at values are scattered across every country's section, so
+          there is no single place to start. PostgreSQL 16 can still walk the *whole*
+          index checking each entry, but it can't seek. (PostgreSQL 18 added B-tree *skip
+          scan*, which hops from one country to the next — worth it when the leading
+          column has few distinct values.)
+      - text: "`WHERE country > 'T' AND created_at = '2026-03-01'`"
+        correct: false
+        why: >
+          A range on the first column means the second column is no longer sorted across
+          the run, so only the `country` part narrows the search; `created_at` is checked
+          entry by entry inside it.
+
+  - id: index-only
+    kind: predict
+    code: |
+      CREATE INDEX t_name ON t (name);
+      EXPLAIN (COSTS OFF) SELECT name FROM t WHERE name = 'name7';
+      EXPLAIN (COSTS OFF) SELECT *    FROM t WHERE name = 'name7';
+    prompt: The first plan says `Index Only Scan using t_name`. What does the second say?
+    options:
+      - text: "`Index Scan using t_name` — it has to visit the table for the other columns"
+        correct: true
+        why: >
+          `SELECT *` needs columns that live only in the heap, so each match costs a second
+          lookup, from index entry to row. Selecting only what the index holds skips it.
+      - text: "`Index Only Scan using t_name` — the WHERE clause is the same"
+        correct: false
+        why: >
+          The WHERE clause decides how rows are found; the SELECT list decides whether the
+          table has to be visited to finish them. `*` includes columns the index lacks.
+      - text: "`Seq Scan on t` — `SELECT *` is too wide for an index"
+        correct: false
+        why: >
+          One matching row is cheap to fetch from the heap. The index is still used to find
+          it; only the extra hop to the table is added.
+
+  - id: suffix-like
+    kind: choose
+    code: |
+      CREATE INDEX ON t (name);
+      SELECT * FROM t WHERE name LIKE '%77';
+    prompt: Can a B-tree index on `name` help this query?
+    options:
+      - text: "No — a sorted list can't find values by how they end; a trigram (`pg_trgm`) GIN index can"
+        correct: true
+        why: >
+          A B-tree is sorted from the first character. Everything starting with "name7" is
+          one run; everything ending in "77" is scattered across the whole list. On PG16 the
+          plan is `Seq Scan` with `Filter: (name ~~ '%77'::text)`.
+      - text: "Yes, if the index uses `text_pattern_ops`"
+        correct: false
+        why: >
+          `text_pattern_ops` makes *prefix* matches indexable under any collation. A leading
+          wildcard is still a scan of everything.
+      - text: "Yes — LIKE always uses an index when one exists on the column"
+        correct: false
+        why: >
+          Only a pattern with a fixed prefix can be rewritten into a range, and only under
+          the C collation or a pattern-ops index.
+
+  - id: newest-ten
+    kind: predict
+    code: |
+      CREATE INDEX t_created ON t (created_at);   -- ascending
+      EXPLAIN (COSTS OFF) SELECT * FROM t ORDER BY created_at DESC LIMIT 10;
+    prompt: What does PostgreSQL 16 do about the descending order?
+    options:
+      - text: "`Limit` over `Index Scan Backward using t_created` — no sort at all"
+        correct: true
+        why: >
+          A B-tree's leaf pages are linked both ways, so reading it from the far end gives
+          descending order for free. A separate `DESC` index on a single column buys nothing.
+      - text: "`Limit` over `Sort` over `Seq Scan` — the index is ascending"
+        correct: false
+        why: >
+          Direction only matters when *columns disagree* (`a, b DESC`). One column can be
+          read either way.
+      - text: "An error — the index has to be declared DESC to be used for DESC"
+        correct: false
+        why: >
+          Index direction never causes an error; at worst it means a sort step. Here it
+          doesn't even cost that.
+
+  - id: mixed-order-plan
+    kind: predict
+    code: |
+      CREATE INDEX ON t (user_id, created_at);
+      EXPLAIN (COSTS OFF) SELECT * FROM t ORDER BY user_id, created_at DESC LIMIT 10;
+    prompt: What appears above the index scan in the plan?
+    options:
+      - text: "`Incremental Sort` with `Presorted Key: user_id`"
+        correct: true
+        why: >
+          The index already delivers rows grouped by user_id; only within each user does the
+          order need flipping. Incremental sort (PostgreSQL 13+) sorts one small group at a
+          time. An index `(user_id, created_at DESC)` would remove even that.
+      - text: "Nothing — `Index Scan Backward` handles the DESC"
+        correct: false
+        why: >
+          Backwards gives `user_id DESC, created_at DESC`. You asked for user_id ascending
+          *and* created_at descending; no single direction of this index produces that.
+      - text: "A full `Sort` over a `Seq Scan`"
+        correct: false
+        why: >
+          That was the only option before PostgreSQL 13. Now the planner can use the part of
+          the order the index already provides.
+
+  - id: cast-hides-column
+    kind: find
+    code: |
+      CREATE INDEX ON t (created_at);
+      SELECT * FROM t WHERE created_at::date = '2026-03-01';
+      -- plan: Parallel Seq Scan, Filter: ((created_at)::date = '2026-03-01'::date)
+    prompt: Why does the index go unused?
+    options:
+      - text: "The cast makes the condition about a different value, which the index is not sorted by"
+        correct: true
+        why: >
+          The index holds created_at, not created_at::date. Rewrite it as
+          `created_at >= '2026-03-01' AND created_at < '2026-03-02'` and PG16 plans
+          `Index Scan using t_created`.
+      - text: "Comparing a timestamp with a date is not allowed by the index"
+        correct: false
+        why: >
+          Mixed types are fine when the *constant* is converted. The trouble is converting
+          the *column*, for every row.
+      - text: "The planner thinks a whole day is too many rows"
+        correct: false
+        why: >
+          The same day written as a range uses the index. Nothing about the row count
+          changed — only where the cast sits.
+
+  - id: partial-scope
+    kind: predict
+    code: |
+      CREATE INDEX t_pending ON t (created_at) WHERE status = 'pending';
+      EXPLAIN (COSTS OFF) SELECT * FROM t WHERE status = 'paid' AND created_at > '2026-04-01';
+    prompt: Can `t_pending` be used here?
+    options:
+      - text: "No — it holds only pending rows, so it can't answer a question about paid ones"
+        correct: true
+        why: >
+          The planner may use a partial index only when the query's WHERE *implies* the
+          index's WHERE. `status = 'paid'` does not imply `status = 'pending'`.
+      - text: "Yes, then it filters for paid"
+        correct: false
+        why: >
+          The paid rows aren't in it at all. Using it would silently return nothing, which is
+          exactly the mistake the implication rule prevents.
+      - text: "Yes — partial indexes are used for any query on their key column"
+        correct: false
+        why: >
+          The predicate is part of the index's meaning. Same query with `status = 'pending'`:
+          `Index Scan using t_pending`.
+
+  - id: two-nulls
+    kind: predict
+    code: |
+      CREATE TABLE u (id int, email text);
+      CREATE UNIQUE INDEX ON u (email);
+      INSERT INTO u VALUES (1, NULL);
+      INSERT INTO u VALUES (2, NULL);
+      SELECT count(*) FROM u;
+    prompt: What happens?
+    options:
+      - text: "Both inserts succeed and the count is 2"
+        correct: true
+        why: >
+          A unique index compares values, and NULL is not equal to NULL — so two NULLs are
+          not duplicates. Since PostgreSQL 15 you can say `UNIQUE NULLS NOT DISTINCT` when
+          you want at most one.
+      - text: "The second insert fails with a duplicate key error"
+        correct: false
+        why: >
+          That is what `NULLS NOT DISTINCT` (PG15+) does. The default treats every NULL as
+          distinct.
+      - text: "The first insert fails: a unique column can't be NULL"
+        correct: false
+        why: >
+          UNIQUE and NOT NULL are separate constraints. A PRIMARY KEY is both; a unique
+          index is only the first.
+
+  - id: explain-analyze-delete
+    kind: predict
+    code: |
+      -- u has two rows
+      EXPLAIN ANALYZE DELETE FROM u;
+      SELECT count(*) FROM u;
+    prompt: What does the count say?
+    options:
+      - text: "0 — `EXPLAIN ANALYZE` really runs the statement"
+        correct: true
+        why: >
+          ANALYZE means "execute it and measure". The plan printed `Seq Scan on u (actual
+          rows=2 …)` and the rows are gone. Wrap it in `BEGIN; … ROLLBACK;` whenever you
+          analyse a write.
+      - text: "2 — EXPLAIN only shows a plan"
+        correct: false
+        why: >
+          Plain `EXPLAIN` only plans. `EXPLAIN ANALYZE` executes, which is the only way it
+          can report actual rows and times.
+      - text: "An error: EXPLAIN only accepts SELECT"
+        correct: false
+        why: >
+          INSERT, UPDATE, DELETE and MERGE can all be explained — and analysed, with their
+          effects.
+
+  - id: stale-statistics
+    kind: choose
+    code: |
+      CREATE TABLE b (id int, k int);
+      CREATE INDEX ON b (k);
+      INSERT INTO b SELECT g, 1 FROM generate_series(1, 10) g;
+      ANALYZE b;
+      INSERT INTO b SELECT g, g FROM generate_series(11, 300000) g;
+      EXPLAIN (COSTS OFF) SELECT * FROM b WHERE k > 5;
+      -- Index Scan using b_k_idx on b   (for almost 300,000 rows)
+    prompt: Why an index scan for nearly the whole table, and what fixes it?
+    options:
+      - text: "The statistics still describe the 10-row table; `ANALYZE b` and the plan becomes `Seq Scan`"
+        correct: true
+        why: >
+          The planner never reads your data to plan — it reads the sample `ANALYZE` took,
+          which says every k is 1, so `k > 5` "matches nothing". Autovacuum would analyze
+          eventually; after a bulk load, do it yourself.
+      - text: "The index is corrupted; `REINDEX` fixes it"
+        correct: false
+        why: >
+          The index is fine and complete. The *estimate* is wrong, and estimates come from
+          statistics, not from the index.
+      - text: "Postgres always prefers an index when one exists; drop it"
+        correct: false
+        why: >
+          Run `ANALYZE b` and the very same query plans a sequential scan. The choice is
+          cost-based, and the cost was computed from stale numbers.
+
+  - id: write-amplification
+    kind: choose
+    code: |
+      CREATE TABLE p (id int PRIMARY KEY, a int, b int);
+      CREATE INDEX ON p (a);
+      CREATE INDEX ON p (b);
+      INSERT INTO p VALUES (1, 2, 3);
+    prompt: How many B-trees does that one INSERT write to, besides the table itself?
+    options:
+      - text: "Three — the primary key's index and both others"
+        correct: true
+        why: >
+          Every index is a separate sorted copy, and each must gain an entry for the new
+          row. This is the cost side of every index: reads get cheaper, every write gets a
+          little dearer, forever.
+      - text: "One — only the primary key is maintained on insert; the others are updated lazily"
+        correct: false
+        why: >
+          B-tree indexes in PostgreSQL are maintained synchronously, in the same
+          transaction. (GIN has a "pending list" that defers work; B-tree has no such thing.)
+      - text: "None — indexes are rebuilt by VACUUM"
+        correct: false
+        why: >
+          VACUUM removes dead entries; it never adds new ones. A row is findable through an
+          index the moment its transaction commits.

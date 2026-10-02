@@ -27,9 +27,10 @@
   import { asCodeBlock, hasFence, shapeOf } from '../lib/compose';
   import MentorSheet from '../components/MentorSheet.svelte';
   import { codeBlocksFor, isDue, pickNext, type CardRef } from '../lib/review';
+  import { buildRound, LAND_AT, MIN_ROUND, practiceStatus } from '../lib/practice';
   import { sql } from '../lib/sqlrun.svelte';
   import { judge, type ShapeReport } from '../lib/shapecheck';
-  import { compareResults, isOrdered, type ResultTable, type Verdict } from '../lib/writecheck';
+  import { compareResults, forbiddenHit, isOrdered, type ResultTable, type Verdict } from '../lib/writecheck';
   import type { TableInfo } from '../lib/sqlcore';
   import ResultGrid from '../components/ResultGrid.svelte';
   import { today } from '../lib/date';
@@ -37,7 +38,7 @@
     collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripMarkers,
     MAX_REVIEW_MESSAGES, ModelGoneError, withStanding, type ChatMessage, type MentorFocus,
   } from '../lib/mentor';
-  import { TRACKS, type Day, type QuizQuestion, type Track, type Week } from '../lib/types';
+  import { TRACKS, type Day, type DrillStep, type QuizQuestion, type Track, type Week, type WriteChallenge, type WriteSet } from '../lib/types';
   import { inlineHtml } from '../lib/inline';
 
   /** Cards dealt this sitting, so the same one can't come round twice in a row. */
@@ -57,7 +58,25 @@
    * push a card further out — see the `early` rule in review.ts — so cramming can
    * sharpen the schedule but never flatter it.
    */
-  let { practice: startInPractice = false }: { practice?: boolean } = $props();
+  let { practice: startInPractice = false, round: roundDay = null }: { practice?: boolean; round?: string | null } = $props();
+
+  /**
+   * A practice round (practice.ts): a fixed list of items from one day's bank, dealt in
+   * order. Every item's first attempt is recorded, and the round's score can land the
+   * concept and open the next lesson.
+   */
+  let roundCards = $state<CardRef[] | null>(null);
+  let roundAt = $state(0);
+  let roundRight = $state(0);
+  let roundDone = $state<{ asked: number; right: number; landed: boolean } | null>(null);
+  const roundCtx = $derived.by(() => {
+    if (!roundDay) return null;
+    for (const week of app.weeks) {
+      const day = week.days.find((d) => d.id === roundDay);
+      if (day) return { week, day };
+    }
+    return null;
+  });
   // Seed only. After that it's a local toggle: arriving via /review/practice starts you
   // in practice, but finishing the due cards and tapping "Keep practising" must be able
   // to flip it on without the URL disagreeing.
@@ -73,7 +92,7 @@
   type Attempt =
     | { kind: 'right'; sql: string; table: ResultTable }
     | { kind: 'wrong'; sql: string; table: ResultTable; verdict: Exclude<Verdict, { ok: true }> }
-    | { kind: 'error'; sql: string; message: string };
+    | { kind: 'error'; sql: string; message: string; ruled?: boolean };
   let writeSql = $state('');
   let target = $state<ResultTable | null>(null);
   let tables = $state<TableInfo[] | null>(null);
@@ -109,18 +128,22 @@
   /** The language of the week this card came from, not of the track you're on now. */
   const lang = $derived(TRACKS[(context?.week.track ?? 'cpp') as Track].lang);
 
-  const question = $derived.by((): QuizQuestion | null => {
-    if (card?.kind !== 'quiz' || !context) return null;
-    return context.day.quiz?.find((q) => q.id === card!.questionId) ?? null;
+  const question = $derived.by((): QuizQuestion | DrillStep | null => {
+    if (!context) return null;
+    if (card?.kind === 'quiz') return context.day.quiz?.find((q) => q.id === card!.questionId) ?? null;
+    if (card?.kind === 'drill') return findDrill(context.day, card.questionId);
+    return null;
   });
+  /** A drill step carries a listing to reason about; a quiz question does not. */
+  const listing = $derived(question && 'code' in question ? question.code : null);
+  /** What a drill's listing is written in: the day's write language, else the track's. */
+  const wLangOfDay = $derived(context?.day.practice?.write?.lang ?? context?.day.write?.lang ?? lang);
 
-  const wc = $derived.by(() => {
-    if (card?.kind !== 'write' || !context) return null;
-    return context.day.write?.challenges.find((c) => c.id === card!.questionId) ?? null;
-  });
-  const writeSetup = $derived(context?.day.write?.setup ?? '');
+  const writeHit = $derived.by(() => (card?.kind === 'write' && context ? findWrite(context.day, card.questionId) : null));
+  const wc = $derived(writeHit?.c ?? null);
+  const writeSetup = $derived(writeHit?.set.setup ?? '');
   /** What the card is written in. SQL is run; Go and C++ are judged by shape. */
-  const wLang = $derived(context?.day.write?.lang ?? 'sql');
+  const wLang = $derived(writeHit?.set.lang ?? 'sql');
   const shaped = $derived(wc !== null && wLang !== 'sql');
   /** Whether row order is part of this answer. */
   const wOrdered = $derived(wc ? (wc.ordered ?? isOrdered(wc.verify ?? wc.solution)) : false);
@@ -147,7 +170,7 @@
    */
   const focus = $derived.by((): MentorFocus | null => {
     if (!card || !context || !answered) return null;
-    if (card.kind === 'quiz' && question) {
+    if ((card.kind === 'quiz' || card.kind === 'drill') && question) {
       const mine = picked !== null ? question.options[picked] : null;
       const right = question.options.find((o) => o.correct);
       return {
@@ -158,7 +181,8 @@
           mine && !mine.correct && right ? `Right answer: ${right.text}` : '',
         ].filter(Boolean),
         brief: [
-          `A multiple-choice quiz card: "${question.prompt}"`,
+          `A multiple-choice ${card.kind === 'drill' ? 'drill' : 'quiz'} card: "${question.prompt}"`,
+          ...(listing ? ['The code it is about:', '```', listing, '```'] : []),
           'The options, with the answer key and why each is right or wrong:',
           ...question.options.map(
             (o, i) => `- ${o.correct ? '[correct]' : '[wrong]'}${i === picked ? ' [THEIR PICK]' : ''} ${o.text} — ${o.why}`,
@@ -291,6 +315,13 @@
   async function deal() {
     const previous = card?.kind;
     reset();
+    if (roundCards) {
+      const next = roundCards[roundAt] ?? null;
+      card = next;
+      if (!next) return void endRound();
+      if (next.kind === 'write') await setupWrite(next);
+      return;
+    }
     // In practice mode nothing is "due", so every card is fair game; `seen` still
     // stops the same one coming round twice in a sitting.
     const on = practice ? '9999-12-31' : today();
@@ -312,11 +343,12 @@
    */
   async function setupWrite(ref: CardRef) {
     const day = findDay(ref.dayId);
-    const c = day?.write?.challenges.find((x) => x.id === ref.questionId);
-    if (!day?.write || !c) return setAside(ref);
+    const hit = day ? findWrite(day, ref.questionId) : null;
+    if (!hit) return setAside(ref);
+    const { set, c } = hit;
     codeMode = true;
     // Go and C++ need no engine and nothing to load: the card is ready the moment it is dealt.
-    if (day.write.lang !== 'sql') {
+    if (set.lang !== 'sql') {
       await tick();
       area?.focus();
       return;
@@ -325,8 +357,8 @@
     try {
       if (!(await sql.warm())) return setAside(ref);
       const [t, ref_] = await Promise.all([
-        sql.describe(day.write.setup),
-        sql.run({ setup: day.write.setup, sql: c.solution, verify: c.verify ?? undefined }),
+        sql.describe(set.setup),
+        sql.run({ setup: set.setup, sql: c.solution, verify: c.verify ?? undefined }),
       ]);
       if (card?.id !== ref.id) return; // dealt past while it was loading
       if (!ref_.ok) {
@@ -344,8 +376,13 @@
 
   /** Put a card aside without grading it, and deal another. */
   async function setAside(ref: CardRef) {
-    seen = new Set([...seen, ref.id]);
     loading = false;
+    if (roundCards) {
+      // Not counted either way: a card the device could not set up is not a wrong answer.
+      roundCards = roundCards.filter((c) => c.id !== ref.id);
+      return deal();
+    }
+    seen = new Set([...seen, ref.id]);
     await deal();
   }
 
@@ -353,6 +390,19 @@
     if (shaped) return checkShape();
     const text = writeSql.trim();
     if (!text || running || solved || revealed || !wc || !target) return;
+    // A card about how the query is written can rule things out before anything runs.
+    const ruledOut = forbiddenHit(text, wc.forbids);
+    if (ruledOut) {
+      const attempt: Attempt = { kind: 'error', sql: text, message: `This card rules that out: ${ruledOut}.`, ruled: true };
+      attempts = [...attempts, attempt];
+      if (!writeGraded) {
+        writeGraded = true;
+        await settle('again');
+      }
+      await tick();
+      area?.focus();
+      return;
+    }
     running = true;
     error = null;
     const res = await sql.run({ setup: writeSetup, sql: text, verify: wc.verify ?? undefined });
@@ -383,7 +433,23 @@
   /** The code that is already in place on a Go/C++ card, if the card has any. */
   const given = (c: { given: string | null }): string | null => c.given?.trim() ? c.given : null;
 
-  const writeLangOf = (c: CardRef): string => findDay(c.dayId)?.write?.lang ?? 'sql';
+  const writeLangOf = (c: CardRef): string => {
+    const day = findDay(c.dayId);
+    return (day && findWrite(day, c.questionId)?.set.lang) ?? 'sql';
+  };
+
+  /** A write challenge, from the day's own file or its practice bank. */
+  function findWrite(day: Day, id: string | undefined): { set: WriteSet; c: WriteChallenge } | null {
+    for (const set of [day.write, day.practice?.write]) {
+      const c = set?.challenges.find((x) => x.id === id);
+      if (set && c) return { set, c };
+    }
+    return null;
+  }
+
+  function findDrill(day: Day, id: string | undefined): DrillStep | null {
+    return day.drill?.find((x) => x.id === id) ?? day.practice?.drill.find((x) => x.id === id) ?? null;
+  }
 
   /**
    * Judge a Go/C++ answer. Nothing is run, so nothing can go wrong with the engine and the
@@ -392,7 +458,7 @@
    */
   async function checkShape() {
     const code = writeSql.trim();
-    const set = context?.day.write;
+    const set = writeHit?.set;
     if (!code || solved || revealed || !wc || !set || set.lang === 'sql') return;
     let report: ShapeReport;
     try {
@@ -604,12 +670,45 @@
     const early = !isDue(app.progress.review.cards[card.id], today());
     seen = new Set([...seen, card.id]);
     await app.gradeCard(card.id, result, early);
+    if (roundCards && roundCtx && card.dayId === roundCtx.day.id) {
+      if (result === 'good') roundRight++;
+      await app.recordPractice(roundCtx.day, roundCtx.week.id, card, result === 'good');
+    }
+  }
+
+  /** Start a round of the given day's bank. */
+  function startRound() {
+    if (!roundCtx) return;
+    roundCards = buildRound(roundCtx.day, app.progress.days[roundCtx.day.id]?.practice);
+    roundAt = 0;
+    roundRight = 0;
+    roundDone = null;
+    seen = new Set();
+    void deal();
+  }
+
+  /** Next item of the round. A card set aside (it could not be set up) is not counted. */
+  async function nextInRound() {
+    roundAt++;
+    await deal();
+  }
+
+  async function endRound() {
+    if (!roundCards || !roundCtx || roundDone) return;
+    const asked = roundCards.filter((c) => seen.has(c.id)).length;
+    const state = await app.finishPracticeRound(roundCtx.day, roundCtx.week.id, asked, roundRight);
+    roundDone = { asked, right: roundRight, landed: Boolean(state.landedAt) };
   }
 
   /** Grade an ungradeable card as a miss rather than letting it silently vanish. */
   async function skip() {
     await settle('again');
-    await deal();
+    await advance();
+  }
+
+  /** On to the next card: the round's next item, or whatever the deck deals. */
+  function advance() {
+    return roundCards ? nextInRound() : deal();
   }
 
   // M does what the Ask button does, and only when it would show: once the card is
@@ -625,14 +724,17 @@
   // 1–4 pick an answer on a quiz card; N or Enter deals the next card once it is answered.
   answerKeys(() => ({
     count: () => question?.options.length ?? 0,
-    canChoose: () => card?.kind === 'quiz' && Boolean(question) && picked === null && !loading,
+    canChoose: () => (card?.kind === 'quiz' || card?.kind === 'drill') && Boolean(question) && picked === null && !loading,
     choose: (i) => void choose(i),
     canAdvance: () => answered && !streaming && !running,
-    advance: () => void deal(),
+    advance: () => void advance(),
   }));
 
   $effect(() => {
-    if (app.ready && !card && !seen.size) void deal();
+    if (!app.ready || card || seen.size) return;
+    if (roundDay) {
+      if (!roundCards && roundCtx) untrack(startRound);
+    } else void deal();
   });
 
   // Let the engine go when the deck is left: it is the heaviest thing the app ever holds.
@@ -656,15 +758,52 @@
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
     <div>
-      <p class="lbl">Review</p>
+      <p class="lbl">{roundDay ? 'Practice round' : 'Review'}</p>
       <p class="ctx">
-        {#if practice}Practice{:else if remaining > 0}{remaining} due{:else}Nothing due — this one's a bonus{/if}
-        {#if app.clearedToday}· {app.clearedToday} cleared today{/if}
+        {#if roundDay}{roundCtx?.day.title ?? ''}{#if roundCards && !roundDone}{' · '}{Math.min(roundAt + 1, roundCards.length)} of {roundCards.length}{/if}
+        {:else if practice}Practice{:else if remaining > 0}{remaining} due{:else}Nothing due — this one's a bonus{/if}
+        {#if app.clearedToday && !roundDay}· {app.clearedToday} cleared today{/if}
       </p>
     </div>
   </header>
 
-  {#if !answerable.length}
+  {#if roundDay && roundDone && roundCtx}
+    {@const st = practiceStatus(roundCtx.day, app.progress.days[roundCtx.day.id]?.practice)}
+    <div class="empty card roundend" class:landed={roundDone.landed}>
+      <p class="score numeral">{roundDone.right}<span>/{roundDone.asked}</span></p>
+      <h2>{roundDone.landed ? 'Landed.' : 'Not landed yet.'}</h2>
+      <p>
+        {#if roundDone.landed}
+          Right first time on {roundDone.right} of {roundDone.asked}. {roundCtx.day.title} has landed, and the
+          next lesson is open. Everything you met in this set stays in your review deck.
+        {:else if roundDone.asked < MIN_ROUND}
+          A round needs at least {MIN_ROUND} questions to count towards landing.
+        {:else}
+          Right first time on {roundDone.right} of {roundDone.asked}; it lands at {Math.round(LAND_AT * 100)}% on a
+          round. {st.fresh ? `${st.fresh} questions in this set you haven't seen yet.` : `You've seen the whole set — the next round goes back over the ${st.missed} you missed.`}
+        {/if}
+      </p>
+      <div class="pair">
+        {#if !roundDone.landed}
+          <Button size="sm" onclick={startRound}>Another round</Button>
+        {/if}
+        <Button variant={roundDone.landed ? 'primary' : 'ghost'} size="sm" onclick={() => router.go('/today')}>Back to today</Button>
+      </div>
+      {#if !roundDone.landed && !st.movedOn}
+        <button class="link" onclick={async () => { await app.moveOn(roundCtx!.day, roundCtx!.week.id); router.go('/today'); }}>
+          Move on to the next lesson anyway
+        </button>
+      {/if}
+    </div>
+  {:else if roundDay && !roundCtx}
+    <div class="empty card">
+      <h2>That practice set isn't here</h2>
+      <p>The lesson it belongs to hasn't loaded on this device yet.</p>
+      <Button size="sm" onclick={() => router.go('/today')}>Back to today</Button>
+    </div>
+  {:else if roundDay && !card}
+    <div class="card wait"><span class="dot"></span>Dealing the round…</div>
+  {:else if !answerable.length}
     <div class="empty card">
       <h2>Nothing to review yet</h2>
       <p>
@@ -672,6 +811,26 @@
         and this fills up on its own.
       </p>
       <Button size="sm" onclick={() => router.go('/today')}>Back to today</Button>
+    </div>
+  {:else if !card && practice && seen.size}
+    <!-- Practice used to start the deck over from the top here, which is how the same
+         dozen cards came round again and again. It stops instead, and points at the
+         practice set, which is where fresh questions on the same ground come from. -->
+    <div class="empty card">
+      <h2>That's every card</h2>
+      <p>
+        You've been through all {seen.size} cards in your deck this sitting. Going round again would
+        only be remembering the answers you just gave.
+      </p>
+      {#if app.practising}
+        <p class="fine">Fresh questions on {app.practising.day.title} are in its practice set.</p>
+        <div class="pair">
+          <Button size="sm" onclick={() => router.go(`/review/round/${app.practising!.day.id}`)}>Practise {app.practising.day.title}</Button>
+          <Button variant="ghost" size="sm" onclick={() => router.go('/today')}>Back to today</Button>
+        </div>
+      {:else}
+        <Button size="sm" onclick={() => router.go('/today')}>Back to today</Button>
+      {/if}
     </div>
   {:else if !card}
     <div class="empty card">
@@ -685,7 +844,7 @@
         extra practice can only sharpen the schedule, never flatter it.
       </p>
       <div class="pair">
-        <Button size="sm" onclick={() => { practice = true; seen = new Set(); void deal(); }}>
+        <Button size="sm" onclick={() => { practice = true; void deal(); }}>
           Keep practising
         </Button>
         <Button variant="ghost" size="sm" onclick={() => router.go('/today')}>Back to today</Button>
@@ -696,6 +855,7 @@
       {#if context}Day {context.day.day} — {context.day.title}{/if}
       <span class="kind">
         {#if card.kind === 'quiz'}from the quiz
+        {:else if card.kind === 'drill'}{question && 'kind' in question ? ({ predict: 'predict it', find: 'find the bug', choose: 'choose' } as Record<string, string>)[question.kind] ?? 'drill' : 'drill'}
         {:else if card.kind === 'explain'}explain it
         {:else if card.kind === 'parsons'}rebuild it
         {:else if card.kind === 'write'}write it
@@ -712,9 +872,12 @@
         <p class="fine">The first time this downloads about 5 MB. After that it starts from the device.</p>
         <button class="link" onclick={() => card && void setAside(card)}>Skip this card</button>
       {/if}
-    {:else if card.kind === 'quiz' && question}
+    {:else if (card.kind === 'quiz' || card.kind === 'drill') && question}
       <div class="card">
         <h2 class="q inline-md">{@html inlineHtml(question.prompt)}</h2>
+        {#if listing}
+          <pre class="ref listing"><code>{@html highlight(listing, wLangOfDay)}</code></pre>
+        {/if}
         <div class="options">
           {#each question.options as option, i}
             <button
@@ -839,7 +1002,7 @@
           {#if a.kind === 'right'}
             <p class="verdict">✓ That returns the target.</p>
           {:else if a.kind === 'error'}
-            <p class="verdict">✗ PostgreSQL says:</p>
+            <p class="verdict">{a.ruled ? '✗ Not this way.' : '✗ PostgreSQL says:'}</p>
             <pre class="pgerr">{a.message}</pre>
           {:else}
             <p class="verdict">✗ Not quite. {whyWrong(a.verdict)}</p>
@@ -953,7 +1116,7 @@
 
     <div class="actions">
       {#if answered}
-        <Button onclick={() => void deal()}>Next card</Button>
+        <Button onclick={() => void advance()}>{roundCards && roundAt + 1 >= roundCards.length ? 'Finish the round' : 'Next card'}</Button>
         <Button variant="ghost" size="sm" onclick={() => router.go('/today')}>Done for now</Button>
       {:else if card.kind === 'parsons'}
         <Button onclick={() => void checkParsons()} disabled={built.length !== solution.length}>
@@ -1443,6 +1606,38 @@
     letter-spacing: 0.075em;
     text-transform: uppercase;
     color: var(--text-faint);
+  }
+
+  .listing {
+    margin: 10px 0 2px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+  }
+
+  .listing code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .roundend .score {
+    margin: 0;
+    font-size: 44px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .roundend .score span {
+    font-size: 22px;
+    color: var(--text-faint);
+  }
+
+  .roundend.landed .score {
+    color: var(--ok);
+  }
+
+  .roundend .link {
+    margin-top: 12px;
   }
 
   .given code {

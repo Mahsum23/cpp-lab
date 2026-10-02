@@ -438,7 +438,8 @@ Today, where running out actually happens. Update it every time days are written
 material taught me should come next.
 
 When asked for more, write a whole topic of **five to eight days** at once, each verified
-like any other lesson, so he has a run of days without waiting. Write the spec
+like any other lesson and each with its practice bank (see **A concept stays until it has
+landed**), so he has a run of days without waiting. Write the spec
 (`milestones/<m>/README.md`, with its **Worth knowing:** hooks) before the days. The app
 warns him at two written days left, and shows a one-tap "copy a request for new lessons"
 when he runs out, so a request may arrive as that pasted text.
@@ -447,7 +448,55 @@ Improvements are welcome without asking first. He said he trusts my judgement on
 and the curriculum, so a change that clearly serves the daily habit can just be made and
 explained, rather than proposed and waited on.
 
-## Every day has two halves, and the phone half is not optional
+## A concept stays until it has landed
+
+He said the pace felt too fast: indexes one day, clause order the next, and the review deck
+repeating the same dozen questions until they were tiring rather than useful. What he asked
+for is "a piece of information to digest, then a solid amount of practice", with a broader
+set of questions on the same topic. We planned it together and he chose all three of these:
+
+- **Pace: until it lands.** A lesson day introduces one concept. On the following days Today
+  offers a **practice round** on that concept instead of the next lesson, until a round
+  scores 80% right first time (`LAND_AT`, at least `MIN_ROUND` items). "Move on anyway" is
+  always there; it opens the next lesson without pretending the concept landed. Only the
+  most recently finished lesson can hold things up: a bank written later for a day long
+  past is offered, never imposed. A finished round keeps the streak exactly as a lesson does.
+- **Practice is mostly writing.** A round is 10 items (`ROUND_SIZE`), about 70% typed from
+  memory (write cards) and the rest quick predict / find / choose items spread between them.
+  Fresh items come first; an item is never dealt again while the bank holds one he hasn't
+  seen; then the ones he missed. An item's *first ever* attempt is what counts. Items a round
+  has dealt join the review deck, so the deck grows with practice instead of cycling.
+- **SQL first**, then Go and C++.
+
+So every lesson day gets a **practice bank**: `day-NN-<slug>.practice.yaml`, with `write:`
+(challenges in the same shape as a `.write.yaml`, sharing its setup unless it declares its
+own) and `drill:` (steps in the same shape as a `.drill.yaml`, any number). Aim for **25–40
+items**, roughly two thirds write. The build warns under 20 and fails if a practice id
+repeats one of the day's own write or drill ids (they share card ids). Writing a new topic
+now means writing each day's bank with it; a day without one simply doesn't hold the next
+lesson back, which is the old pace.
+
+What makes a bank good, as opposed to big:
+
+- **Breadth over repetition.** Not the lesson's examples with new numbers: the same idea
+  from every side — the DDL and the query it serves, the plausible wrong spelling, the
+  catalog view that shows what you did, the version-specific gotcha, the trap the lesson only
+  mentioned in passing.
+- **Every SQL write card carries `bad:` examples** — the mistakes people actually make —
+  and `tools/check-write-cards.py` proves each one wrong on a real PostgreSQL 16 (an error,
+  different rows, or a forbid). This is not optional: on the first two banks it caught twelve
+  cards whose data couldn't tell right from wrong (no ties for keyset paging to trip on, no
+  order at exactly midnight for `BETWEEN` to include). If a bad example passes, change the
+  data, not the example.
+- **SQL cards may carry `forbids`** (regular expressions over the query, case-insensitive,
+  comments ignored) when the card is about *how* a query is written — "rewrite this so the
+  index can be used" has the same rows either way. The app rejects a forbidden spelling
+  before running it; the checker proves the reference doesn't trip its own forbids.
+- **Drill outputs are real.** Run every plan, error and result on the version named, and
+  re-run them if the setup changes. Write every item to stand alone, cold — cards are
+  shuffled, so never "the next card shows".
+
+
 
 A task needs a machine, and not having one is the most common reason a day stalls
 half-finished — which is how the habit dies. So every day carries a **drill** as well as a

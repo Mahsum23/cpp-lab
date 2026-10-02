@@ -130,3 +130,25 @@ export function cellText(v: unknown): Cell {
   if (Array.isArray(v)) return `{${v.map((x) => cellText(x) ?? 'NULL').join(',')}}`;
   return JSON.stringify(v);
 }
+
+/**
+ * The first thing the card rules out that this query does, or null.
+ *
+ * Some cards are about *how* a query is written, not only what it returns: "rewrite this
+ * so the index on created_at can be used" has the same rows either way, and the rows alone
+ * would pass the very query the card is about. Those cards carry `forbids` — regular
+ * expressions over the query text, matched case-insensitively, comments ignored — and
+ * check-write-cards.py proves the reference answer passes them and the classic wrong
+ * answer does not.
+ */
+export function forbiddenHit(sql: string, forbids: { say: string; match: string }[] | undefined): string | null {
+  const text = sql.replace(/--[^\n]*/g, ' ');
+  for (const f of forbids ?? []) {
+    try {
+      if (new RegExp(f.match, 'i').test(text)) return f.say;
+    } catch {
+      // A broken pattern is the card's bug; it must not fail the learner.
+    }
+  }
+  return null;
+}

@@ -738,6 +738,37 @@ harness (C++ ones on real sockets), then mutation-tests the patterns. Verified: 
 26 C++), 2,451 mutants, no false accepts; `test-shape.mjs` covers the judge itself; Chromium
 covers dealing, a wrong check, a right one, hint and give-up.
 
+## 8.10 Practice rounds: a concept stays until it lands (2026-10-02)
+
+The path used to introduce one concept per day, and the review deck had about a dozen
+fixed cards per day to revise it with — so after two days the whole deck was ~25 cards and
+"Keep practising" cycled them until the answers were remembered rather than understood. The
+fix changes the unit from *a day* to *a concept*:
+
+- **Learn day, then practice days.** After a lesson, Today offers a practice round on it
+  instead of the next lesson (`app.practising`: the latest finished lesson, when it has a
+  bank that has not landed). A round (`practice.ts`) is 10 items from the day's practice
+  bank, ~70% write cards and the rest drill steps spaced between them, fresh items first.
+- **Mastery opens the next lesson.** A round scoring ≥80% right first time (≥6 items) sets
+  `landedAt`. "Move on anyway" sets `movedOn` — the next lesson opens, the bank stays.
+  Only the latest lesson gates; banks written later for old days are offered, not imposed.
+- **First attempts only.** `PracticeState.first` records each item's first-ever result;
+  later attempts never overwrite it, two devices merge with the miss winning a
+  disagreement, and rounds union by timestamp. A finished round counts for the streak
+  (`deriveStreak` reads rounds as well as completed days).
+- **The deck grows instead of cycling.** Practice items a round has dealt become review
+  cards (`cardsFor`), as do a day's answered drill steps (new card kind `drill`). Practice
+  mode in the deck no longer restarts from the top when every card has been seen; it says
+  so and points at the practice set.
+- **Honest cards.** SQL write cards may carry `forbids` (regexes, for cards about how a
+  query is written) and `bad` examples; `tools/check-write-cards.py` proves the reference
+  passes and every bad example fails on PostgreSQL 16, and `test-write.mjs` compares the
+  browser engine's answers with PG16's card by card.
+
+First banks: indexes (21 write + 12 drill) and clause order (19 write + 12 drill). Verified:
+`test-practice.mjs`, the checker (78 SQL cards, 84 bad examples proven wrong), PGlite vs
+PG16 agreement, and Chromium (a landing round, a non-landing round, Today before and after).
+
 ## 9. Offline & local storage
 
 - **Content cache:** Cache API / IndexedDB — loaded weeks fully offline.

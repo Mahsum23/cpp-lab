@@ -7,6 +7,7 @@
   import { TRACKS, type Track } from '../lib/types';
 
   import MoreLessons from '../components/MoreLessons.svelte';
+  import { LAND_AT, practiceStatus, ROUND_SIZE } from '../lib/practice';
 
   const current = $derived(app.current);
   // One path per track. Track-scoped, so a subject that hasn't loaded yet never shows
@@ -24,6 +25,12 @@
 
   /** Where "Continue" should drop him: the first step he hasn't closed. */
   const resumeStep = $derived(segs.findIndex((s) => !s) === -1 ? 2 : segs.findIndex((s) => !s));
+
+  /** A concept that has not landed yet: today is a practice round, not a new lesson. */
+  const practising = $derived(app.practising);
+  const pst = $derived(
+    practising ? practiceStatus(practising.day, app.progress.days[practising.day.id]?.practice) : null,
+  );
 
   function start() {
     if (!current) return;
@@ -93,7 +100,14 @@
         <svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7" /></svg>
       </div>
       <h2>Done today</h2>
-      {#if current}
+      {#if practising}
+        <p class="meta">
+          See you tomorrow, for another round on {practising.day.title}. The next lesson opens when it lands.
+        </p>
+        <div class="soft">
+          <Button variant="secondary" size="sm" onclick={() => router.go(`/review/round/${practising.day.id}`)}>One more round now</Button>
+        </div>
+      {:else if current}
         <p class="meta">See you tomorrow. Day {current.day.day} — {current.day.title} — is next.</p>
         <div class="soft">
           <Button variant="secondary" size="sm" onclick={() => router.go('/map')}>Review a past day</Button>
@@ -110,6 +124,36 @@
     {#if current && app.runway <= RUNWAY_WARN}
       <MoreLessons compact />
     {/if}
+  {:else if practising && pst}
+    <p class="context">{week.title} · practice</p>
+    <article class="card hero">
+      <div class="top">
+        <div>
+          <p class="eyebrow">Practice · Day {practising.day.day}</p>
+          <h2>{practising.day.title}</h2>
+          <p class="meta">~20 min · {ROUND_SIZE} questions · mostly writing from memory</p>
+        </div>
+      </div>
+      <p class="teaser">
+        {#if pst.last === null}
+          No new theory today. Fresh questions on the same ground, until it sticks — a round of
+          {Math.round(LAND_AT * 100)}% right first time lands it and opens the next lesson.
+        {:else}
+          Round {pst.rounds + 1}. Last round {Math.round(pst.last * 100)}% right first time; it lands at
+          {Math.round(LAND_AT * 100)}%. {pst.fresh ? `${pst.fresh} questions you haven't seen yet.` : `You've seen them all — this round goes back over the ${pst.missed} you missed.`}
+        {/if}
+      </p>
+      <Button full onclick={() => router.go(`/review/round/${practising.day.id}`)}>
+        Start the round
+        <svg class="arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
+      </Button>
+      {#if current}
+        <p class="nextup">
+          Next lesson: Day {current.day.day} — {current.day.title}.
+          <button class="link" onclick={() => void app.moveOn(practising.day, practising.week.id)}>Move on anyway</button>
+        </p>
+      {/if}
+    </article>
   {:else if current}
     <p class="context">{topic ? `${week.title} · ${topic}` : week.title}</p>
 
@@ -556,5 +600,21 @@
     to {
       background-position: -200% 0;
     }
+  }
+  .nextup {
+    margin: 12px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-faint);
+  }
+
+  .nextup .link {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
+    cursor: pointer;
   }
 </style>

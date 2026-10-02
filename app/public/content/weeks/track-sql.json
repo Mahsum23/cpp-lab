@@ -78,6 +78,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",
@@ -277,6 +278,585 @@
             "note": null,
             "requires": [],
             "forbids": []
+          }
+        ]
+      },
+      "practice": {
+        "write": {
+          "lang": "sql",
+          "setup": "CREATE TABLE users (\n  id       int PRIMARY KEY,\n  email    text NOT NULL,\n  country  text NOT NULL,\n  deleted  boolean NOT NULL DEFAULT false\n);\nINSERT INTO users VALUES\n  (1, 'ana@mail.io', 'DE', false),\n  (2, 'bo@mail.io',  'FR', false),\n  (3, 'cy@mail.io',  'US', false),\n  (4, 'dee@mail.io', 'UZ', false),\n  (5, 'eli@mail.io', 'DE', true),\n  (6, 'fay@mail.io', 'FR', false),\n  (7, 'deena@mail.io', 'UZ', false);\n\nCREATE TABLE orders (\n  id          int PRIMARY KEY,\n  user_id     int NOT NULL REFERENCES users,\n  status      text NOT NULL,\n  amount      numeric(10,2) NOT NULL,\n  code        text NOT NULL,\n  created_at  timestamptz NOT NULL\n);\nINSERT INTO orders\nSELECT g,\n       g % 6 + 1,\n       (ARRAY['paid', 'paid', 'pending', 'cancelled', 'paid'])[g % 5 + 1],\n       (g * 37 % 200) + 0.50,\n       (ARRAY['AB', 'CBX', 'BX'])[g % 3 + 1] || lpad(g::text, 4, '0'),\n       -- two orders per timestamp: ties are what make paging and ranges honest\n       timestamptz '2026-03-01 08:00+00' + ((g + 1) / 2) * interval '14 hours'\nFROM generate_series(1, 24) g;\nCREATE INDEX orders_status_idx ON orders (status);",
+          "defs": {},
+          "challenges": [
+            {
+              "id": "fk-index",
+              "prompt": "Every page of the app loads a user's orders with `WHERE user_id = $1`, and PostgreSQL does not index a foreign key for you. Create the index on `orders` that serves that lookup.",
+              "solution": "CREATE INDEX ON orders (user_id);",
+              "hint": "A foreign key constrains the column; it does not make it searchable.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes\nWHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "unique-email",
+              "prompt": "Two accounts must never share an email. Enforce it on `users.email` with an index.",
+              "solution": "CREATE UNIQUE INDEX ON users (email);",
+              "hint": "An index can refuse duplicates as well as find things.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes WHERE tablename = 'users' AND indexname <> 'users_pkey'\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "unique-any-case",
+              "prompt": "`Ana@Mail.io` and `ana@mail.io` are the same mailbox. Make it impossible for two users to have emails that differ only in letter case.",
+              "solution": "CREATE UNIQUE INDEX ON users (lower(email));",
+              "hint": "The uniqueness has to be about a value computed from the column.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes WHERE tablename = 'users' AND indexname <> 'users_pkey'\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "filter-then-sort",
+              "prompt": "The hottest query is `WHERE user_id = $1 ORDER BY created_at`. Create the one two-column index that serves both the filter and the sort, so no sort step is needed.",
+              "solution": "CREATE INDEX ON orders (user_id, created_at);",
+              "hint": "The column you test with `=` goes first; within one user, the rows then come out sorted by the second.",
+              "verify": "SELECT string_agg(a.attname, ', ' ORDER BY k.ord) AS key_columns\nFROM pg_index i\nJOIN pg_class c ON c.oid = i.indexrelid\nCROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)\nJOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum\nWHERE i.indrelid = 'orders'::regclass AND c.relname NOT IN ('orders_pkey', 'orders_status_idx')\nGROUP BY c.relname;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "mixed-directions",
+              "prompt": "A report runs `ORDER BY user_id, created_at DESC`. A plain `(user_id, created_at)` index can't produce that order, so Postgres sorts. Create a two-column index that can produce it directly.",
+              "solution": "CREATE INDEX ON orders (user_id, created_at DESC);",
+              "hint": "Each column of an index has its own direction. Read it forwards or backwards — what order do you need?",
+              "verify": "SELECT string_agg(a.attname, ', ' ORDER BY k.ord) AS key_columns,\n       (i.indoption[0] & 1) <> (i.indoption[1] & 1) AS directions_differ\nFROM pg_index i\nJOIN pg_class c ON c.oid = i.indexrelid\nCROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)\nJOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum\nWHERE i.indrelid = 'orders'::regclass AND c.relname NOT IN ('orders_pkey', 'orders_status_idx')\nGROUP BY c.relname, i.indoption;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "pending-only",
+              "prompt": "Only *pending* orders are ever looked up by `created_at`, and they are a small slice of the table. Create an index on `created_at` that contains pending orders and nothing else.",
+              "solution": "CREATE INDEX ON orders (created_at) WHERE status = 'pending';",
+              "hint": "An index can carry a WHERE clause of its own.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes\nWHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "one-cart",
+              "prompt": "A user may have any number of paid orders but at most **one** order with status `'cart'`. Enforce that with a single index.",
+              "solution": "CREATE UNIQUE INDEX ON orders (user_id) WHERE status = 'cart';",
+              "hint": "Unique, but only among some of the rows.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes\nWHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "carry-amount",
+              "prompt": "`SELECT amount FROM orders WHERE user_id = $1` should be answered from the index alone, with no trip to the table. Create one index keyed on `user_id` that also carries `amount` — without making `amount` part of the sort key.",
+              "solution": "CREATE INDEX ON orders (user_id) INCLUDE (amount);",
+              "hint": "There is a clause for columns that ride along in the leaf pages.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes\nWHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "pattern-ops",
+              "prompt": "`WHERE code LIKE 'AB%'` has to use an index whatever the database's collation is, and you may not change the column's collation. Create that index on `code`.",
+              "solution": "CREATE INDEX ON orders (code text_pattern_ops);",
+              "hint": "An index column can name an operator class that compares byte by byte.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes\nWHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "index-a-day",
+              "prompt": "Reports filter with `WHERE (created_at AT TIME ZONE 'UTC')::date = $1`. Create an index on exactly that expression, spelled the same way. (Try `created_at::date` first if you like — and read the error.)",
+              "solution": "CREATE INDEX ON orders (((created_at AT TIME ZONE 'UTC')::date));",
+              "hint": "An index expression must give the same answer whatever the session's time zone is.",
+              "verify": "SELECT regexp_replace(indexdef, 'INDEX \\S+ ON ', 'INDEX ON ') AS definition\nFROM pg_indexes\nWHERE tablename = 'orders' AND indexname NOT IN ('orders_pkey', 'orders_status_idx')\nORDER BY 1;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "drop-unused",
+              "prompt": "`orders_status_idx` has never been used by a single query, and every insert still pays to maintain it. Remove it.",
+              "solution": "DROP INDEX orders_status_idx;",
+              "hint": "Indexes are dropped by name.",
+              "verify": "SELECT (SELECT string_agg(indexname, ', ' ORDER BY indexname) FROM pg_indexes WHERE tablename = 'orders') AS indexes,\n       (SELECT count(*) FROM information_schema.columns WHERE table_name = 'orders') AS columns;",
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "list-indexes",
+              "prompt": "Before adding anything, look at what is already there: return the name and the definition of every index on `orders`, by name.",
+              "solution": "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'orders' ORDER BY indexname;",
+              "hint": "There is a system view that holds one row per index, with its CREATE statement.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "a-whole-day",
+              "prompt": "Return `id` and `created_at` of the orders placed on 5 March 2026 (UTC), oldest first (then by id). `created_at` is indexed, so leave the column bare: no function or cast wrapped around it.",
+              "solution": "SELECT id, created_at FROM orders\nWHERE created_at >= '2026-03-05' AND created_at < '2026-03-06'\nORDER BY created_at, id;",
+              "hint": "A day is a half-open range — from its midnight, up to but not including the next one.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "a function or cast applied to created_at",
+                  "match": "created_at\\s*::|(date|date_trunc|date_part|extract|to_char|cast)\\s*\\(|at\\s+time\\s+zone"
+                }
+              ]
+            },
+            {
+              "id": "from-a-date",
+              "prompt": "Someone wrote `WHERE to_char(created_at, 'YYYY-MM-DD') >= '2026-03-06'`. Return the same orders' `id`s, in id order, with a condition on the bare column instead.",
+              "solution": "SELECT id FROM orders WHERE created_at >= '2026-03-06' ORDER BY id;",
+              "hint": "Compare the timestamp with a timestamp.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "a function or cast applied to created_at",
+                  "match": "created_at\\s*::|(date|date_trunc|date_part|extract|to_char|cast)\\s*\\(|at\\s+time\\s+zone"
+                }
+              ]
+            },
+            {
+              "id": "tax-on-the-other-side",
+              "prompt": "`WHERE amount * 1.2 > 124.2` hides `amount` from its index. Return `id` and `amount` of the same orders, in id order, with `amount` alone on its side of the comparison.",
+              "solution": "SELECT id, amount FROM orders WHERE amount > 103.5 ORDER BY id;",
+              "hint": "Do the arithmetic once, to the constant.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "arithmetic on the amount column",
+                  "match": "amount\\s*[*/+-]|[*/+-]\\s*amount"
+                }
+              ]
+            },
+            {
+              "id": "prefix-as-range",
+              "prompt": "`WHERE left(code, 2) = 'BX'` can't use an index on `code`. Return the same `code`s, sorted, with a prefix match the planner can turn into a range.",
+              "solution": "SELECT code FROM orders WHERE code LIKE 'BX%' ORDER BY code;",
+              "hint": "The pattern-matching operator, with a wildcard only at the end.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "cutting the string up with a function",
+                  "match": "(left|substr|substring|position|strpos|starts_with|split_part)\\s*\\("
+                }
+              ]
+            },
+            {
+              "id": "no-cast-key",
+              "prompt": "To silence a type error, someone wrote `WHERE id::text = '17'`. Return that order's `id` and `status` with a condition the primary key can actually use.",
+              "solution": "SELECT id, status FROM orders WHERE id = 17;",
+              "hint": "Compare the integer with an integer.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "casting the key to text",
+                  "match": "::\\s*(text|varchar|character)|cast\\s*\\(|\\btext\\s*\\("
+                }
+              ]
+            },
+            {
+              "id": "no-lower-needed",
+              "prompt": "Emails are stored in lowercase already and only `users.email` itself is indexed. Return `id` and `email` of the user with email `dee@mail.io`, without wrapping the column in a function.",
+              "solution": "SELECT id, email FROM users WHERE email = 'dee@mail.io';",
+              "hint": "If the data is already normalised, compare it directly.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "a function around email, or a case-insensitive operator",
+                  "match": "(lower|upper|initcap)\\s*\\(|\\bilike\\b|~\\*"
+                }
+              ]
+            },
+            {
+              "id": "interval-moves-over",
+              "prompt": "`WHERE created_at + interval '2 days' >= '2026-03-06'` puts the column inside an expression. Return the same orders' `id`s, in id order, with `created_at` alone.",
+              "solution": "SELECT id FROM orders WHERE created_at >= timestamptz '2026-03-06' - interval '2 days' ORDER BY id;",
+              "hint": "Move the interval across to the constant side, flipping its sign.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "arithmetic on created_at",
+                  "match": "created_at\\s*[+-]"
+                }
+              ]
+            },
+            {
+              "id": "latest-three",
+              "prompt": "Return the three most recent orders of user 4: `id` and `created_at`, newest first (ties: higher id first). (With an index on `(user_id, created_at)` this reads three index entries and stops.)",
+              "solution": "SELECT id, created_at FROM orders WHERE user_id = 4 ORDER BY created_at DESC, id DESC LIMIT 3;",
+              "hint": "Sort, then cut.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "keyset-page",
+              "prompt": "Orders are listed by `(created_at, id)`, five per page. The last row of the previous page had `created_at = '2026-03-04 06:00+00'` and `id = 9`. Return the next page — `id`, `created_at` — without `OFFSET`, which reads and throws away every earlier row.",
+              "solution": "SELECT id, created_at FROM orders\nWHERE (created_at, id) > ('2026-03-04 06:00+00', 9)\nORDER BY created_at, id\nLIMIT 5;",
+              "hint": "Two columns can be compared as one, left to right — `(a, b) > (x, y)`.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "OFFSET, which still reads every row it skips",
+                  "match": "\\boffset\\b"
+                }
+              ]
+            }
+          ]
+        },
+        "drill": [
+          {
+            "id": "not-deleted",
+            "kind": "predict",
+            "code": "-- 200,000 rows; 1% have deleted = true. There is an index on (deleted).\nEXPLAIN (COSTS OFF) SELECT * FROM t WHERE deleted = false;",
+            "prompt": "Which plan comes back on PostgreSQL 16?",
+            "options": [
+              {
+                "text": "`Index Scan using t_deleted` — there is an index on exactly that column",
+                "correct": false,
+                "why": "An index existing is not a reason to use it. For 198,000 matching rows, 198,000 random heap fetches lose to one sequential pass."
+              },
+              {
+                "text": "`Bitmap Heap Scan` — a middle gear for many rows",
+                "correct": false,
+                "why": "A bitmap scan is for a few thousand rows. At 99% of the table there is nothing to gain from sorting the locations first: every page is needed anyway."
+              },
+              {
+                "text": "`Seq Scan on t` with `Filter: (NOT deleted)`",
+                "correct": true,
+                "why": "99% of the table matches. Reading it straight through is far cheaper than one index lookup and one random heap jump per row, so the planner ignores the index — correctly. The same index *is* used for `deleted = true`, the rare value."
+              }
+            ]
+          },
+          {
+            "id": "leading-column",
+            "kind": "choose",
+            "code": "CREATE INDEX ON t (country, created_at);",
+            "prompt": "Which condition lets PostgreSQL 16 jump straight to the matching entries of this index?",
+            "options": [
+              {
+                "text": "`WHERE country = 'DE' AND created_at > '2026-04-01'`",
+                "correct": true,
+                "why": "The index is sorted by country first, then by created_at within each country. An equality on the first column and a range on the second is one contiguous run of entries: descend once, read until the range ends."
+              },
+              {
+                "text": "`WHERE created_at > '2026-04-01'`",
+                "correct": false,
+                "why": "Matching created_at values are scattered across every country's section, so there is no single place to start. PostgreSQL 16 can still walk the *whole* index checking each entry, but it can't seek. (PostgreSQL 18 added B-tree *skip scan*, which hops from one country to the next — worth it when the leading column has few distinct values.)"
+              },
+              {
+                "text": "`WHERE country > 'T' AND created_at = '2026-03-01'`",
+                "correct": false,
+                "why": "A range on the first column means the second column is no longer sorted across the run, so only the `country` part narrows the search; `created_at` is checked entry by entry inside it."
+              }
+            ]
+          },
+          {
+            "id": "index-only",
+            "kind": "predict",
+            "code": "CREATE INDEX t_name ON t (name);\nEXPLAIN (COSTS OFF) SELECT name FROM t WHERE name = 'name7';\nEXPLAIN (COSTS OFF) SELECT *    FROM t WHERE name = 'name7';",
+            "prompt": "The first plan says `Index Only Scan using t_name`. What does the second say?",
+            "options": [
+              {
+                "text": "`Index Scan using t_name` — it has to visit the table for the other columns",
+                "correct": true,
+                "why": "`SELECT *` needs columns that live only in the heap, so each match costs a second lookup, from index entry to row. Selecting only what the index holds skips it."
+              },
+              {
+                "text": "`Index Only Scan using t_name` — the WHERE clause is the same",
+                "correct": false,
+                "why": "The WHERE clause decides how rows are found; the SELECT list decides whether the table has to be visited to finish them. `*` includes columns the index lacks."
+              },
+              {
+                "text": "`Seq Scan on t` — `SELECT *` is too wide for an index",
+                "correct": false,
+                "why": "One matching row is cheap to fetch from the heap. The index is still used to find it; only the extra hop to the table is added."
+              }
+            ]
+          },
+          {
+            "id": "suffix-like",
+            "kind": "choose",
+            "code": "CREATE INDEX ON t (name);\nSELECT * FROM t WHERE name LIKE '%77';",
+            "prompt": "Can a B-tree index on `name` help this query?",
+            "options": [
+              {
+                "text": "Yes — LIKE always uses an index when one exists on the column",
+                "correct": false,
+                "why": "Only a pattern with a fixed prefix can be rewritten into a range, and only under the C collation or a pattern-ops index."
+              },
+              {
+                "text": "Yes, if the index uses `text_pattern_ops`",
+                "correct": false,
+                "why": "`text_pattern_ops` makes *prefix* matches indexable under any collation. A leading wildcard is still a scan of everything."
+              },
+              {
+                "text": "No — a sorted list can't find values by how they end; a trigram (`pg_trgm`) GIN index can",
+                "correct": true,
+                "why": "A B-tree is sorted from the first character. Everything starting with \"name7\" is one run; everything ending in \"77\" is scattered across the whole list. On PG16 the plan is `Seq Scan` with `Filter: (name ~~ '%77'::text)`."
+              }
+            ]
+          },
+          {
+            "id": "newest-ten",
+            "kind": "predict",
+            "code": "CREATE INDEX t_created ON t (created_at);   -- ascending\nEXPLAIN (COSTS OFF) SELECT * FROM t ORDER BY created_at DESC LIMIT 10;",
+            "prompt": "What does PostgreSQL 16 do about the descending order?",
+            "options": [
+              {
+                "text": "`Limit` over `Sort` over `Seq Scan` — the index is ascending",
+                "correct": false,
+                "why": "Direction only matters when *columns disagree* (`a, b DESC`). One column can be read either way."
+              },
+              {
+                "text": "`Limit` over `Index Scan Backward using t_created` — no sort at all",
+                "correct": true,
+                "why": "A B-tree's leaf pages are linked both ways, so reading it from the far end gives descending order for free. A separate `DESC` index on a single column buys nothing."
+              },
+              {
+                "text": "An error — the index has to be declared DESC to be used for DESC",
+                "correct": false,
+                "why": "Index direction never causes an error; at worst it means a sort step. Here it doesn't even cost that."
+              }
+            ]
+          },
+          {
+            "id": "mixed-order-plan",
+            "kind": "predict",
+            "code": "CREATE INDEX ON t (user_id, created_at);\nEXPLAIN (COSTS OFF) SELECT * FROM t ORDER BY user_id, created_at DESC LIMIT 10;",
+            "prompt": "What appears above the index scan in the plan?",
+            "options": [
+              {
+                "text": "A full `Sort` over a `Seq Scan`",
+                "correct": false,
+                "why": "That was the only option before PostgreSQL 13. Now the planner can use the part of the order the index already provides."
+              },
+              {
+                "text": "Nothing — `Index Scan Backward` handles the DESC",
+                "correct": false,
+                "why": "Backwards gives `user_id DESC, created_at DESC`. You asked for user_id ascending *and* created_at descending; no single direction of this index produces that."
+              },
+              {
+                "text": "`Incremental Sort` with `Presorted Key: user_id`",
+                "correct": true,
+                "why": "The index already delivers rows grouped by user_id; only within each user does the order need flipping. Incremental sort (PostgreSQL 13+) sorts one small group at a time. An index `(user_id, created_at DESC)` would remove even that."
+              }
+            ]
+          },
+          {
+            "id": "cast-hides-column",
+            "kind": "find",
+            "code": "CREATE INDEX ON t (created_at);\nSELECT * FROM t WHERE created_at::date = '2026-03-01';\n-- plan: Parallel Seq Scan, Filter: ((created_at)::date = '2026-03-01'::date)",
+            "prompt": "Why does the index go unused?",
+            "options": [
+              {
+                "text": "The planner thinks a whole day is too many rows",
+                "correct": false,
+                "why": "The same day written as a range uses the index. Nothing about the row count changed — only where the cast sits."
+              },
+              {
+                "text": "The cast makes the condition about a different value, which the index is not sorted by",
+                "correct": true,
+                "why": "The index holds created_at, not created_at::date. Rewrite it as `created_at >= '2026-03-01' AND created_at < '2026-03-02'` and PG16 plans `Index Scan using t_created`."
+              },
+              {
+                "text": "Comparing a timestamp with a date is not allowed by the index",
+                "correct": false,
+                "why": "Mixed types are fine when the *constant* is converted. The trouble is converting the *column*, for every row."
+              }
+            ]
+          },
+          {
+            "id": "partial-scope",
+            "kind": "predict",
+            "code": "CREATE INDEX t_pending ON t (created_at) WHERE status = 'pending';\nEXPLAIN (COSTS OFF) SELECT * FROM t WHERE status = 'paid' AND created_at > '2026-04-01';",
+            "prompt": "Can `t_pending` be used here?",
+            "options": [
+              {
+                "text": "Yes, then it filters for paid",
+                "correct": false,
+                "why": "The paid rows aren't in it at all. Using it would silently return nothing, which is exactly the mistake the implication rule prevents."
+              },
+              {
+                "text": "Yes — partial indexes are used for any query on their key column",
+                "correct": false,
+                "why": "The predicate is part of the index's meaning. Same query with `status = 'pending'`: `Index Scan using t_pending`."
+              },
+              {
+                "text": "No — it holds only pending rows, so it can't answer a question about paid ones",
+                "correct": true,
+                "why": "The planner may use a partial index only when the query's WHERE *implies* the index's WHERE. `status = 'paid'` does not imply `status = 'pending'`."
+              }
+            ]
+          },
+          {
+            "id": "two-nulls",
+            "kind": "predict",
+            "code": "CREATE TABLE u (id int, email text);\nCREATE UNIQUE INDEX ON u (email);\nINSERT INTO u VALUES (1, NULL);\nINSERT INTO u VALUES (2, NULL);\nSELECT count(*) FROM u;",
+            "prompt": "What happens?",
+            "options": [
+              {
+                "text": "Both inserts succeed and the count is 2",
+                "correct": true,
+                "why": "A unique index compares values, and NULL is not equal to NULL — so two NULLs are not duplicates. Since PostgreSQL 15 you can say `UNIQUE NULLS NOT DISTINCT` when you want at most one."
+              },
+              {
+                "text": "The first insert fails: a unique column can't be NULL",
+                "correct": false,
+                "why": "UNIQUE and NOT NULL are separate constraints. A PRIMARY KEY is both; a unique index is only the first."
+              },
+              {
+                "text": "The second insert fails with a duplicate key error",
+                "correct": false,
+                "why": "That is what `NULLS NOT DISTINCT` (PG15+) does. The default treats every NULL as distinct."
+              }
+            ]
+          },
+          {
+            "id": "explain-analyze-delete",
+            "kind": "predict",
+            "code": "-- u has two rows\nEXPLAIN ANALYZE DELETE FROM u;\nSELECT count(*) FROM u;",
+            "prompt": "What does the count say?",
+            "options": [
+              {
+                "text": "2 — EXPLAIN only shows a plan",
+                "correct": false,
+                "why": "Plain `EXPLAIN` only plans. `EXPLAIN ANALYZE` executes, which is the only way it can report actual rows and times."
+              },
+              {
+                "text": "An error: EXPLAIN only accepts SELECT",
+                "correct": false,
+                "why": "INSERT, UPDATE, DELETE and MERGE can all be explained — and analysed, with their effects."
+              },
+              {
+                "text": "0 — `EXPLAIN ANALYZE` really runs the statement",
+                "correct": true,
+                "why": "ANALYZE means \"execute it and measure\". The plan printed `Seq Scan on u (actual rows=2 …)` and the rows are gone. Wrap it in `BEGIN; … ROLLBACK;` whenever you analyse a write."
+              }
+            ]
+          },
+          {
+            "id": "stale-statistics",
+            "kind": "choose",
+            "code": "CREATE TABLE b (id int, k int);\nCREATE INDEX ON b (k);\nINSERT INTO b SELECT g, 1 FROM generate_series(1, 10) g;\nANALYZE b;\nINSERT INTO b SELECT g, g FROM generate_series(11, 300000) g;\nEXPLAIN (COSTS OFF) SELECT * FROM b WHERE k > 5;\n-- Index Scan using b_k_idx on b   (for almost 300,000 rows)",
+            "prompt": "Why an index scan for nearly the whole table, and what fixes it?",
+            "options": [
+              {
+                "text": "Postgres always prefers an index when one exists; drop it",
+                "correct": false,
+                "why": "Run `ANALYZE b` and the very same query plans a sequential scan. The choice is cost-based, and the cost was computed from stale numbers."
+              },
+              {
+                "text": "The index is corrupted; `REINDEX` fixes it",
+                "correct": false,
+                "why": "The index is fine and complete. The *estimate* is wrong, and estimates come from statistics, not from the index."
+              },
+              {
+                "text": "The statistics still describe the 10-row table; `ANALYZE b` and the plan becomes `Seq Scan`",
+                "correct": true,
+                "why": "The planner never reads your data to plan — it reads the sample `ANALYZE` took, which says every k is 1, so `k > 5` \"matches nothing\". Autovacuum would analyze eventually; after a bulk load, do it yourself."
+              }
+            ]
+          },
+          {
+            "id": "write-amplification",
+            "kind": "choose",
+            "code": "CREATE TABLE p (id int PRIMARY KEY, a int, b int);\nCREATE INDEX ON p (a);\nCREATE INDEX ON p (b);\nINSERT INTO p VALUES (1, 2, 3);",
+            "prompt": "How many B-trees does that one INSERT write to, besides the table itself?",
+            "options": [
+              {
+                "text": "One — only the primary key is maintained on insert; the others are updated lazily",
+                "correct": false,
+                "why": "B-tree indexes in PostgreSQL are maintained synchronously, in the same transaction. (GIN has a \"pending list\" that defers work; B-tree has no such thing.)"
+              },
+              {
+                "text": "Three — the primary key's index and both others",
+                "correct": true,
+                "why": "Every index is a separate sorted copy, and each must gain an entry for the new row. This is the cost side of every index: reads get cheaper, every write gets a little dearer, forever."
+              },
+              {
+                "text": "None — indexes are rebuilt by VACUUM",
+                "correct": false,
+                "why": "VACUUM removes dead entries; it never adds new ones. A row is findable through an index the moment its transaction commits."
+              }
+            ]
           }
         ]
       },
@@ -494,6 +1074,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",
@@ -790,6 +1371,531 @@
             "note": null,
             "requires": [],
             "forbids": []
+          }
+        ]
+      },
+      "practice": {
+        "write": {
+          "lang": "sql",
+          "setup": "CREATE TABLE customers (\n  id    int PRIMARY KEY,\n  name  text NOT NULL,\n  city  text NOT NULL\n);\nINSERT INTO customers VALUES\n  (1, 'ana', 'Tashkent'),\n  (2, 'bo',  'Lisbon'),\n  (3, 'cy',  'Oslo'),\n  (4, 'dee', 'Lisbon'),\n  (5, 'eli', 'Oslo');\n\nCREATE TABLE orders (\n  id           int PRIMARY KEY,\n  customer_id  int NOT NULL REFERENCES customers,\n  status       text NOT NULL,\n  amount       numeric(10,2) NOT NULL,\n  placed       date NOT NULL\n);\nINSERT INTO orders VALUES\n  ( 1, 1, 'paid',      120.00, '2026-01-05'),\n  ( 2, 1, 'paid',       40.00, '2026-01-20'),\n  ( 3, 2, 'cancelled', 500.00, '2026-01-21'),\n  ( 4, 2, 'paid',       30.00, '2026-02-02'),\n  ( 5, 3, 'paid',       90.00, '2026-02-03'),\n  ( 6, 3, 'paid',       25.00, '2026-02-14'),\n  ( 7, 3, 'pending',    62.50, '2026-02-15'),\n  ( 8, 4, 'cancelled',  75.00, '2026-03-01'),\n  ( 9, 4, 'cancelled',  15.00, '2026-03-02'),\n  (10, 1, 'paid',       90.00, '2026-03-03'),\n  (11, 2, 'pending',   210.00, '2026-03-04'),\n  (12, 3, 'paid',      120.00, '2026-03-09');\n\nCREATE TABLE tags (id int PRIMARY KEY, label text NOT NULL);\nINSERT INTO tags VALUES (1, 'SQL'), (2, 'sql'), (3, 'Go'), (4, 'go'), (5, 'go'), (6, 'C++');",
+          "defs": {},
+          "challenges": [
+            {
+              "id": "paid-over-100",
+              "prompt": "Which customers have **paid** more than 150 in total? Return `customer_id` and `total`, by customer_id. Cancelled and pending orders must not count.",
+              "solution": "SELECT customer_id, sum(amount) AS total\nFROM orders\nWHERE status = 'paid'\nGROUP BY customer_id\nHAVING sum(amount) > 150\nORDER BY customer_id;",
+              "hint": "One condition is about a row, the other about a group — they belong to different clauses.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "busy-customers",
+              "prompt": "Which customers placed at least two orders worth more than 50 each? Return `customer_id` and that count as `big_orders`, by customer_id.",
+              "solution": "SELECT customer_id, count(*) AS big_orders\nFROM orders\nWHERE amount > 50\nGROUP BY customer_id\nHAVING count(*) >= 2\nORDER BY customer_id;",
+              "hint": "Filter the orders first, then count what's left per customer.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "crowded-cities",
+              "prompt": "Return each city with at least two customers: `city` and `customers`, by city.",
+              "solution": "SELECT city, count(*) AS customers\nFROM customers\nGROUP BY city\nHAVING count(*) >= 2\nORDER BY city;",
+              "hint": "A condition on a count can only be checked once the groups exist.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "paid-and-all",
+              "prompt": "For every customer who has orders: `customer_id`, `orders` (all of them) and `paid` (only the paid ones), by customer_id. One query, one pass — filtering on status in `WHERE` would change the first count too.",
+              "solution": "SELECT customer_id,\n       count(*) AS orders,\n       count(*) FILTER (WHERE status = 'paid') AS paid\nFROM orders\nGROUP BY customer_id\nORDER BY customer_id;",
+              "hint": "An aggregate can carry its own filter, or count a CASE that is NULL for the rows you don't want.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "share-of-orders",
+              "prompt": "For each status: `status` and its `share` of all orders, as a fraction rounded to 2 decimal places, by status.",
+              "solution": "SELECT status, round(count(*)::numeric / (SELECT count(*) FROM orders), 2) AS share\nFROM orders\nGROUP BY status\nORDER BY status;",
+              "hint": "The denominator is one number for the whole table — a scalar subquery can supply it.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "filter-on-net",
+              "prompt": "Return `id` and `net` (the amount times 0.8) for orders whose net is over 50, by id. Write the expression `amount * 0.8` **once** and filter on the name.",
+              "solution": "SELECT id, net\nFROM (SELECT id, amount * 0.8 AS net FROM orders) o\nWHERE net > 50\nORDER BY id;",
+              "hint": "Give the expression its name in an inner query; the outer query's WHERE can see it.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "the expression written twice",
+                  "match": "amount\\s*\\*\\s*0?\\.8[\\s\\S]*amount\\s*\\*\\s*0?\\.8"
+                }
+              ]
+            },
+            {
+              "id": "top-gross",
+              "prompt": "The three orders with the highest `gross` (amount times 1.2): `id` and `gross`, highest first, ties by id. Sort by the alias.",
+              "solution": "SELECT id, amount * 1.2 AS gross FROM orders ORDER BY gross DESC, id LIMIT 3;",
+              "hint": "ORDER BY runs after SELECT, so the name exists by then.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "rounded-sort",
+              "prompt": "Return `id` and `gross` (amount times 1.2) for every order, sorted by gross **rounded to the nearest 50**, highest first, then by id. `ORDER BY round(gross / 50)` is an error — find out why, and write what works.",
+              "solution": "SELECT id, amount * 1.2 AS gross FROM orders ORDER BY round(amount * 1.2 / 50) DESC, id;",
+              "hint": "Inside an expression, ORDER BY looks for input columns, not output names.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "tags-any-case",
+              "prompt": "The `tags` table has labels in mixed case (`Go`, `go`). Count them case-insensitively: `label` in lower case, and `uses`, by label. Each label must appear once.",
+              "solution": "SELECT lower(label) AS label_lower, count(*) AS uses\nFROM tags\nGROUP BY lower(label)\nORDER BY label_lower;",
+              "hint": "If the alias has the same name as a column, GROUP BY picks the column. Avoid the clash.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "per-month",
+              "prompt": "Orders per month of `placed`: `month` (the first day of the month, as a date) and `orders`, in month order.",
+              "solution": "SELECT date_trunc('month', placed)::date AS month, count(*) AS orders\nFROM orders\nGROUP BY 1\nORDER BY 1;",
+              "hint": "Truncate the date to its month, group by that, and cast back to a date.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "by-the-key",
+              "prompt": "For each customer with orders: `id`, `name`, `city` and `orders` (how many), by id. Group by as little as Postgres will let you: just the customers' primary key.",
+              "solution": "SELECT c.id, c.name, c.city, count(*) AS orders\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nGROUP BY c.id\nORDER BY c.id;",
+              "hint": "Grouping by a primary key makes every other column of that table safe to select.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": [
+                {
+                  "say": "grouping by more than the key",
+                  "match": "group\\s+by\\s+c\\.id\\s*,|group\\s+by\\s+c\\.name|group\\s+by\\s+[^;]*city"
+                }
+              ]
+            },
+            {
+              "id": "biggest-spender",
+              "prompt": "The customer with the largest **paid** total: `customer_id` and `total`. (Nested aggregates like `max(sum(amount))` aren't allowed — sort the groups instead.)",
+              "solution": "SELECT customer_id, sum(amount) AS total\nFROM orders\nWHERE status = 'paid'\nGROUP BY customer_id\nORDER BY total DESC\nLIMIT 1;",
+              "hint": "Group, order by the sum, keep one.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "distinct-by-max",
+              "prompt": "Every `customer_id` that has an order, once each, ordered by their single largest order, biggest first. (`SELECT DISTINCT customer_id … ORDER BY amount` is an error.)",
+              "solution": "SELECT customer_id FROM orders GROUP BY customer_id ORDER BY max(amount) DESC;",
+              "hint": "After DISTINCT there's no single amount per customer — say which one with an aggregate.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "how-many-customers",
+              "prompt": "How many different customers have at least one **paid** order? One row, one column named `customers`.",
+              "solution": "SELECT count(DISTINCT customer_id) AS customers FROM orders WHERE status = 'paid';",
+              "hint": "Count each customer once, not each order.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "refunds-zero",
+              "prompt": "Return the total amount of `'refunded'` orders as one value named `total` — `0` when there are none, never NULL.",
+              "solution": "SELECT coalesce(sum(amount), 0) AS total FROM orders WHERE status = 'refunded';",
+              "hint": "The sum of no rows is NULL; something returns its first non-NULL argument.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "always-one-row",
+              "prompt": "A dashboard tile needs exactly one row for customer 5 even though they have no orders: `orders` (the count) and `spent` (the total, 0 if none).",
+              "solution": "SELECT count(*) AS orders, coalesce(sum(amount), 0) AS spent FROM orders WHERE customer_id = 5;",
+              "hint": "An aggregate with no GROUP BY always returns one row. Adding one makes it return a row per group — here, none.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "over-target",
+              "prompt": "Has the shop taken more than 600 in **paid** orders? One row: `paid_total`, and a boolean `over_target`.",
+              "solution": "SELECT sum(amount) AS paid_total, sum(amount) > 600 AS over_target FROM orders WHERE status = 'paid';",
+              "hint": "A comparison is an expression; it can sit in the SELECT list around an aggregate.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "second-largest",
+              "prompt": "The second-largest order: `id` and `amount`, with ties broken by the smaller id.",
+              "solution": "SELECT id, amount FROM orders ORDER BY amount DESC, id LIMIT 1 OFFSET 1;",
+              "hint": "LIMIT runs last, after the sort — and it can skip as well as take.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            },
+            {
+              "id": "latest-per-status",
+              "prompt": "For each status, the most recent `placed` date: `status` and `latest`, newest first, ties by status.",
+              "solution": "SELECT status, max(placed) AS latest FROM orders GROUP BY status ORDER BY latest DESC, status;",
+              "hint": "One aggregate per group, then sort the groups by it.",
+              "verify": null,
+              "ordered": null,
+              "given": null,
+              "note": null,
+              "requires": [],
+              "forbids": []
+            }
+          ]
+        },
+        "drill": [
+          {
+            "id": "alias-in-where",
+            "kind": "predict",
+            "code": "SELECT id, amount * 2 AS doubled FROM orders WHERE doubled > 100;",
+            "prompt": "What does PostgreSQL say?",
+            "options": [
+              {
+                "text": "It returns the orders whose doubled amount is over 100",
+                "correct": false,
+                "why": "It reads that way, which is the trap. The alias doesn't exist yet when WHERE runs. (A few engines bend this rule; PostgreSQL and the standard don't.)"
+              },
+              {
+                "text": "`ERROR: column \"doubled\" does not exist`",
+                "correct": true,
+                "why": "WHERE (step 2) runs before SELECT (step 5) has computed or named anything. Repeat the expression, or name it in a subquery and filter outside."
+              },
+              {
+                "text": "`ERROR: aggregate functions are not allowed in WHERE`",
+                "correct": false,
+                "why": "There's no aggregate here — `amount * 2` is a per-row expression. The only problem is the name."
+              }
+            ]
+          },
+          {
+            "id": "having-ordered",
+            "kind": "predict",
+            "code": "-- statuses: 7 paid, 3 cancelled, 2 pending\nSELECT status, count(*) FROM orders\nGROUP BY status HAVING count(*) > 2 ORDER BY 2 DESC;",
+            "prompt": "What comes back?",
+            "options": [
+              {
+                "text": "`paid 7`, `cancelled 3`, `pending 2`",
+                "correct": false,
+                "why": "`> 2` is strict. The pending group has exactly 2 and is removed."
+              },
+              {
+                "text": "`paid 7`, then `cancelled 3`",
+                "correct": true,
+                "why": "HAVING drops the pending group (2 is not > 2), and `ORDER BY 2` means \"the second output column\", the count, descending."
+              },
+              {
+                "text": "Sorted by status, because `2` is a constant",
+                "correct": false,
+                "why": "A bare integer in ORDER BY (and GROUP BY) is a column position, not a constant. It's a SQL-92 convention that every major engine still honours."
+              }
+            ]
+          },
+          {
+            "id": "sum-of-nothing",
+            "kind": "predict",
+            "code": "-- no order has status 'refunded'\nSELECT sum(amount) AS total, count(*) AS n FROM orders WHERE status = 'refunded';",
+            "prompt": "What does it return?",
+            "options": [
+              {
+                "text": "No rows at all",
+                "correct": false,
+                "why": "That's what happens with a GROUP BY: no input rows means no groups. Without one, you always get exactly one row."
+              },
+              {
+                "text": "One row: total is NULL, n is 0",
+                "correct": true,
+                "why": "With no GROUP BY, the whole (empty) input is one group, so there is always one row. count of nothing is 0; sum of nothing is NULL. `coalesce(sum(amount), 0)` when you mean zero."
+              },
+              {
+                "text": "One row: total 0, n 0",
+                "correct": false,
+                "why": "count is the only standard aggregate that returns 0 for no rows. sum, avg, min and max all return NULL."
+              }
+            ]
+          },
+          {
+            "id": "grouped-nothing",
+            "kind": "predict",
+            "code": "SELECT status, sum(amount) FROM orders WHERE status = 'refunded' GROUP BY status;",
+            "prompt": "And with a GROUP BY?",
+            "options": [
+              {
+                "text": "One row: `refunded` and NULL",
+                "correct": false,
+                "why": "A group exists only if some row belongs to it. Nothing says \"refunded\" here except your WHERE clause."
+              },
+              {
+                "text": "One row: NULL and NULL",
+                "correct": false,
+                "why": "That one-row behaviour belongs to aggregates *without* GROUP BY."
+              },
+              {
+                "text": "`(0 rows)`",
+                "correct": true,
+                "why": "No input rows, so no groups, so nothing to report. Code that reads \"the first row\" of this result will crash where the version without GROUP BY returned a NULL."
+              }
+            ]
+          },
+          {
+            "id": "distinct-order-by",
+            "kind": "find",
+            "code": "SELECT DISTINCT status FROM orders ORDER BY amount;",
+            "prompt": "Why does PostgreSQL reject this?",
+            "options": [
+              {
+                "text": "After DISTINCT, each status stands for many orders — there's no single amount to sort it by",
+                "correct": true,
+                "why": "The error is `for SELECT DISTINCT, ORDER BY expressions must appear in select list`. Say which amount you mean: `GROUP BY status ORDER BY max(amount)`."
+              },
+              {
+                "text": "ORDER BY may only use columns that are indexed",
+                "correct": false,
+                "why": "Indexes never decide what is *allowed*, only how fast it runs."
+              },
+              {
+                "text": "DISTINCT and ORDER BY can't appear in the same query",
+                "correct": false,
+                "why": "They can — `SELECT DISTINCT status FROM orders ORDER BY status` is fine. The sort key just has to be one of the things DISTINCT kept."
+              }
+            ]
+          },
+          {
+            "id": "alias-in-group-by",
+            "kind": "predict",
+            "code": "SELECT status AS s, count(*) FROM orders GROUP BY s ORDER BY s;",
+            "prompt": "Does `GROUP BY s` work?",
+            "options": [
+              {
+                "text": "It runs but groups everything into one row",
+                "correct": false,
+                "why": "`s` resolves to the status expression, so it groups by status exactly as `GROUP BY status` would."
+              },
+              {
+                "text": "Yes — three rows: cancelled 3, paid 7, pending 2",
+                "correct": true,
+                "why": "PostgreSQL lets GROUP BY use an output alias as an extension to the standard, as long as it doesn't clash with an input column's name."
+              },
+              {
+                "text": "No — `column \"s\" does not exist`, GROUP BY runs before SELECT",
+                "correct": false,
+                "why": "Logically true, and the standard agrees — but PostgreSQL resolves the alias anyway. HAVING is not so forgiving: `HAVING s <> 'pending'` is an error."
+              }
+            ]
+          },
+          {
+            "id": "alias-in-having",
+            "kind": "predict",
+            "code": "SELECT status AS s, count(*) FROM orders GROUP BY s HAVING s <> 'pending';",
+            "prompt": "What does PostgreSQL say?",
+            "options": [
+              {
+                "text": "`ERROR: aggregate functions are not allowed in HAVING`",
+                "correct": false,
+                "why": "HAVING is exactly where aggregates *are* allowed. The complaint is about the name."
+              },
+              {
+                "text": "Two rows, cancelled and paid",
+                "correct": false,
+                "why": "That's what `HAVING status <> 'pending'` returns. The alias is the problem."
+              },
+              {
+                "text": "`ERROR: column \"s\" does not exist`",
+                "correct": true,
+                "why": "GROUP BY accepts the alias as an extension; HAVING doesn't. Write `HAVING status <> 'pending'` — or better, put that row condition in WHERE."
+              }
+            ]
+          },
+          {
+            "id": "having-plain-column",
+            "kind": "predict",
+            "code": "SELECT status, count(*) FROM orders GROUP BY status HAVING status = 'paid';",
+            "prompt": "Is a plain column allowed in HAVING?",
+            "options": [
+              {
+                "text": "Yes, but it counts every order, so: paid 12",
+                "correct": false,
+                "why": "The groups were formed first; HAVING only chooses which to keep. The paid group still holds its 7 orders."
+              },
+              {
+                "text": "Yes, because it's grouped — one row: paid 7",
+                "correct": true,
+                "why": "A grouped column has one value per group, so HAVING can test it. It gives the same answer as `WHERE status = 'paid'`, but filters *after* grouping everything, where WHERE would have thrown the rows away first."
+              },
+              {
+                "text": "No — HAVING only accepts aggregates",
+                "correct": false,
+                "why": "HAVING accepts anything that has one value per group: aggregates, and the grouped columns themselves."
+              }
+            ]
+          },
+          {
+            "id": "nested-aggregate",
+            "kind": "predict",
+            "code": "SELECT customer_id, max(sum(amount)) FROM orders GROUP BY customer_id;",
+            "prompt": "What happens?",
+            "options": [
+              {
+                "text": "`ERROR: aggregate function calls cannot be nested`",
+                "correct": true,
+                "why": "One GROUP BY gives one level of aggregation. For the biggest total, sort the groups (`ORDER BY sum(amount) DESC LIMIT 1`) or aggregate a subquery."
+              },
+              {
+                "text": "Each customer's total, with the overall maximum repeated on every row",
+                "correct": false,
+                "why": "That's a window function: `max(sum(amount)) OVER ()` is legal, because the window runs after grouping. A plain nested aggregate isn't."
+              },
+              {
+                "text": "One row: the largest customer total",
+                "correct": false,
+                "why": "That would need a second level of grouping, which a single SELECT doesn't have."
+              }
+            ]
+          },
+          {
+            "id": "group-by-name",
+            "kind": "find",
+            "code": "SELECT c.name, c.city, count(*)\nFROM customers c JOIN orders o ON o.customer_id = c.id\nGROUP BY c.name;\n-- ERROR: column \"c.city\" must appear in the GROUP BY clause or be used in an aggregate function",
+            "prompt": "`name` is unique in this data. Why is `c.city` still rejected?",
+            "options": [
+              {
+                "text": "Nothing *promises* name is unique; group by the primary key, `c.id`, and city is allowed",
+                "correct": true,
+                "why": "PostgreSQL allows extra columns only when they are functionally dependent on the grouping — which it can prove only from a primary key (or unique not-null set). The data happening to be unique today proves nothing."
+              },
+              {
+                "text": "GROUP BY can't use a column from a joined table",
+                "correct": false,
+                "why": "It can group by any input column, joined or not. The issue is what city could mean for a group of rows."
+              },
+              {
+                "text": "City must always be inside an aggregate when you join",
+                "correct": false,
+                "why": "With `GROUP BY c.id`, `c.name` and `c.city` can be selected bare — joins don't change the rule."
+              }
+            ]
+          },
+          {
+            "id": "alias-shadows-column",
+            "kind": "predict",
+            "code": "-- tags.label: 'SQL', 'sql', 'Go', 'go', 'go', 'C++'\nSELECT lower(label) AS label, count(*) FROM tags GROUP BY label ORDER BY label, 2;",
+            "prompt": "How many rows does it return?",
+            "options": [
+              {
+                "text": "3 — c++, go, sql",
+                "correct": false,
+                "why": "That's what `GROUP BY lower(label)` (or `GROUP BY 1`) returns. Here `label` means the raw column."
+              },
+              {
+                "text": "6 — one per row",
+                "correct": false,
+                "why": "The two lowercase `go` rows have identical input labels, so they do share a group: c++ 1, go 1, go 2, sql 1, sql 1."
+              },
+              {
+                "text": "5 — `go` and `sql` each appear twice",
+                "correct": true,
+                "why": "The alias has the same name as a column, and GROUP BY resolves an ambiguous name to the *input* column, so `Go` and `go` stay separate groups — while the output lowercases both. Name the alias something else, or `GROUP BY 1`."
+              }
+            ]
+          },
+          {
+            "id": "counting-three-ways",
+            "kind": "predict",
+            "code": "-- 12 orders, from 4 customers, in 3 statuses\nSELECT count(*), count(DISTINCT customer_id), count(DISTINCT status) FROM orders;",
+            "prompt": "What are the three numbers?",
+            "options": [
+              {
+                "text": "12, 5, 3 — there are five customers",
+                "correct": false,
+                "why": "Five customers exist, but customer 5 has no orders, and this counts only what's in `orders`."
+              },
+              {
+                "text": "12, 12, 12",
+                "correct": false,
+                "why": "That would be `count(customer_id)` and `count(status)` — non-NULL values, with repeats. DISTINCT removes the repeats."
+              },
+              {
+                "text": "12, 4, 3",
+                "correct": true,
+                "why": "`count(*)` counts rows; `count(DISTINCT x)` counts different non-NULL values of x."
+              }
+            ]
           }
         ]
       },
@@ -1092,6 +2198,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",
@@ -1391,6 +2498,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",
@@ -1679,6 +2787,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",
@@ -1990,6 +3099,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",
@@ -2289,6 +3399,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",
@@ -2588,6 +3699,7 @@
           }
         ]
       },
+      "practice": null,
       "quiz": [
         {
           "id": "q1",

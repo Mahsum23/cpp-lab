@@ -10,6 +10,7 @@
  * The one field that can't be merged that way is the streak, which is history the
  * records no longer contain — see mergeStreak.
  */
+import { mergePractice } from './practice';
 import {
   emptyDayProgress, emptyReview,
   type DayProgress, type Progress, type ReviewCard, type ReviewState, type StreakState, type TaskReview, type TaskState, type QuizState,
@@ -84,6 +85,7 @@ function mergeDay(local: DayProgress, remote: DayProgress): DayProgress {
     notes: mergeNotes(local.notes, remote.notes),
     teachBackDone: local.teachBackDone || remote.teachBackDone,
     completedAt: earliest(local.completedAt, remote.completedAt),
+    ...(local.practice || remote.practice ? { practice: mergePractice(local.practice, remote.practice) } : {}),
   };
 }
 
