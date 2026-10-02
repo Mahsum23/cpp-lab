@@ -1,0 +1,109 @@
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+challenges:
+  - id: reuseaddr
+    prompt: |
+      `fd` is a TCP socket that has not been bound yet. Turn on `SO_REUSEADDR` for it, using a local `int` named `yes` set to 1 for the option value.
+    given: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+    hint: "`setsockopt(fd, level, optname, optval, optlen)` — this option lives at the socket level, and the value is passed by address with its size."
+    solution: |
+      int yes = 1;
+      setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    note: |
+      Without it, restarting a server within about a minute of stopping it fails with `EADDRINUSE`: the old connections sit in `TIME_WAIT`, protecting the new incarnation from stray packets of the old one. The option has to be set *before* `bind`, and it does not let two live listeners share a port — that is `SO_REUSEPORT`.
+    requires:
+      - say: "declares an int named yes holding 1"
+        match: 'int yes \( = 1 \| { 1 } \) ;'
+      - say: "sets SO_REUSEADDR on fd at the socket level, passing yes by address and its size"
+        match: 'setsockopt ( fd , SOL_SOCKET , SO_REUSEADDR , & yes , \( sizeof ( yes ) \| sizeof yes \| sizeof ( int ) \) ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        {{ANSWER}}
+        int v = 0;
+        socklen_t len = sizeof v;
+        getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &v, &len);
+        std::printf("%d\n", v != 0);
+      }
+    expect: "1"
+    good:
+      - |
+        int yes{1};
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+    bad:
+      - |
+        int yes = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes));
+      - |
+        int yes = 1;
+        setsockopt(fd, IPPROTO_TCP, SO_REUSEADDR, &yes, sizeof(yes));
+      - |
+        int yes = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, yes, sizeof(yes));
+      - |
+        int yes = 0;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+  - id: bind-listen
+    prompt: |
+      `fd` and a filled-in `addr` exist. Bind `fd` to `addr`, then put it in the listening state with a backlog of 128. (`bind` takes the generic `sockaddr`, not your `sockaddr_in`.)
+    given: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+      sockaddr_in addr{};   // family, port, address already set
+    hint: Two calls, in that order, and the first needs a cast on the address argument.
+    solution: |
+      bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+      listen(fd, 128);
+    note: |
+      The BSD socket API predates C's `void *`: every address family has its own struct, and `sockaddr` is the common-prefix type they are all cast to, with the length passed separately so the kernel knows which one it got. In C++ the cast is mandatory — and `reinterpret_cast` is the honest spelling of what is happening.
+    requires:
+      - say: "binds fd to addr (cast to the generic sockaddr, with its size), then listens"
+        then:
+          - 'bind ( fd , \( reinterpret_cast < sockaddr * > ( & addr ) \| ( sockaddr * ) & addr \| ( sockaddr * ) ( & addr ) \) , \( sizeof ( addr ) \| sizeof addr \| sizeof ( sockaddr_in ) \) ) ;'
+          - 'listen ( fd , \( 128 \| SOMAXCONN \) ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(0);
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        {{ANSWER}}
+        int v = 0;
+        socklen_t len = sizeof v;
+        getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &v, &len);
+        std::printf("%d\n", v);
+      }
+    expect: "1"
+    good:
+      - |
+        bind(fd, (sockaddr *)&addr, sizeof(addr));
+        listen(fd, SOMAXCONN);
+    bad:
+      - |
+        listen(fd, 128);
+        bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+      - |
+        bind(fd, &addr, sizeof(addr));
+        listen(fd, 128);
+      - |
+        bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+      - |
+        bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr *));
+        listen(fd, 128);

@@ -332,16 +332,23 @@ function loadDrill(path, dayId) {
  * but correct query passes. `tools/check-write-cards.py` runs every solution on a real
  * PostgreSQL before it ships, the same way check-sql-lesson.py does for lessons.
  */
+/** What a card file holds that only the authoring-time checker reads; never shipped. */
+const AUTHORING_ONLY = ['harness', 'expect', 'good', 'bad'];
+
 function loadWrite(path, dayId) {
   if (!existsSync(path)) return null;
   const doc = parseYaml(readFileSync(path, 'utf8'));
+  const lang = String(doc?.lang ?? 'sql');
+  if (!['sql', 'go', 'cpp'].includes(lang)) warn(`${dayId}: ${path} has lang "${lang}" — expected sql, go or cpp`);
+  const shape = lang !== 'sql';
   const setup = String(doc?.setup ?? '').trim();
   const list = doc?.challenges ?? [];
-  if (!setup) warn(`${dayId}: ${path} has no setup — the tables have to come from somewhere`);
+  if (!shape && !setup) warn(`${dayId}: ${path} has no setup — the tables have to come from somewhere`);
   if (!Array.isArray(list) || list.length === 0) {
     warn(`${dayId}: ${path} has no challenges`);
     return null;
   }
+  const defs = Object.fromEntries(Object.entries(doc?.defs ?? {}).map(([k, v]) => [k, String(v).trim()]));
   const seen = new Set();
   const challenges = list.map((c, i) => {
     const id = String(c.id ?? `w${i + 1}`);
@@ -350,6 +357,25 @@ function loadWrite(path, dayId) {
     if (/[:\s]/.test(id)) warn(`${dayId} write ${id}: ids may not contain ":" or spaces`);
     if (!String(c.prompt ?? '').trim()) warn(`${dayId} write ${id}: no prompt`);
     if (!String(c.solution ?? '').trim()) warn(`${dayId} write ${id}: no solution`);
+    const requires = (c.requires ?? []).map((r) => ({
+      say: String(r.say ?? '').trim(),
+      ...(r.match !== undefined ? { match: String(r.match).trim() } : {}),
+      ...(r.then ? { then: r.then.map((x) => String(x).trim()) } : {}),
+    }));
+    const forbids = (c.forbids ?? []).map((f) => ({ say: String(f.say ?? '').trim(), match: String(f.match ?? '').trim() }));
+    if ([...String(c.prompt ?? '').matchAll(/\*\*([^*]+)\*\*/g)].some((m) => m[1].includes('`'))) warn(`${dayId} write ${id}: code inside **bold** in the prompt renders as literal asterisks — use *emphasis* or drop the bold`);
+    if (shape) {
+      if (!requires.length) warn(`${dayId} write ${id}: no requires — a shape card with nothing to check accepts anything`);
+      for (const r of requires) {
+        if (!r.say) warn(`${dayId} write ${id}: a requirement has no say`);
+        if ((r.match === undefined) === (r.then === undefined)) warn(`${dayId} write ${id}: "${r.say}" needs exactly one of match / then`);
+      }
+      if (!String(c.note ?? '').trim()) warn(`${dayId} write ${id}: no note — say what the card is for once it is answered`);
+      if (!Array.isArray(c.good ?? []) || !Array.isArray(c.bad ?? []) || !(c.bad ?? []).length) {
+        warn(`${dayId} write ${id}: needs at least one "bad" example the pattern must reject`);
+      }
+    }
+    for (const key of AUTHORING_ONLY) if (!shape && c[key] !== undefined) warn(`${dayId} write ${id}: "${key}" is for Go/C++ cards`);
     return {
       id,
       prompt: String(c.prompt ?? '').trim(),
@@ -358,9 +384,13 @@ function loadWrite(path, dayId) {
       verify: c.verify ? String(c.verify).trim() : null,
       // null means "decide from the solution": ordered when it sorts at the top level.
       ordered: typeof c.ordered === 'boolean' ? c.ordered : null,
+      given: c.given ? String(c.given).trimEnd() : null,
+      note: c.note ? String(c.note).trim() : null,
+      requires,
+      forbids,
     };
   });
-  return { setup, challenges };
+  return { lang, setup, defs, challenges };
 }
 
 function buildTopic(milestone) {
@@ -395,8 +425,8 @@ function buildTopic(milestone) {
     const quiz = loadQuiz(join(lessonsDir, mdName.replace(/\.md$/, '.quiz.yaml')), d.id);
     const drill = loadDrill(join(lessonsDir, mdName.replace(/\.md$/, '.drill.yaml')), d.id);
     const write = loadWrite(join(lessonsDir, mdName.replace(/\.md$/, '.write.yaml')), d.id);
-    if (!write && (meta.track ?? 'cpp') === 'sql') {
-      warn(`${d.id}: no .write.yaml — this SQL day has nothing to type from memory in the review deck`);
+    if (!write) {
+      warn(`${d.id}: no .write.yaml — this day has nothing to type from memory in the review deck`);
     }
     if (!drill) warn(`${d.id}: no .drill.yaml — this day can only be done at a machine`);
 

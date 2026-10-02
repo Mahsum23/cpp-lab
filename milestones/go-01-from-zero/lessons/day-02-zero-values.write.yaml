@@ -1,0 +1,161 @@
+lang: go
+challenges:
+  - id: zero-values
+    prompt: |
+      Declare three variables with `var` and **no initial value** — `i` an `int`, `s` a `string`, `p` a pointer to `int` — then print them with exactly this call shape: `fmt.Printf("int=%d string=%q ptr=%v\n", …)`.
+    hint: "`var name type` on its own line gives the variable its type's zero value; a pointer's is `nil`."
+    given: |
+      func main() {
+      	// your code
+      }
+    solution: |
+      var i int
+      var s string
+      var p *int
+      fmt.Printf("int=%d string=%q ptr=%v\n", i, s, p)
+    note: |
+      There is no uninitialised memory in Go: every variable starts as its type's zero value (`0`, `""`, `nil`, `false`), which is why the C-style "forgot to initialise" bug mostly cannot happen.
+    requires:
+      - say: "declares an int with var and no initial value"
+        match: var $i int
+      - say: "declares a string with var and no initial value"
+        match: var $s string
+      - say: "declares a pointer to int with var and no initial value"
+        match: var $p * int
+      - say: "prints all three, in that order, with Printf"
+        match: fmt . Printf ( $str=%d , $i , $s , $p )
+    forbids:
+      - say: "an initial value — the point is the zero value"
+        match: var $any \( int \| string \| * int \) =
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	{{ANSWER}}
+      }
+    expect: 'int=0 string="" ptr=<nil>'
+    bad:
+      - |
+        i := 0
+        s := ""
+        var p *int
+        fmt.Printf("int=%d string=%q ptr=%v\n", i, s, p)
+      - |
+        var i int
+        var s string
+        var p int
+        fmt.Printf("int=%d string=%q ptr=%v\n", i, s, p)
+      - |
+        var i int
+        var s string
+        var p *int
+        fmt.Printf("int=%d string=%q ptr=%v\n", s, i, p)
+
+  - id: package-level
+    prompt: |
+      Outside any function, at package level, declare an `int` named `limit` with the value `10`.
+    hint: The short declaration operator is only legal inside a function body.
+    solution: |
+      var limit = 10
+    note: |
+      `:=` is function-bodies-only. At package level every declaration has to start with a keyword (`var`, `const`, `func`, `type`), which makes a file's top level parseable without looking ahead.
+    requires:
+      - say: "starts with the var keyword (no short declaration here)"
+        match: var limit
+      - say: "gives it the value 10"
+        match: var limit $* = 10
+    forbids:
+      - say: ":= at package level"
+        match: limit :=
+    harness: |
+      package main
+
+      import "fmt"
+
+      {{ANSWER}}
+
+      func main() {
+      	fmt.Println(limit + 1)
+      }
+    expect: "11"
+    good:
+      - "var limit int = 10"
+    bad:
+      - "limit := 10"
+      - "var limit = 11"
+      - "int limit = 10"
+
+  - id: shadow-fix
+    prompt: |
+      This prints `outer count is 1`, and you want it to print `2`. Change only the inner line so it **assigns to the existing** `count` instead of creating a new variable that hides it.
+    given: |
+      count := 1
+      if true {
+      	count := 2
+      	_ = count
+      }
+      fmt.Println("outer count is", count)
+    hint: One character fewer in the operator.
+    solution: |
+      count = 2
+    note: |
+      `:=` always creates a *new* variable in the current scope, even when a variable of that name exists in an outer one — and nothing warns you. The compiler only complains when a variable is left unused, which `_ = count` here deliberately prevents.
+    requires:
+      - say: "assigns 2 with plain =, not :="
+        match: count = 2
+    forbids:
+      - say: "a := or var that creates a second count"
+        match: \( count := \| var count \)
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	count := 1
+      	if true {
+      		{{ANSWER}}
+      	}
+      	fmt.Println("outer count is", count)
+      }
+    expect: outer count is 2
+    bad:
+      - "count := 2"
+      - "var count = 2"
+      - "count == 2"
+
+  - id: mixed-ints
+    prompt: |
+      `a` is an `int` and `b` is an `int64`, and `fmt.Println(a + b)` does not compile. Write the one `fmt.Println` call that prints their sum by converting `a` to `int64`.
+    given: |
+      var a int = 3
+      var b int64 = 4
+    hint: Go never converts between numeric types for you; a conversion looks like a function call named after the target type.
+    solution: |
+      fmt.Println(int64(a) + b)
+    note: |
+      Go has no implicit numeric conversions at all — not even `int` to `int64`, which are the same size on a 64-bit machine. The designers' argument: C's silent promotions are a famous source of bugs, and a conversion you must write is a conversion you can see.
+    requires:
+      - say: "prints with fmt.Println"
+        match: fmt . Println (
+      - say: "converts a to int64 and adds b"
+        match: \( int64 ( a ) + b \| b + int64 ( a ) \)
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	var a int = 3
+      	var b int64 = 4
+      	{{ANSWER}}
+      }
+    expect: "7"
+    good:
+      - "fmt.Println(b + int64(a))"
+    bad:
+      - "fmt.Println(a + b)"
+      - "fmt.Println(int(a) + b)"
+      - "fmt.Println(int64(a + b))"

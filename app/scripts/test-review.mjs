@@ -138,6 +138,16 @@ const mixed = [...writeCards, ...cards.filter((x) => x.kind === 'quiz').slice(0,
 ok('the next card is of another kind when there is one', Array.from({ length: 30 }, (_, i) => pickNext(mixed, fresh, '2026-09-07', seq(0.9, i / 30), new Set(), 'write')).every((x) => x.kind === 'quiz'));
 ok('with only one kind left it is dealt anyway', pickNext(writeCards, fresh, '2026-09-07', mid, new Set(), 'write') !== null);
 
+console.log('\n— reorder cards sit out half the deals —');
+const ps = { id: 'parsons:d:x', kind: 'parsons', dayId: 'd', questionId: 'x' };
+const mixedP = [ps, writeCards[0]];
+const dealt = (roll) => pickNext(mixedP, fresh, '2026-09-07', seq(roll, 0.9, 0.9), new Set()).kind;
+ok('a low roll leaves the reorder card out when a write card is there', dealt(0.1) === 'write');
+ok('a high roll lets it in', ['write', 'parsons'].includes(dealt(0.9)));
+ok('it is never left out when it is all there is', pickNext([ps], fresh, '2026-09-07', seq(0.1), new Set()).kind === 'parsons');
+const share = Array.from({ length: 400 }, (_, i) => pickNext(mixedP, fresh, '2026-09-07', seq(i / 400, (i * 7 % 400) / 400, (i * 13 % 400) / 400), new Set()).kind).filter((k) => k === 'parsons').length / 400;
+ok(`over many deals a reorder card is dealt about a quarter of the time, not half (${share})`, share > 0.15 && share < 0.35);
+
 console.log('\n— the ambush —');
 ok('due cards justify an interruption', shouldAmbush(fresh, deck, '2026-09-07', () => 0.99));
 ok('but only once a day', !shouldAmbush({ ...fresh, lastAmbush: '2026-09-07' }, deck, '2026-09-07', () => 0));

@@ -1,0 +1,191 @@
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+challenges:
+  - id: connect-localhost
+    prompt: |
+      Be the client. `fd` is an unconnected TCP socket and `port` is a host-order `uint16_t`. Fill a zero-initialised `sockaddr_in` named `server` for IPv4 `127.0.0.1` on that port — parsing the address *text* with the call that reports success with 1 — and connect `fd` to it.
+    given: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+      uint16_t port;   // where the server listens
+    hint: "The address struct is the same one the server used, but you fill the *remote* end, and `connect` takes the same cast-and-size pair as `bind`."
+    solution: |
+      sockaddr_in server{};
+      server.sin_family = AF_INET;
+      server.sin_port = htons(port);
+      inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+      connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server));
+    note: |
+      `connect` is where the three-way handshake happens: it blocks until the kernel has SYN, SYN-ACK and ACK'd with the server, then returns. Notice what you did *not* write — no `bind`. The kernel picks a free ephemeral port and the local address for you, which is why a client's port changes on every run.
+    requires:
+      - say: "declares server zero-initialised"
+        match: 'sockaddr_in server \( { } ; \| = { } ; \)'
+      - say: "sets the family to IPv4"
+        match: 'server . sin_family = AF_INET ;'
+      - say: "sets the port from the variable, in network byte order"
+        match: 'server . sin_port = htons ( port ) ;'
+      - say: "parses 127.0.0.1 into the address field"
+        match: 'inet_pton ( AF_INET , $str=127.0.0.1 , & server . sin_addr ) ;'
+      - say: "connects fd to server (cast to the generic sockaddr, with its size)"
+        match: 'connect ( fd , \( reinterpret_cast < sockaddr * > ( & server ) \| ( sockaddr * ) & server \| ( sockaddr * ) ( & server ) \) , \( sizeof ( server ) \| sizeof server \| sizeof ( sockaddr_in ) \) ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int listener = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bind(listener, reinterpret_cast<sockaddr *>(&a), sizeof(a));
+        listen(listener, 8);
+        socklen_t al = sizeof(a);
+        getsockname(listener, reinterpret_cast<sockaddr *>(&a), &al);
+        uint16_t port = ntohs(a.sin_port);
+
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        {{ANSWER}}
+
+        int conn = accept(listener, nullptr, nullptr);
+        std::printf("%d\n", conn >= 0);
+      }
+    expect: "1"
+    bad:
+      - |
+        sockaddr_in server{};
+        server.sin_family = AF_INET;
+        server.sin_port = port;
+        inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+        connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server));
+      - |
+        sockaddr_in server{};
+        server.sin_family = AF_INET;
+        server.sin_port = htons(port);
+        inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+        bind(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server));
+      - |
+        sockaddr_in server{};
+        server.sin_family = AF_INET;
+        server.sin_port = htons(port);
+        inet_pton(AF_INET, "127.0.0.1", &server.sin_addr);
+      - |
+        sockaddr_in server{};
+        server.sin_family = AF_INET;
+        server.sin_port = htons(port);
+        inet_pton(AF_INET, "127.0.0.1", &server);
+        connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server));
+
+  - id: half-close
+    prompt: |
+      Send the four bytes `ping` on `fd` (no flags), then tell the other side "I'm finished *sending*" while staying able to read its reply — without closing the descriptor.
+    hint: There is a call between "keep everything open" and `close`; the argument says which direction to stop.
+    solution: |
+      send(fd, "ping", 4, 0);
+      shutdown(fd, SHUT_WR);
+    note: |
+      `shutdown(SHUT_WR)` sends a FIN: the peer's `recv` will return 0 once it has drained what you sent, yet you can still read its reply. That is how a client says "that's my whole request" on a protocol with no length prefix. `close` can't do it — it gives up both directions *and* the descriptor, and with other copies of the fd alive (a forked child) it may not send a FIN at all.
+    requires:
+      - say: "sends the four bytes first, then closes only the sending direction"
+        then:
+          - 'send ( fd , $str=ping , 4 , 0 ) ;'
+          - 'shutdown ( fd , SHUT_WR ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int fd = sv[0];
+        {{ANSWER}}
+        char buf[16];
+        size_t total = 0;
+        ssize_t r;
+        while ((r = recv(sv[1], buf, sizeof buf, 0)) > 0) total += static_cast<size_t>(r);
+        // still able to read from fd: the other side can answer
+        const char *reply = "pong";
+        if (write(sv[1], reply, 4) != 4) return 2;
+        char back[8];
+        ssize_t got = recv(fd, back, sizeof back, 0);
+        std::printf("%zu %s %zd\n", total, r == 0 ? "eof" : "no-eof", got);
+      }
+    expect: 4 eof 4
+    bad:
+      - |
+        send(fd, "ping", 4, 0);
+        shutdown(fd, SHUT_RD);
+      - |
+        send(fd, "ping", 4, 0);
+        close(fd);
+      - |
+        shutdown(fd, SHUT_WR);
+        send(fd, "ping", 4, 0);
+      - |
+        send(fd, "ping", 4, 0);
+        shutdown(fd, SHUT_RDWR);
+
+  - id: connect-checked
+    prompt: |
+      `connect` can fail — nobody may be listening. Wrap it: call `connect(fd, …)` on the already-filled `server` (cast, with its size) *inside* an `if` that tests for a negative result; on failure, report it with `perror("connect")` and `return 1`.
+    given: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+      sockaddr_in server{};   // family, port and address already set
+    hint: Syscalls report failure with -1 and leave the reason in `errno`; `perror` turns it into text.
+    solution: |
+      if (connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server)) < 0) {
+          std::perror("connect");
+          return 1;
+      }
+    note: |
+      A refused connection is not exceptional, it is Tuesday: the server restarted, the port is wrong, a firewall is in the way. The reason arrives only in `errno` (`ECONNREFUSED`, `ETIMEDOUT`, `ENETUNREACH` …), so read it immediately after the failing call, before anything else can overwrite it.
+    requires:
+      - say: "tests connect's result for failure, in the if condition"
+        match: 'if ( connect ( fd , \( reinterpret_cast < sockaddr * > ( & server ) \| ( sockaddr * ) & server \| ( sockaddr * ) ( & server ) \) , \( sizeof ( server ) \| sizeof server \| sizeof ( sockaddr_in ) \) ) \( < 0 \| == - 1 \) ) {'
+      - say: "reports the reason with perror and exits non-zero"
+        match: '{ perror ( $str=connect ) ; return \( 1 \| EXIT_FAILURE \) ; }'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        // a port nothing is listening on: bind to learn a free one, then close it
+        int probe = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in server{};
+        server.sin_family = AF_INET;
+        server.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bind(probe, reinterpret_cast<sockaddr *>(&server), sizeof(server));
+        socklen_t sl = sizeof(server);
+        getsockname(probe, reinterpret_cast<sockaddr *>(&server), &sl);
+        close(probe);
+
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        {{ANSWER}}
+        std::puts("connected");
+      }
+    exit: 1
+    expect: ""
+    expectErr: "connect: Connection refused"
+    bad:
+      - |
+        if (connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server)) > 0) {
+            std::perror("connect");
+            return 1;
+        }
+      - |
+        if (connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server)) < 0) {
+            std::perror("connect");
+        }
+      - |
+        if (connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server)) < 0) {
+            return 1;
+        }
+      - |
+        connect(fd, reinterpret_cast<sockaddr *>(&server), sizeof(server));
+        std::perror("connect");
+        return 1;

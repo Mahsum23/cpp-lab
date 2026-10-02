@@ -114,7 +114,105 @@
           ]
         }
       ],
-      "write": null,
+      "write": {
+        "lang": "go",
+        "setup": "",
+        "defs": {},
+        "challenges": [
+          {
+            "id": "hello",
+            "prompt": "Write a complete Go program, from the first line, that prints `hello from Go` and exits.",
+            "solution": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello from Go\")\n}",
+            "hint": "A file that builds an executable belongs to one particular package, and something has to be imported before it can print.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "Only package `main` produces an executable, and `main` takes no arguments and returns nothing — the exit code is `os.Exit`'s job, not a return value.",
+            "requires": [
+              {
+                "say": "declares package main",
+                "match": "package main"
+              },
+              {
+                "say": "imports fmt",
+                "match": "import \\( \"fmt\" \\| ( \"fmt\" ) \\)"
+              },
+              {
+                "say": "defines func main with no parameters and no result",
+                "match": "func main ( ) {"
+              },
+              {
+                "say": "prints the text from inside main",
+                "match": "fmt . \\( Println \\| Print \\| Printf \\) ( $str=hello"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "silence-var",
+            "prompt": "The build fails with `declared and not used: count`. Add the one line that makes it build *without deleting* the variable and without printing it.",
+            "solution": "_ = count",
+            "hint": "There is an assignment whose target is the identifier that means \"discard\".",
+            "verify": null,
+            "ordered": null,
+            "given": "func main() {\n\tcount := 42\n\tfmt.Println(\"hi\")\n\t// your line goes here\n}",
+            "note": "The blank identifier is the compiler's \"yes, I know\". It is deliberately ugly so that it doesn't survive a code review by accident — and note the rule is the `gc` toolchain's, not the language's: the spec only says a compiler *may* reject unused variables.",
+            "requires": [
+              {
+                "say": "assigns count to the blank identifier",
+                "match": "\\( _ = \\| var _ = \\) count"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "blank-import",
+            "prompt": "Write the import line that pulls in `net/http/pprof` purely for the side effects of its `init` function, so the compiler does not complain that it is unused.",
+            "solution": "import _ \"net/http/pprof\"",
+            "hint": "One character goes where the package's local name would normally go.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "This is the standard way to register something with a program you never call into directly — importing `net/http/pprof` is how a live profiler gets bolted onto a running server.",
+            "requires": [
+              {
+                "say": "an import declaration",
+                "match": "import"
+              },
+              {
+                "say": "of net/http/pprof, under the blank name",
+                "match": "_ \"net/http/pprof\""
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "grouped-imports",
+            "prompt": "Write the *grouped* import declaration that brings in `fmt`, `os` and `strings` with a single `import` keyword.",
+            "solution": "import (\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n)",
+            "hint": "The grouped form is the same keyword followed by a parenthesised list, one path per line.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "`gofmt` sorts the paths inside a group alphabetically and keeps them separated from third-party imports by a blank line. Every one of them must be used, or the build fails.",
+            "requires": [
+              {
+                "say": "imports fmt, inside one parenthesised group",
+                "match": "import ( $* \"fmt\" $* )"
+              },
+              {
+                "say": "imports os, inside the same group",
+                "match": "import ( $* \"os\" $* )"
+              },
+              {
+                "say": "imports strings, inside the same group",
+                "match": "import ( $* \"strings\" $* )"
+              }
+            ],
+            "forbids": []
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -332,7 +430,116 @@
           ]
         }
       ],
-      "write": null,
+      "write": {
+        "lang": "go",
+        "setup": "",
+        "defs": {},
+        "challenges": [
+          {
+            "id": "zero-values",
+            "prompt": "Declare three variables with `var` and **no initial value** — `i` an `int`, `s` a `string`, `p` a pointer to `int` — then print them with exactly this call shape: `fmt.Printf(\"int=%d string=%q ptr=%v\\n\", …)`.",
+            "solution": "var i int\nvar s string\nvar p *int\nfmt.Printf(\"int=%d string=%q ptr=%v\\n\", i, s, p)",
+            "hint": "`var name type` on its own line gives the variable its type's zero value; a pointer's is `nil`.",
+            "verify": null,
+            "ordered": null,
+            "given": "func main() {\n\t// your code\n}",
+            "note": "There is no uninitialised memory in Go: every variable starts as its type's zero value (`0`, `\"\"`, `nil`, `false`), which is why the C-style \"forgot to initialise\" bug mostly cannot happen.",
+            "requires": [
+              {
+                "say": "declares an int with var and no initial value",
+                "match": "var $i int"
+              },
+              {
+                "say": "declares a string with var and no initial value",
+                "match": "var $s string"
+              },
+              {
+                "say": "declares a pointer to int with var and no initial value",
+                "match": "var $p * int"
+              },
+              {
+                "say": "prints all three, in that order, with Printf",
+                "match": "fmt . Printf ( $str=%d , $i , $s , $p )"
+              }
+            ],
+            "forbids": [
+              {
+                "say": "an initial value — the point is the zero value",
+                "match": "var $any \\( int \\| string \\| * int \\) ="
+              }
+            ]
+          },
+          {
+            "id": "package-level",
+            "prompt": "Outside any function, at package level, declare an `int` named `limit` with the value `10`.",
+            "solution": "var limit = 10",
+            "hint": "The short declaration operator is only legal inside a function body.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "`:=` is function-bodies-only. At package level every declaration has to start with a keyword (`var`, `const`, `func`, `type`), which makes a file's top level parseable without looking ahead.",
+            "requires": [
+              {
+                "say": "starts with the var keyword (no short declaration here)",
+                "match": "var limit"
+              },
+              {
+                "say": "gives it the value 10",
+                "match": "var limit $* = 10"
+              }
+            ],
+            "forbids": [
+              {
+                "say": ":= at package level",
+                "match": "limit :="
+              }
+            ]
+          },
+          {
+            "id": "shadow-fix",
+            "prompt": "This prints `outer count is 1`, and you want it to print `2`. Change only the inner line so it **assigns to the existing** `count` instead of creating a new variable that hides it.",
+            "solution": "count = 2",
+            "hint": "One character fewer in the operator.",
+            "verify": null,
+            "ordered": null,
+            "given": "count := 1\nif true {\n\tcount := 2\n\t_ = count\n}\nfmt.Println(\"outer count is\", count)",
+            "note": "`:=` always creates a *new* variable in the current scope, even when a variable of that name exists in an outer one — and nothing warns you. The compiler only complains when a variable is left unused, which `_ = count` here deliberately prevents.",
+            "requires": [
+              {
+                "say": "assigns 2 with plain =, not :=",
+                "match": "count = 2"
+              }
+            ],
+            "forbids": [
+              {
+                "say": "a := or var that creates a second count",
+                "match": "\\( count := \\| var count \\)"
+              }
+            ]
+          },
+          {
+            "id": "mixed-ints",
+            "prompt": "`a` is an `int` and `b` is an `int64`, and `fmt.Println(a + b)` does not compile. Write the one `fmt.Println` call that prints their sum by converting `a` to `int64`.",
+            "solution": "fmt.Println(int64(a) + b)",
+            "hint": "Go never converts between numeric types for you; a conversion looks like a function call named after the target type.",
+            "verify": null,
+            "ordered": null,
+            "given": "var a int = 3\nvar b int64 = 4",
+            "note": "Go has no implicit numeric conversions at all — not even `int` to `int64`, which are the same size on a 64-bit machine. The designers' argument: C's silent promotions are a famous source of bugs, and a conversion you must write is a conversion you can see.",
+            "requires": [
+              {
+                "say": "prints with fmt.Println",
+                "match": "fmt . Println ("
+              },
+              {
+                "say": "converts a to int64 and adds b",
+                "match": "\\( int64 ( a ) + b \\| b + int64 ( a ) \\)"
+              }
+            ],
+            "forbids": []
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -549,7 +756,115 @@
           ]
         }
       ],
-      "write": null,
+      "write": {
+        "lang": "go",
+        "setup": "",
+        "defs": {},
+        "challenges": [
+          {
+            "id": "make-cap",
+            "prompt": "Create a slice of `int` named `s` with length 0 and capacity 1000, in one statement.",
+            "solution": "s := make([]int, 0, 1000)",
+            "hint": "The built-in that allocates slices, maps and channels takes the type, then a length, then an optional capacity.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "Pre-sizing with `make([]T, 0, n)` avoids the repeated grow-and-copy that `append` does when it runs out of room; the capacity is a promise about how many appends are free.",
+            "requires": [
+              {
+                "say": "assigns the result to s",
+                "match": "\\( s := \\| s = \\| var s $* = \\) make ("
+              },
+              {
+                "say": "makes a []int with length 0 and capacity 1000",
+                "match": "make ( [ ] int , 0 , 1000 )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "append-assign",
+            "prompt": "`s` holds `1, 2, 3`. Add `4` to it so that `s` itself holds four elements afterwards.",
+            "solution": "s = append(s, 4)",
+            "hint": "`append` returns the slice to use from now on — it can't update your variable for you.",
+            "verify": null,
+            "ordered": null,
+            "given": "s := []int{1, 2, 3}",
+            "note": "`append` may have to allocate a new, bigger array, so it hands back a new slice header and the caller decides what to do with it. Calling it and discarding the result is a compile error — the language refuses to let the call silently do nothing.",
+            "requires": [
+              {
+                "say": "appends 4 to s",
+                "match": "append ( $s , 4 )"
+              },
+              {
+                "say": "stores the result back into s",
+                "match": "$s = append ( $s , 4 )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "three-index",
+            "prompt": "`head` should be the first two elements of `full`, but appending to `head` must **never** overwrite `full[2]`. Define `head` with a *full slice expression* (the three-index form).",
+            "solution": "head := full[:2:2]",
+            "hint": "`s[low:high:max]` — the third number caps the capacity.",
+            "verify": null,
+            "ordered": null,
+            "given": "full := []int{1, 2, 3, 4, 5}",
+            "note": "A plain `full[:2]` has capacity 5, so `append(head, 99)` writes into `full`'s third slot. The third index sets the capacity to `max-low`, so the next append has no room and copies into a fresh array instead.",
+            "requires": [
+              {
+                "say": "defines head from full with a three-index slice",
+                "match": "head \\( := \\| = \\) full [ \\( 0 \\| \\) : 2 : 2 ]"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "detach-copy",
+            "prompt": "`firstLine` should be the first 60 bytes of `data`, in a **brand-new array**, so that `data` (which may be huge) can be garbage-collected. Use only built-ins — no imports.",
+            "solution": "firstLine := append([]byte(nil), data[:60]...)",
+            "hint": "One idiom appends the bytes onto a nil slice; another allocates exactly 60 and copies into it.",
+            "verify": null,
+            "ordered": null,
+            "given": "data := make([]byte, 100)",
+            "note": "A sub-slice is a window onto the *same* array, so a 60-byte slice of a 500 MB file keeps all 500 MB alive. Copying is how you let the big one go; Go 1.21 added `slices.Clone` for the same job.",
+            "requires": [
+              {
+                "say": "builds firstLine as a fresh copy of the first 60 bytes",
+                "match": "\\( firstLine := append ( [ ] byte ( nil ) , data [ \\( 0 \\| \\) : 60 ] ... ) \\| firstLine := make ( [ ] byte , 60 ) $* copy ( firstLine , data $* ) \\)"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "nil-slice",
+            "prompt": "Declare `s` as a `[]int` that is **nil** — no `make`, no literal — then append `1` to it.",
+            "solution": "var s []int\ns = append(s, 1)",
+            "hint": "A slice's zero value is already usable with append.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "A nil slice has length 0, capacity 0 and no array behind it, and `append` on it just works. That is why Go code almost never initialises a slice before appending.",
+            "requires": [
+              {
+                "say": "declares s as a nil []int",
+                "match": "var s [ ] int"
+              },
+              {
+                "say": "then appends 1 and keeps the result",
+                "match": "s = append ( s , 1 )"
+              }
+            ],
+            "forbids": [
+              {
+                "say": "make or a literal — it should stay nil until the append",
+                "match": "\\( make \\| { \\)"
+              }
+            ]
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -766,7 +1081,105 @@
           ]
         }
       ],
-      "write": null,
+      "write": {
+        "lang": "go",
+        "setup": "",
+        "defs": {},
+        "challenges": [
+          {
+            "id": "pointer-receiver",
+            "prompt": "Define a struct type `Counter` with one `int` field `n`, and a method `Bump` that increments `n` **in place**, so that calling it twice on a `Counter` variable leaves `n` at 2.",
+            "solution": "type Counter struct {\n\tn int\n}\n\nfunc (c *Counter) Bump() {\n\tc.n++\n}",
+            "hint": "A method that has to change the value it is called on needs a receiver that points at it.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "A value receiver gets a *copy* of the struct, so `c.n++` bumps the copy and the caller sees nothing — no error, no warning. Rule of thumb: if any method needs a pointer receiver, give them all one.",
+            "requires": [
+              {
+                "say": "declares struct Counter with an int field n",
+                "match": "type Counter struct { n int }"
+              },
+              {
+                "say": "declares method Bump on a *pointer* receiver, taking and returning nothing",
+                "match": "func ( $c * Counter ) Bump ( ) {"
+              },
+              {
+                "say": "increments n through the receiver",
+                "match": "\\( $c . n ++ \\| $c . n += 1 \\| $c . n = $c . n + 1 \\)"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "stringer",
+            "prompt": "Define `type Celsius float64` and give it a `String` method so that `fmt.Println(Celsius(36.6))` prints `36.6°C` — one decimal place, then `°C`.",
+            "solution": "type Celsius float64\n\nfunc (c Celsius) String() string {\n\treturn fmt.Sprintf(\"%.1f°C\", float64(c))\n}",
+            "hint": "`fmt.Println` looks for a method with this exact name and signature, and calls it for you.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "There is no `implements` keyword: a type satisfies `fmt.Stringer` just by having `String() string`. (Converting back with `float64(c)` is the habit that matters — `%v` on a `Celsius` would call `String` again and recurse forever.)",
+            "requires": [
+              {
+                "say": "declares Celsius with underlying type float64",
+                "match": "type Celsius float64"
+              },
+              {
+                "say": "declares a method named String on Celsius returning string",
+                "match": "func ( $c Celsius ) String ( ) string {"
+              },
+              {
+                "say": "returns the value formatted with Sprintf and a one-decimal verb",
+                "match": "return fmt . Sprintf ( $str=%.1f , \\( float64 ( $c ) \\| $c \\) )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "interface-decl",
+            "prompt": "Declare an interface `Greeter` with a single method `Greet` that takes no arguments and returns a `string`.",
+            "solution": "type Greeter interface {\n\tGreet() string\n}",
+            "hint": "An interface is a `type` whose underlying type is the keyword `interface` followed by a list of method signatures.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "Interfaces are satisfied implicitly, by shape, which is why they are best defined by the code that *uses* them and kept small — the standard library's most useful ones (`io.Reader`, `error`, `fmt.Stringer`) have one method each.",
+            "requires": [
+              {
+                "say": "declares type Greeter as an interface",
+                "match": "type Greeter interface {"
+              },
+              {
+                "say": "with a method Greet that takes nothing and returns string",
+                "match": "type Greeter interface { Greet ( ) string }"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "compile-time-check",
+            "prompt": "`English` is meant to satisfy `Greeter`. Write the single package-level line that makes the **build fail** if it ever stops doing so, without keeping a usable variable around.",
+            "solution": "var _ Greeter = English{}",
+            "hint": "A package-level `var` can be declared with the blank identifier as its name.",
+            "verify": null,
+            "ordered": null,
+            "given": "type Greeter interface{ Greet() string }\n\ntype English struct{ Name string }\n\nfunc (e English) Greet() string { return \"Hello, \" + e.Name }",
+            "note": "Because satisfaction is implicit, nothing tells you when a refactor quietly breaks it — until some far-away assignment fails. This idiom moves the failure to the type's own file. For a pointer-receiver type, the allocation-free spelling is `var _ Greeter = (*Spanish)(nil)`.",
+            "requires": [
+              {
+                "say": "a package-level var named _ of type Greeter",
+                "match": "var _ Greeter ="
+              },
+              {
+                "say": "assigned a value of the type being checked",
+                "match": "var _ Greeter = \\( English { } \\| ( * English ) ( nil ) \\)"
+              }
+            ],
+            "forbids": []
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -983,7 +1396,132 @@
           ]
         }
       ],
-      "write": null,
+      "write": {
+        "lang": "go",
+        "setup": "",
+        "defs": {},
+        "challenges": [
+          {
+            "id": "return-err",
+            "prompt": "`os.Open` returned `f` and `err`. Write the check that hands the error straight up to the caller when there is one.",
+            "solution": "if err != nil {\n\treturn err\n}",
+            "hint": "Go's error handling is a plain `if` on a plain value.",
+            "verify": null,
+            "ordered": null,
+            "given": "func open(name string) error {\n\tf, err := os.Open(name)\n\t// your check\n\tdefer f.Close()\n\treturn nil\n}",
+            "note": "No exceptions: an error is an ordinary return value and the check is ordinary control flow. That is verbose on purpose — every place a call can fail is visible in the source, which is the argument the Go team makes against the invisible control flow of `throw`.",
+            "requires": [
+              {
+                "say": "tests err against nil",
+                "match": "if err != nil {"
+              },
+              {
+                "say": "returns the error to the caller",
+                "match": "if err != nil { return \\( err \\| fmt . Errorf ( $str=%w , err ) \\) }"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "defer-close",
+            "prompt": "`f` was opened successfully. Add the one line that guarantees it is closed when the surrounding function returns — on every path, including a panic — without calling `Close` right now.",
+            "solution": "defer f.Close()",
+            "hint": "A keyword in front of a call postpones the call until the function exits.",
+            "verify": null,
+            "ordered": null,
+            "given": "f, err := os.Open(\"data.txt\")\nif err != nil {\n\treturn err\n}",
+            "note": "`defer` is Go's answer to a C++ destructor: cleanup sits next to the acquisition instead of at the end of the function, so adding an early `return` later can't skip it. The arguments are evaluated at the `defer` line; the call itself runs at exit.",
+            "requires": [
+              {
+                "say": "defers a call to Close on f",
+                "match": "defer f . Close ( )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "defer-order",
+            "prompt": "Write a `main` body that prints `body` normally and uses *three* `defer` statements so the full output is, in order: `body`, `first`, `second`, `third`. Print each with `fmt.Println`.",
+            "solution": "defer fmt.Println(\"third\")\ndefer fmt.Println(\"second\")\ndefer fmt.Println(\"first\")\nfmt.Println(\"body\")",
+            "hint": "Deferred calls run last-in, first-out, like a stack.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "Deferred calls unwind in reverse order of registration, exactly like destructors of locals in C++ — the thing acquired last is released first. The `defer` lines read backwards from the output, which is the whole trick.",
+            "requires": [
+              {
+                "say": "defers third, then second, then first (registration order is the reverse of the output)",
+                "then": [
+                  "defer fmt . Println ( $str=third )",
+                  "defer fmt . Println ( $str=second )",
+                  "defer fmt . Println ( $str=first )"
+                ]
+              },
+              {
+                "say": "prints body",
+                "match": "fmt . Println ( $str=body )"
+              }
+            ],
+            "forbids": [
+              {
+                "say": "deferring the body line — it has to print first",
+                "match": "defer fmt . Println ( $str=body )"
+              }
+            ]
+          },
+          {
+            "id": "wrap-error",
+            "prompt": "`err` is what `os.Open(\"/no/such/file\")` returned. Build `wrapped`: an error whose message starts with `loading config: ` and which `errors.Is` can still see `err` *through*.",
+            "solution": "wrapped := fmt.Errorf(\"loading config: %w\", err)",
+            "hint": "`fmt.Errorf` has a format verb that wraps instead of just printing.",
+            "verify": null,
+            "ordered": null,
+            "given": "_, err := os.Open(\"/no/such/file\")",
+            "note": "`%w` stores `err` inside the new error so `errors.Is` and `errors.As` can walk the chain. `%v` would produce an identical *message* and silently cut the chain — the two look the same in a log and behave differently in code.",
+            "requires": [
+              {
+                "say": "builds wrapped with fmt.Errorf",
+                "match": "wrapped := fmt . Errorf ("
+              },
+              {
+                "say": "starts the message with the context text",
+                "match": "wrapped := fmt . Errorf ( $str=loading"
+              },
+              {
+                "say": "wraps err with the wrapping verb, not just printing it",
+                "match": "wrapped := fmt . Errorf ( $str=%w , err )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "errors-is",
+            "prompt": "Print whether `wrapped` is — or wraps — `os.ErrNotExist`, using the `errors` package (not `==`).",
+            "solution": "fmt.Println(errors.Is(wrapped, os.ErrNotExist))",
+            "hint": "One function from `errors` walks the whole wrap chain.",
+            "verify": null,
+            "ordered": null,
+            "given": "wrapped := fmt.Errorf(\"loading config: %w\", err)",
+            "note": "`==` compares only the outermost error, so it is false for any wrapped one. `errors.Is` unwraps repeatedly; its sibling `errors.As` does the same but extracts a value of a given *type* from the chain.",
+            "requires": [
+              {
+                "say": "calls errors.Is with the wrapped error and os.ErrNotExist",
+                "match": "errors . Is ( wrapped , os . ErrNotExist )"
+              },
+              {
+                "say": "prints the result",
+                "match": "fmt . Println ( errors . Is ("
+              }
+            ],
+            "forbids": [
+              {
+                "say": "comparing errors with ==",
+                "match": "=="
+              }
+            ]
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",
@@ -1200,7 +1738,131 @@
           ]
         }
       ],
-      "write": null,
+      "write": {
+        "lang": "go",
+        "setup": "",
+        "defs": {},
+        "challenges": [
+          {
+            "id": "make-chans",
+            "prompt": "Create two channels: `done`, an **unbuffered** channel of `string`, and `jobs`, a **buffered** channel of `int` with room for 3 values.",
+            "solution": "done := make(chan string)\njobs := make(chan int, 3)",
+            "hint": "Both come from the same built-in as slices and maps; the optional second argument is the buffer size.",
+            "verify": null,
+            "ordered": null,
+            "given": null,
+            "note": "An unbuffered channel is a rendezvous — a send blocks until a receiver is ready, so it synchronises the two goroutines as well as moving data. A buffer decouples them only up to its capacity, after which the sender blocks again.",
+            "requires": [
+              {
+                "say": "done: an unbuffered channel of string",
+                "match": "done \\( := \\| = \\) make ( chan string )"
+              },
+              {
+                "say": "jobs: a channel of int with capacity 3",
+                "match": "jobs \\( := \\| = \\) make ( chan int , 3 )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "goroutine-send",
+            "prompt": "Start a goroutine that sends `\"worker finished\"` on `done`, then receive that value in `main` and print it. Use `go` with a function literal.",
+            "solution": "go func() {\n\tdone <- \"worker finished\"\n}()\nfmt.Println(<-done)",
+            "hint": "`go` in front of a call runs it concurrently; `done <- v` sends and `<-done` receives. The receive is what keeps `main` from exiting early.",
+            "verify": null,
+            "ordered": null,
+            "given": "done := make(chan string)",
+            "note": "The receive does double duty: it fetches the value *and* blocks `main` until the worker has produced it. Without it `main` would return and the program would end with the goroutine unfinished — Go does not wait for goroutines on exit.",
+            "requires": [
+              {
+                "say": "starts a goroutine from a function literal that sends on done",
+                "match": "go func ( ) { done <- $str=worker } ( )"
+              },
+              {
+                "say": "after starting it, receives from done and prints what came back",
+                "then": [
+                  "go func",
+                  "\\( fmt . Println ( <- done ) \\| $v := <- done fmt . Println ( $v ) \\)"
+                ]
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "close-comma-ok",
+            "prompt": "`ch` is a buffered channel that already holds one value. Close it, then receive one value using the form that also reports whether the value was real, and print both on one line.",
+            "solution": "close(ch)\nv, ok := <-ch\nfmt.Println(v, ok)",
+            "hint": "A receive can be used as an expression with two results.",
+            "verify": null,
+            "ordered": null,
+            "given": "ch := make(chan int, 3)\nch <- 1",
+            "note": "Closing a channel does not discard what is buffered — receivers drain it first. Only once it is empty does a receive return the zero value immediately, with `ok == false`; that second result is how `for v := range ch` knows when to stop. Closing is the *sender's* job, and sending on a closed channel panics.",
+            "requires": [
+              {
+                "say": "closes the channel",
+                "match": "close ( ch )"
+              },
+              {
+                "say": "receives with the two-value form, after closing",
+                "then": [
+                  "close ( ch )",
+                  "$v , $ok \\( := \\| = \\) <- ch"
+                ]
+              },
+              {
+                "say": "prints the value and the ok flag",
+                "match": "fmt . Println ( $v , $ok )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "waitgroup",
+            "prompt": "Use the `sync.WaitGroup` `wg` so that `main` waits for one goroutine that prints `working`. Register the work **before** starting the goroutine, and have the goroutine mark itself finished on the way out.",
+            "solution": "wg.Add(1)\ngo func() {\n\tdefer wg.Done()\n\tfmt.Println(\"working\")\n}()\nwg.Wait()",
+            "hint": "A WaitGroup is a counter — add to it, subtract from it, wait for zero.",
+            "verify": null,
+            "ordered": null,
+            "given": "var wg sync.WaitGroup",
+            "note": "`Add` must happen in the *parent*, before the `go` statement — if the goroutine called it, `Wait` could run first, see zero and return early. And `defer wg.Done()` guarantees the counter drops even if the goroutine panics or returns early.",
+            "requires": [
+              {
+                "say": "adds one to the group, then starts the goroutine, then waits",
+                "then": [
+                  "wg . Add ( 1 )",
+                  "go func ( ) {",
+                  "wg . Wait ( )"
+                ]
+              },
+              {
+                "say": "the goroutine calls Done (deferred, so it always runs)",
+                "match": "go func ( ) { defer wg . Done ( ) fmt . Println ( $str=working ) } ( )"
+              }
+            ],
+            "forbids": []
+          },
+          {
+            "id": "mutex-defer",
+            "prompt": "Write the two lines that go at the top of a function so that `mu` is held for the rest of it and is released on **every** way out of the function.",
+            "solution": "mu.Lock()\ndefer mu.Unlock()",
+            "hint": "Acquire, then immediately schedule the release.",
+            "verify": null,
+            "ordered": null,
+            "given": "var mu sync.Mutex\nvar count int\n\nfunc inc() {\n\t// your two lines\n\tcount++\n}",
+            "note": "Putting the `defer` straight after the `Lock` means a later `return` or panic can't leak the lock — the same reason C++ has `std::lock_guard`. It costs almost nothing on modern Go (the compiler inlines the open-coded defer), which is why the old \"defer is slow\" advice is out of date.",
+            "requires": [
+              {
+                "say": "locks mu, then defers the unlock",
+                "then": [
+                  "mu . Lock ( )",
+                  "defer mu . Unlock ( )"
+                ]
+              }
+            ],
+            "forbids": []
+          }
+        ]
+      },
       "quiz": [
         {
           "id": "q1",

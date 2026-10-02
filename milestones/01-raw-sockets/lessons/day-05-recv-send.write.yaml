@@ -1,0 +1,190 @@
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+defs:
+  bufsz: 'sizeof ( buf ) \| sizeof buf \| 1024'
+challenges:
+  - id: recv-count
+    prompt: |
+      `fd` is a connected socket with a few bytes waiting. Read as many as fit in `buf` with **no flags**, and keep the byte count in a `ssize_t` named `n`.
+    given: |
+      char buf[1024];
+    hint: "`recv(fd, buf, len, flags)` — the return type is *signed*, because it also carries errors."
+    solution: |
+      ssize_t n = recv(fd, buf, sizeof(buf), 0);
+    note: |
+      `recv` returns *up to* the buffer size — whatever the kernel has, which on TCP can be less than one message or more than one. TCP is a byte stream with no message boundaries, so "one `send` = one `recv`" is a bug that works on localhost and fails in production. The type is `ssize_t` because the same return carries -1 for errors.
+    requires:
+      - say: "declares n as a signed size and fills it from recv on fd into buf, with the buffer's size and no flags"
+        match: '\( ssize_t \| auto \) n = recv ( fd , buf , \( @bufsz \) , 0 ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int fd = sv[0];
+        if (write(sv[1], "hello", 5) != 5) return 2;
+        char buf[1024];
+        {{ANSWER}}
+        std::printf("%zd\n", n);
+      }
+    expect: "5"
+    bad:
+      - "int n = recv(fd, buf, sizeof(buf), 0);"
+      - "ssize_t n = recv(buf, fd, sizeof(buf), 0);"
+      - "ssize_t n = recv(fd, buf, sizeof(buf));"
+      - "ssize_t n = recv(fd, &buf, sizeof(buf), MSG_PEEK);"
+
+  - id: peek-then-read
+    prompt: |
+      Bytes are waiting on `fd`. First **look** at them without consuming them, then read them for real into `buf` with a `ssize_t n`. Use `sizeof(buf)` for the length both times.
+    given: |
+      char buf[1024];
+    hint: One flag leaves the data in the kernel's receive queue.
+    solution: |
+      recv(fd, buf, sizeof(buf), MSG_PEEK);
+      ssize_t n = recv(fd, buf, sizeof(buf), 0);
+    note: |
+      The receive buffer is the kernel's, not yours — `MSG_PEEK` copies out of it without removing anything, so the same bytes come back twice. A server can use it to read a fixed-size header, decide how much body to expect, and only then consume.
+    requires:
+      - say: "peeks first, then reads for real"
+        then:
+          - 'recv ( fd , buf , \( @bufsz \) , MSG_PEEK ) ;'
+          - '\( ssize_t \| auto \) n = recv ( fd , buf , \( @bufsz \) , 0 ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int fd = sv[0];
+        if (write(sv[1], "hello", 5) != 5) return 2;
+        char buf[1024];
+        {{ANSWER}}
+        std::printf("%zd %.*s\n", n, static_cast<int>(n), buf);
+      }
+    expect: 5 hello
+    bad:
+      - |
+        recv(fd, buf, sizeof(buf), 0);
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+        recv(fd, buf, sizeof(buf), MSG_PEEK);
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), MSG_PEEK);
+      - |
+        recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+
+  - id: would-block
+    prompt: |
+      Nothing has been sent to `fd`. Call `recv` so it **never blocks**, into `ssize_t n`, then write the check that recognises "nothing there right now" — and in that case only, print `empty` with `puts`. Test for both spellings of that errno.
+    given: |
+      char buf[1024];
+    hint: A per-call flag makes it fail immediately instead of waiting; the failure is -1 with a particular errno.
+    solution: |
+      ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+      if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+          std::puts("empty");
+      }
+    note: |
+      "Would block" is not an error in the usual sense — it is the normal answer from a non-blocking socket with nothing queued, and the signal to go and wait for readiness with `poll`/`epoll`. `EAGAIN` and `EWOULDBLOCK` are the same number on Linux but the standard allows them to differ, so portable code tests both.
+    requires:
+      - say: "reads with the flag that makes this one call non-blocking"
+        match: '\( ssize_t \| auto \) n = recv ( fd , buf , \( @bufsz \) , MSG_DONTWAIT ) ;'
+      - say: "recognises 'no data right now' — a negative return with EAGAIN / EWOULDBLOCK — and prints empty"
+        match: 'if ( n < 0 && \( errno == EAGAIN \| errno == EWOULDBLOCK \| ( errno == EAGAIN || errno == EWOULDBLOCK ) \) ) { puts ( $str=empty ) ; }'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int fd = sv[0];
+        char buf[1024];
+        {{ANSWER}}
+      }
+    expect: empty
+    bad:
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+        if (n < 0 && errno == EAGAIN) {
+            std::puts("empty");
+        }
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+        if (n == 0) {
+            std::puts("empty");
+        }
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+        if (n < 0 && errno == EINTR) {
+            std::puts("empty");
+        }
+
+  - id: recv-three-ways
+    prompt: |
+      Read once from `fd` into `ssize_t n` (no flags). Then tell the three outcomes apart: if `n == 0` print `peer closed` with `puts`; otherwise, if `n < 0`, report the failure with `perror("recv")`.
+    given: |
+      char buf[1024];
+    hint: Zero is not an error and not "no data" — it is the answer a closed connection gives.
+    solution: |
+      ssize_t n = recv(fd, buf, sizeof(buf), 0);
+      if (n == 0) {
+          std::puts("peer closed");
+      } else if (n < 0) {
+          std::perror("recv");
+      }
+    note: |
+      A return of 0 from `recv` on a stream socket means the peer sent FIN: an orderly shutdown, end-of-file. It is the only way a TCP reader ever learns the other side is done, and treating 0 as "try again" is the classic busy-loop that pegs a CPU the moment a client disconnects. -1 is the error path — and check `errno` *immediately*, before any other call overwrites it.
+    requires:
+      - say: "reads into n with no flags"
+        match: '\( ssize_t \| auto \) n = recv ( fd , buf , \( @bufsz \) , 0 ) ;'
+      - say: "a return of 0 prints peer closed"
+        match: 'if ( n == 0 ) { puts ( $str=peer ) ; }'
+      - say: "a negative return is reported with perror"
+        match: 'else if ( \( n < 0 \| n == - 1 \) ) { perror ( $str=recv ) ; }'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int fd = sv[0];
+        close(sv[1]);
+        char buf[1024];
+        {{ANSWER}}
+      }
+    expect: peer closed
+    bad:
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+        if (n < 0) {
+            std::puts("peer closed");
+        } else if (n == 0) {
+            std::perror("recv");
+        }
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+        if (n == 0) {
+            std::perror("recv");
+        } else if (n < 0) {
+            std::puts("peer closed");
+        }
+      - |
+        ssize_t n = recv(fd, buf, sizeof(buf), 0);
+        if (n = 0) {
+            std::puts("peer closed");
+        } else if (n < 0) {
+            std::perror("recv");
+        }

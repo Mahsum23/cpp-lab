@@ -1,0 +1,244 @@
+lang: go
+challenges:
+  - id: return-err
+    prompt: |
+      `os.Open` returned `f` and `err`. Write the check that hands the error straight up to the caller when there is one.
+    given: |
+      func open(name string) error {
+      	f, err := os.Open(name)
+      	// your check
+      	defer f.Close()
+      	return nil
+      }
+    hint: Go's error handling is a plain `if` on a plain value.
+    solution: |
+      if err != nil {
+      	return err
+      }
+    note: |
+      No exceptions: an error is an ordinary return value and the check is ordinary control flow. That is verbose on purpose — every place a call can fail is visible in the source, which is the argument the Go team makes against the invisible control flow of `throw`.
+    requires:
+      - say: "tests err against nil"
+        match: if err != nil {
+      - say: "returns the error to the caller"
+        match: 'if err != nil { return \( err \| fmt . Errorf ( $str=%w , err ) \) }'
+    harness: |
+      package main
+
+      import (
+      	"fmt"
+      	"os"
+      )
+
+      func open(name string) error {
+      	f, err := os.Open(name)
+      	{{ANSWER}}
+      	defer f.Close()
+      	return nil
+      }
+
+      func main() {
+      	fmt.Println(open("/no/such/file") != nil, open("/dev/null") == nil)
+      }
+    expect: true true
+    good:
+      - |
+        if err != nil {
+        	return fmt.Errorf("open: %w", err)
+        }
+    bad:
+      - |
+        if err == nil {
+        	return err
+        }
+      - |
+        if err != nil {
+        	return nil
+        }
+      - |
+        if (err != nil) then return err
+
+  - id: defer-close
+    prompt: |
+      `f` was opened successfully. Add the one line that guarantees it is closed when the surrounding function returns — on every path, including a panic — without calling `Close` right now.
+    given: |
+      f, err := os.Open("data.txt")
+      if err != nil {
+      	return err
+      }
+    hint: A keyword in front of a call postpones the call until the function exits.
+    solution: |
+      defer f.Close()
+    note: |
+      `defer` is Go's answer to a C++ destructor: cleanup sits next to the acquisition instead of at the end of the function, so adding an early `return` later can't skip it. The arguments are evaluated at the `defer` line; the call itself runs at exit.
+    requires:
+      - say: "defers a call to Close on f"
+        match: defer f . Close ( )
+    harness: |
+      package main
+
+      import (
+      	"fmt"
+      	"os"
+      )
+
+      func work() (*os.File, error) {
+      	f, err := os.Open("/dev/null")
+      	if err != nil {
+      		return nil, err
+      	}
+      	{{ANSWER}}
+      	_, e := f.Stat()
+      	fmt.Println("still open while working:", e == nil)
+      	return f, nil
+      }
+
+      func main() {
+      	f, _ := work()
+      	_, e := f.Stat()
+      	fmt.Println("open after return:", e == nil)
+      }
+    expect: |
+      still open while working: true
+      open after return: false
+    bad:
+      - "f.Close()"
+      - "defer f.Close"
+      - "go f.Close()"
+      - "defer close(f)"
+
+  - id: defer-order
+    prompt: |
+      Write a `main` body that prints `body` normally and uses *three* `defer` statements so the full output is, in order: `body`, `first`, `second`, `third`. Print each with `fmt.Println`.
+    hint: Deferred calls run last-in, first-out, like a stack.
+    solution: |
+      defer fmt.Println("third")
+      defer fmt.Println("second")
+      defer fmt.Println("first")
+      fmt.Println("body")
+    note: |
+      Deferred calls unwind in reverse order of registration, exactly like destructors of locals in C++ — the thing acquired last is released first. The `defer` lines read backwards from the output, which is the whole trick.
+    requires:
+      - say: "defers third, then second, then first (registration order is the reverse of the output)"
+        then:
+          - 'defer fmt . Println ( $str=third )'
+          - 'defer fmt . Println ( $str=second )'
+          - 'defer fmt . Println ( $str=first )'
+      - say: "prints body"
+        match: 'fmt . Println ( $str=body )'
+    forbids:
+      - say: "deferring the body line — it has to print first"
+        match: 'defer fmt . Println ( $str=body )'
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	{{ANSWER}}
+      }
+    expect: |
+      body
+      first
+      second
+      third
+    good:
+      - |
+        fmt.Println("body")
+        defer fmt.Println("third")
+        defer fmt.Println("second")
+        defer fmt.Println("first")
+    bad:
+      - |
+        defer fmt.Println("first")
+        defer fmt.Println("second")
+        defer fmt.Println("third")
+        fmt.Println("body")
+      - |
+        defer fmt.Println("third")
+        defer fmt.Println("second")
+        defer fmt.Println("first")
+      - |
+        defer fmt.Println("third")
+        defer fmt.Println("second")
+        fmt.Println("first")
+        defer fmt.Println("body")
+
+  - id: wrap-error
+    prompt: |
+      `err` is what `os.Open("/no/such/file")` returned. Build `wrapped`: an error whose message starts with `loading config: ` and which `errors.Is` can still see `err` *through*.
+    given: |
+      _, err := os.Open("/no/such/file")
+    hint: "`fmt.Errorf` has a format verb that wraps instead of just printing."
+    solution: |
+      wrapped := fmt.Errorf("loading config: %w", err)
+    note: |
+      `%w` stores `err` inside the new error so `errors.Is` and `errors.As` can walk the chain. `%v` would produce an identical *message* and silently cut the chain — the two look the same in a log and behave differently in code.
+    requires:
+      - say: "builds wrapped with fmt.Errorf"
+        match: wrapped := fmt . Errorf (
+      - say: "starts the message with the context text"
+        match: wrapped := fmt . Errorf ( $str=loading
+      - say: "wraps err with the wrapping verb, not just printing it"
+        match: wrapped := fmt . Errorf ( $str=%w , err )
+    harness: |
+      package main
+
+      import (
+      	"errors"
+      	"fmt"
+      	"os"
+      )
+
+      func main() {
+      	_, err := os.Open("/no/such/file")
+      	{{ANSWER}}
+      	fmt.Println(wrapped)
+      	fmt.Println(errors.Is(wrapped, os.ErrNotExist))
+      }
+    expect: |
+      loading config: open /no/such/file: no such file or directory
+      true
+    bad:
+      - 'wrapped := fmt.Errorf("loading config: %v", err)'
+      - 'wrapped := fmt.Errorf("loading config", err)'
+      - 'wrapped := errors.New("loading config: " + err.Error())'
+      - 'wrapped := fmt.Sprintf("loading config: %w", err)'
+
+  - id: errors-is
+    prompt: |
+      Print whether `wrapped` is — or wraps — `os.ErrNotExist`, using the `errors` package (not `==`).
+    given: |
+      wrapped := fmt.Errorf("loading config: %w", err)
+    hint: One function from `errors` walks the whole wrap chain.
+    solution: |
+      fmt.Println(errors.Is(wrapped, os.ErrNotExist))
+    note: |
+      `==` compares only the outermost error, so it is false for any wrapped one. `errors.Is` unwraps repeatedly; its sibling `errors.As` does the same but extracts a value of a given *type* from the chain.
+    requires:
+      - say: "calls errors.Is with the wrapped error and os.ErrNotExist"
+        match: errors . Is ( wrapped , os . ErrNotExist )
+      - say: "prints the result"
+        match: fmt . Println ( errors . Is (
+    forbids:
+      - say: "comparing errors with =="
+        match: ==
+    harness: |
+      package main
+
+      import (
+      	"errors"
+      	"fmt"
+      	"os"
+      )
+
+      func main() {
+      	_, err := os.Open("/no/such/file")
+      	wrapped := fmt.Errorf("loading config: %w", err)
+      	{{ANSWER}}
+      }
+    expect: "true"
+    bad:
+      - "fmt.Println(wrapped == os.ErrNotExist)"
+      - "fmt.Println(errors.Is(os.ErrNotExist, wrapped))"
+      - "fmt.Println(errors.As(wrapped, os.ErrNotExist))"

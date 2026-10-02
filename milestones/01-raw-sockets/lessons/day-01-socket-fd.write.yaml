@@ -1,0 +1,107 @@
+# Write-it cards for the raw-sockets days. Judged by shape in the app; checked against the real
+# g++ and the real kernel by `node app/scripts/check-shape-cards.mjs` (prelude / harness /
+# expect / exit / good / bad are authoring-only and never shipped).
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+challenges:
+  - id: socket-create
+    prompt: |
+      Create a TCP socket over IPv4 and keep the descriptor in an `int` named `fd`. Pass the protocol as `0` ("pick the default for this type").
+    hint: "`socket(domain, type, protocol)` — the domain is the address family, the type says stream or datagram."
+    solution: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+    note: |
+      The `int` is an index into the process's file-descriptor table; the kernel object it points at lives on the other side of the syscall. `SOCK_STREAM` + protocol `0` means "TCP", because TCP is the only stream protocol in the `AF_INET` family.
+    requires:
+      - say: "declares an int named fd from socket()"
+        match: '\( int \| auto \) fd = socket ('
+      - say: "asks for the IPv4 family and a stream (TCP) socket, with the default protocol"
+        match: 'socket ( AF_INET , SOCK_STREAM , \( 0 \| IPPROTO_TCP \) ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        {{ANSWER}}
+        int type = 0, domain = 0;
+        socklen_t len = sizeof type;
+        getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &len);
+        len = sizeof domain;
+        getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &domain, &len);
+        std::printf("%d %d %d\n", fd >= 0, type == SOCK_STREAM, domain == AF_INET);
+      }
+    expect: 1 1 1
+    good:
+      - "int fd = ::socket(AF_INET, SOCK_STREAM, 0);"
+      - "auto fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);"
+    bad:
+      - "int fd = socket(AF_INET, SOCK_DGRAM, 0);"
+      - "int fd = socket(SOCK_STREAM, AF_INET, 0);"
+      - "int fd = socket(AF_INET6, SOCK_STREAM, 0);"
+      - "socket fd = socket(AF_INET, SOCK_STREAM, 0);"
+
+  - id: socket-cloexec
+    prompt: |
+      Create the same TCP/IPv4 socket, but have the kernel mark it close-on-exec **atomically, in the same call** — no second call afterwards.
+    hint: Flags can be OR-ed into the *type* argument.
+    solution: |
+      int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    note: |
+      Setting the flag with a separate `fcntl` leaves a window between the two calls in which another thread can `fork`+`exec` and leak the descriptor into the child. That race is exactly why `SOCK_CLOEXEC` (and `O_CLOEXEC`, `accept4`, `pipe2`…) exist.
+    requires:
+      - say: "creates the socket into an int named fd"
+        match: '\( int \| auto \) fd = socket ('
+      - say: "an IPv4 stream socket whose type also carries the close-on-exec flag"
+        match: 'socket ( AF_INET , \( SOCK_STREAM | SOCK_CLOEXEC \| SOCK_CLOEXEC | SOCK_STREAM \) , \( 0 \| IPPROTO_TCP \) ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        {{ANSWER}}
+        std::printf("%d\n", (fcntl(fd, F_GETFD) & FD_CLOEXEC) != 0);
+      }
+    expect: "1"
+    bad:
+      - "int fd = socket(AF_INET, SOCK_STREAM, 0);"
+      - "int fd = socket(AF_INET, SOCK_STREAM & SOCK_CLOEXEC, 0);"
+      - "int fd = socket(AF_INET, SOCK_STREAM, SOCK_CLOEXEC);"
+      - "int fd = socket(AF_INET | SOCK_CLOEXEC, SOCK_STREAM, 0);"
+
+  - id: fcntl-cloexec
+    prompt: |
+      `fd` is an already-open descriptor. Mark it close-on-exec with `fcntl` (the two-call route the atomic flag replaced).
+    given: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+    hint: The command that sets descriptor flags is not the one that sets file-status flags.
+    solution: |
+      fcntl(fd, F_SETFD, FD_CLOEXEC);
+    note: |
+      `F_SETFD` changes flags of the *descriptor* (just `FD_CLOEXEC`); `F_SETFL` changes flags of the open file description (`O_NONBLOCK`, `O_APPEND`). Mixing the two up compiles and silently does something else.
+    requires:
+      - say: "calls fcntl on fd"
+        match: 'fcntl ( fd ,'
+      - say: "with the command that sets *descriptor* flags, and the close-on-exec flag"
+        match: 'fcntl ( fd , F_SETFD , FD_CLOEXEC ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        {{ANSWER}}
+        std::printf("%d\n", (fcntl(fd, F_GETFD) & FD_CLOEXEC) != 0);
+      }
+    expect: "1"
+    bad:
+      - "fcntl(fd, F_SETFL, FD_CLOEXEC);"
+      - "fcntl(fd, F_GETFD, FD_CLOEXEC);"
+      - "fcntl(FD_CLOEXEC, F_SETFD, fd);"
+      - "fcntl(fd, F_SETFD, O_NONBLOCK);"

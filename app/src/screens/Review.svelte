@@ -3,8 +3,10 @@
    * The review deck: old material, dealt back at you.
    *
    * Five kinds of card, deliberately mixed so a session never settles into a rhythm.
-   * A write card hands you a database and a goal and makes you type the query from
-   * memory; it is run in a PostgreSQL on this device and judged by the rows it returns.
+   * A write card makes you type something from memory. A SQL one is run in a PostgreSQL
+   * on this device and judged by the rows it returns; a Go or C++ one cannot be run in a
+   * browser, so it is judged by shape (shapecheck.ts) — and its card file was checked
+   * against the real compiler before it shipped.
    * A quiz card is one you already answered weeks ago, replayed from the stored bank —
    * it needs no network and no key, which is what keeps the deck usable on a train. A
    * teach-back card asks you to explain a mechanism and is graded. A forged card is
@@ -26,6 +28,7 @@
   import MentorSheet from '../components/MentorSheet.svelte';
   import { codeBlocksFor, isDue, pickNext, type CardRef } from '../lib/review';
   import { sql } from '../lib/sqlrun.svelte';
+  import { judge, type ShapeReport } from '../lib/shapecheck';
   import { compareResults, isOrdered, type ResultTable, type Verdict } from '../lib/writecheck';
   import type { TableInfo } from '../lib/sqlcore';
   import ResultGrid from '../components/ResultGrid.svelte';
@@ -80,6 +83,9 @@
   let revealed = $state(false);
   /** The first run (or a hint, or giving up) is what the schedule hears; later tries are free. */
   let writeGraded = $state(false);
+  /** Go/C++ write card: each answer you checked, with what the judge made of it. */
+  type ShapeTry = { code: string; report: ShapeReport };
+  let shapeTries = $state<ShapeTry[]>([]);
 
   // Graded cards.
   let challenge = $state('');
@@ -113,9 +119,12 @@
     return context.day.write?.challenges.find((c) => c.id === card!.questionId) ?? null;
   });
   const writeSetup = $derived(context?.day.write?.setup ?? '');
+  /** What the card is written in. SQL is run; Go and C++ are judged by shape. */
+  const wLang = $derived(context?.day.write?.lang ?? 'sql');
+  const shaped = $derived(wc !== null && wLang !== 'sql');
   /** Whether row order is part of this answer. */
   const wOrdered = $derived(wc ? (wc.ordered ?? isOrdered(wc.verify ?? wc.solution)) : false);
-  const solved = $derived(attempts.some((a) => a.kind === 'right'));
+  const solved = $derived(shaped ? shapeTries.some((t) => t.report.ok) : attempts.some((a) => a.kind === 'right'));
 
   /** Graded cards need the mentor; without a key the deck falls back to quiz cards. */
   const graded = $derived(card?.kind === 'explain' || card?.kind === 'forge');
@@ -124,7 +133,7 @@
   const answerable = $derived(
     app.deck.filter((c) =>
       c.kind === 'write'
-        ? sql.state !== 'failed'
+        ? writeLangOf(c) !== 'sql' || sql.state !== 'failed'
         : c.kind === 'quiz' || c.kind === 'parsons' || app.mentorReady,
     ),
   );
@@ -168,6 +177,27 @@
           (turns
             .map((t) => `${t.role === 'user' ? 'They' : 'The marker'}: ${stripMarkers(t.content)}`)
             .join('\n\n') || '(nothing yet)'),
+      };
+    }
+    if (card.kind === 'write' && wc && shaped) {
+      const fence = (q: string) => `\`\`\`${wLang}\n${q}\n\`\`\``;
+      const tried = shapeTries
+        .map((t, i) => {
+          const missed = t.report.items.filter((x) => !x.ok).map((x) => x.say);
+          return `Attempt ${i + 1} — ${t.report.ok ? 'it had everything the card looks for' : `it missed: ${missed.join('; ')}`}:\n\n${fence(t.code)}`;
+        })
+        .join('\n\n');
+      return {
+        label: 'Write it',
+        question: wc.prompt,
+        outcome: [solved ? 'Your answer had everything the card looks for ✓' : revealed ? 'You asked for the answer ✗' : ''].filter(Boolean),
+        brief:
+          `A write-it-from-memory card in ${wLang === 'go' ? 'Go' : 'C++'}. It is judged by the *shape* of the answer, not by running it, so an answer the judge rejected may still be valid code, and one it accepted is only known to contain the right pieces.\n\n` +
+          (given(wc) ? `Code they were given:\n\n${fence(given(wc)!)}\n\n` : '') +
+          `The task: ${wc.prompt}\n\nThe reference answer:\n\n${fence(wc.solution)}\n\n` +
+          (wc.note ? `Why it is this way: ${wc.note}\n\n` : '') +
+          (tried ? `What they wrote:\n\n${tried}` : 'They did not check anything.') +
+          (hinted ? '\n\nThey asked for the hint.' : ''),
       };
     }
     if (card.kind === 'write' && wc) {
@@ -255,6 +285,7 @@
     hinted = false;
     revealed = false;
     writeGraded = false;
+    shapeTries = [];
   }
 
   async function deal() {
@@ -283,8 +314,14 @@
     const day = findDay(ref.dayId);
     const c = day?.write?.challenges.find((x) => x.id === ref.questionId);
     if (!day?.write || !c) return setAside(ref);
-    loading = true;
     codeMode = true;
+    // Go and C++ need no engine and nothing to load: the card is ready the moment it is dealt.
+    if (day.write.lang !== 'sql') {
+      await tick();
+      area?.focus();
+      return;
+    }
+    loading = true;
     try {
       if (!(await sql.warm())) return setAside(ref);
       const [t, ref_] = await Promise.all([
@@ -313,6 +350,7 @@
   }
 
   async function runWrite() {
+    if (shaped) return checkShape();
     const text = writeSql.trim();
     if (!text || running || solved || revealed || !wc || !target) return;
     running = true;
@@ -337,6 +375,41 @@
       await settle(attempt.kind === 'right' && !hinted ? 'good' : 'again');
     }
     if (attempt.kind !== 'right') {
+      await tick();
+      area?.focus();
+    }
+  }
+
+  /** The code that is already in place on a Go/C++ card, if the card has any. */
+  const given = (c: { given: string | null }): string | null => c.given?.trim() ? c.given : null;
+
+  const writeLangOf = (c: CardRef): string => findDay(c.dayId)?.write?.lang ?? 'sql';
+
+  /**
+   * Judge a Go/C++ answer. Nothing is run, so nothing can go wrong with the engine and the
+   * first check always counts: right with no hint is a pass, anything else is a miss, and
+   * fixing it afterwards is free.
+   */
+  async function checkShape() {
+    const code = writeSql.trim();
+    const set = context?.day.write;
+    if (!code || solved || revealed || !wc || !set || set.lang === 'sql') return;
+    let report: ShapeReport;
+    try {
+      report = judge(code, set.lang, { requires: wc.requires, forbids: wc.forbids }, set.defs);
+    } catch (err) {
+      // A broken pattern is the card file's bug, not the learner's wrong answer.
+      console.error(`[write] ${card?.id}: ${err instanceof Error ? err.message : err}`);
+      error = 'This card is broken — it has been left out of your score.';
+      if (card) await setAside(card);
+      return;
+    }
+    shapeTries = [...shapeTries, { code, report }];
+    if (!writeGraded) {
+      writeGraded = true;
+      await settle(report.ok && !hinted ? 'good' : 'again');
+    }
+    if (!report.ok) {
       await tick();
       area?.focus();
     }
@@ -568,7 +641,7 @@
   // The engine is a few MB and takes a few seconds to start, so start it as the deck opens
   // rather than when the first write card is dealt. After the first time it comes from cache.
   $effect(() => {
-    if (app.ready && app.deck.some((c) => c.kind === 'write')) void sql.warm();
+    if (app.ready && app.deck.some((c) => c.kind === 'write' && writeLangOf(c) === 'sql')) void sql.warm();
   });
 
   // Opening the deck spends the day's interruption, however it was reached.
@@ -661,6 +734,61 @@
           {/each}
         </div>
       </div>
+    {:else if card.kind === 'write' && wc && shaped}
+      <div class="card">
+        <h2 class="q inline-md">{@html inlineHtml(wc.prompt)}</h2>
+        {#if given(wc)}
+          <p class="sub">What you already have:</p>
+          <pre class="ref given"><code>{@html highlight(given(wc)!, wLang)}</code></pre>
+        {/if}
+        {#if hinted && wc.hint}
+          <p class="hint"><strong>Hint.</strong> {@html inlineHtml(wc.hint)}</p>
+        {/if}
+      </div>
+
+      {#if !solved && !revealed}
+        <div class="answer">
+          <CodeArea
+            bind:this={area}
+            bind:value={writeSql}
+            bind:codeMode
+            lang={wLang}
+            placeholder="Write it from memory…"
+            ariaLabel="Your code"
+            maxHeight={260}
+            onsubmit={() => void runWrite()}
+          />
+        </div>
+        <p class="fine">
+          {shapeTries.length ? 'Fix it and check again — only the first check counts towards the schedule.' : 'The first check counts. Ctrl/Cmd+Enter checks it.'}
+        </p>
+      {/if}
+
+      {#each shapeTries.slice(-1) as t}
+        <div class="card try" class:right={t.report.ok} class:wrong={!t.report.ok}>
+          <p class="verdict">{t.report.ok ? '✓ That has everything this card looks for.' : '✗ Not quite yet.'}</p>
+          <ul class="checks">
+            {#each t.report.items as it}
+              <li class:okk={it.ok}>
+                <span class="tick">{it.ok ? '✓' : '✗'}</span>
+                <span>{#if it.kind === 'forbid'}Shouldn't have: {/if}{it.say}</span>
+              </li>
+            {/each}
+          </ul>
+          <p class="fine">
+            Judged by shape: it checks the right pieces are there, in the right places. It doesn't run your code, so a
+            plausible answer can still be wrong — and a valid one the card didn't expect can be marked short.
+          </p>
+        </div>
+      {/each}
+
+      {#if answered}
+        <div class="card">
+          <p class="lbl2">{solved ? 'The reference answer — yours may differ and still be right' : 'The answer'}</p>
+          <pre class="ref"><code>{@html highlight(wc.solution, wLang)}</code></pre>
+          {#if wc.note}<p class="note inline-md">{@html inlineHtml(wc.note)}</p>{/if}
+        </div>
+      {/if}
     {:else if card.kind === 'write' && wc && target}
       <div class="card">
         <h2 class="q inline-md">{@html inlineHtml(wc.prompt)}</h2>
@@ -832,9 +960,9 @@
           Check
         </Button>
         <Button variant="ghost" size="sm" onclick={() => void skip()}>Skip</Button>
-      {:else if card.kind === 'write' && wc && target}
+      {:else if card.kind === 'write' && wc && (target || shaped)}
         <Button onclick={() => void runWrite()} disabled={!writeSql.trim() || running}>
-          {running ? 'Running…' : 'Run ▶'}
+          {running ? 'Running…' : shaped ? 'Check ▶' : 'Run ▶'}
         </Button>
         {#if wc.hint && !hinted}
           <Button variant="ghost" size="sm" onclick={() => (hinted = true)}>Hint</Button>
@@ -1315,6 +1443,55 @@
     letter-spacing: 0.075em;
     text-transform: uppercase;
     color: var(--text-faint);
+  }
+
+  .given code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .given {
+    margin: 4px 0 0;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+  }
+
+  .checks {
+    list-style: none;
+    margin: 0 0 10px;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .checks li {
+    display: flex;
+    gap: 8px;
+    color: var(--bad);
+  }
+
+  .checks li.okk {
+    color: var(--text);
+  }
+
+  .checks .tick {
+    flex: none;
+    width: 1.1em;
+    font-weight: 700;
+  }
+
+  .checks li.okk .tick {
+    color: var(--ok);
+  }
+
+  .note {
+    margin: 12px 0 0;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-dim, var(--text));
   }
 
   .ref {

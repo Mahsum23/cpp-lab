@@ -1,0 +1,129 @@
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <sys/resource.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+challenges:
+  - id: checked-socket
+    prompt: |
+      Harden `socket()`. Directly after the call, test for failure; if it failed, report the reason on **stderr** as `socket: <reason>` — with `std::fprintf` and `std::strerror(errno)` — and `return 1`.
+    given: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+    hint: "-1 means failure and `errno` says why; `strerror` turns the number into words."
+    solution: |
+      if (fd < 0) {
+          std::fprintf(stderr, "socket: %s\n", std::strerror(errno));
+          return 1;
+      }
+    note: |
+      Every syscall can fail, and the failure is the *only* thing you learn about the system's real state — descriptors exhausted (`EMFILE`), memory (`ENOMEM`), a seccomp policy (`EPERM`). The error goes to stderr so it survives `./server > log`, and the non-zero exit lets a supervisor notice. An unchecked `fd` of -1 flows into `bind` and surfaces three calls later as a baffling `EBADF`.
+    requires:
+      - say: "tests the descriptor for failure"
+        match: 'if ( \( fd < 0 \| fd == - 1 \) ) {'
+      - say: "reports the errno text to stderr as 'socket: …' and exits non-zero"
+        match: 'if ( \( fd < 0 \| fd == - 1 \) ) { \( fprintf ( stderr , $str=socket , strerror ( errno ) ) \| perror ( $str=socket ) \) ; return \( 1 \| EXIT_FAILURE \) ; }'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        rlimit rl{0, 0};
+        setrlimit(RLIMIT_NOFILE, &rl);
+        {{GIVEN}}
+        {{ANSWER}}
+        std::puts("opened");
+      }
+    exit: 1
+    expect: ""
+    expectErr: "socket: Too many open files"
+    bad:
+      - |
+        if (fd < 0) {
+            std::fprintf(stderr, "socket: %s\n", std::strerror(errno));
+        }
+      - |
+        if (fd > 0) {
+            std::fprintf(stderr, "socket: %s\n", std::strerror(errno));
+            return 1;
+        }
+      - |
+        if (fd < 0) {
+            std::printf("socket: %s\n", std::strerror(errno));
+            return 1;
+        }
+      - |
+        if (fd < 0) {
+            std::fprintf(stderr, "socket: %s\n", std::strerror(fd));
+            return 1;
+        }
+
+  - id: checked-bind
+    prompt: |
+      Harden `bind()` the same way: put the call, with `reinterpret_cast<sockaddr *>(&addr)` and `sizeof(addr)`, **inside** an `if` that tests for a negative result; on failure `perror("bind")` and `return 1`.
+    given: |
+      int fd = socket(AF_INET, SOCK_STREAM, 0);
+      sockaddr_in addr{};   // family, port and address already set
+    hint: The shape is the same as the connect check, with a different call and message.
+    solution: |
+      if (bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
+          std::perror("bind");
+          return 1;
+      }
+    note: |
+      `bind` is the call that fails most often in practice, and always for a reason worth reading: `EADDRINUSE` (another process, or `TIME_WAIT` without `SO_REUSEADDR`), `EACCES` (ports under 1024 without privilege), `EADDRNOTAVAIL` (an address this machine does not own). `perror` prints your label, a colon, and `strerror(errno)` — the one-line version of the previous card.
+    requires:
+      - say: "calls bind on fd with addr (cast, with its size) inside an if that tests for failure"
+        match: 'if ( bind ( fd , \( reinterpret_cast < sockaddr * > ( & addr ) \| ( sockaddr * ) & addr \| ( sockaddr * ) ( & addr ) \) , \( sizeof ( addr ) \| sizeof addr \| sizeof ( sockaddr_in ) \) ) \( < 0 \| == - 1 \) ) {'
+      - say: "reports with perror and exits non-zero"
+        match: '{ perror ( $str=bind ) ; return \( 1 \| EXIT_FAILURE \) ; }'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        // occupy a port, then try to bind another socket to it
+        int first = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bind(first, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+        listen(first, 8);
+        socklen_t al = sizeof(addr);
+        getsockname(first, reinterpret_cast<sockaddr *>(&addr), &al);
+
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        {{ANSWER}}
+        std::puts("bound");
+      }
+    exit: 1
+    expect: ""
+    expectErr: "bind: Address already in use"
+    bad:
+      - |
+        if (bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) > 0) {
+            std::perror("bind");
+            return 1;
+        }
+      - |
+        if (bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
+            std::perror("listen");
+            return 1;
+        }
+      - |
+        bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+        if (errno) {
+            std::perror("bind");
+            return 1;
+        }
+      - |
+        if (bind(fd, &addr, sizeof(addr)) < 0) {
+            std::perror("bind");
+            return 1;
+        }

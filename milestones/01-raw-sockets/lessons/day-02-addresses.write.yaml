@@ -1,0 +1,172 @@
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+defs:
+  zeroed: 'sockaddr_in addr { } ; \| sockaddr_in addr = { } ; \| sockaddr_in addr ; memset ( & addr , 0 , \( sizeof ( addr ) \| sizeof addr \| sizeof ( sockaddr_in ) \) ) ;'
+challenges:
+  - id: fill-sockaddr
+    prompt: |
+      Declare a **zero-initialised** `sockaddr_in` named `addr` and fill it in for "any local IPv4 address, port 9000": the family, the port, and the address — each stored in the byte order the network expects.
+    hint: Four things to set, two of which need a byte-order conversion function — one for 16-bit values, one for 32-bit.
+    solution: |
+      sockaddr_in addr{};
+      addr.sin_family = AF_INET;
+      addr.sin_port = htons(9000);
+      addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    note: |
+      The struct has eight bytes of padding (`sin_zero`) that some kernels compare, so zero the whole thing first. Network byte order is big-endian; on a little-endian x86 machine writing `9000` straight into `sin_port` would put the bytes `28 23` on the wire and you would be listening on port 10,019.
+    requires:
+      - say: "declares addr zeroed (value-initialised, or memset right after)"
+        match: '@zeroed'
+      - say: "sets the family to IPv4"
+        match: 'addr . sin_family = AF_INET ;'
+      - say: "sets the port to 9000, converted to network byte order"
+        match: 'addr . sin_port = htons ( 9000 ) ;'
+      - say: "sets the address to the wildcard, in network byte order"
+        match: 'addr . sin_addr . s_addr = \( htonl ( INADDR_ANY ) \| INADDR_ANY \) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        {{ANSWER}}
+        const unsigned char *p = reinterpret_cast<const unsigned char *>(&addr.sin_port);
+        std::printf("%02x%02x %d %u\n", p[0], p[1], addr.sin_family == AF_INET, addr.sin_addr.s_addr);
+      }
+    expect: 2328 1 0
+    good:
+      - |
+        sockaddr_in addr;
+        std::memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(9000);
+        addr.sin_addr.s_addr = INADDR_ANY;
+    bad:
+      - |
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = 9000;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+      - |
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htonl(9000);
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+      - |
+        sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(9000);
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+      - |
+        sockaddr addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(9000);
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+  - id: peer-port
+    prompt: |
+      `peer` is a `sockaddr_in` the kernel filled in; its port is in network byte order. Store the port as a normal host-order number in a `uint16_t` named `port`.
+    given: |
+      sockaddr_in peer;   // filled in by accept()
+    hint: The function names read "network to host, short".
+    solution: |
+      uint16_t port = ntohs(peer.sin_port);
+    note: |
+      The 16-bit pair is `htons`/`ntohs`, the 32-bit pair `htonl`/`ntohl` — "short" and "long" from the days when `long` was 32 bits. On a big-endian machine all four are no-ops, which is why code that forgets them often works on exactly one developer's laptop.
+    requires:
+      - say: "declares port as a 16-bit host-order value"
+        match: '\( uint16_t \| in_port_t \| unsigned short \| auto \) port = ntohs ( peer . sin_port ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        sockaddr_in peer{};
+        peer.sin_port = htons(4242);
+        {{ANSWER}}
+        std::printf("%u\n", port);
+      }
+    expect: "4242"
+    bad:
+      - "uint16_t port = peer.sin_port;"
+      - "uint16_t port = htonl(peer.sin_port);"
+      - "uint16_t port = ntohs(peer.sin_addr);"
+      - "uint16_t port = ntohs(peer->sin_port);"
+
+  - id: ntop-text
+    prompt: |
+      `addr.sin_addr` holds an IPv4 address. Format it as text into a buffer named `text` — sized with the constant that is exactly big enough for dotted-quad text — using the call that writes into **your** buffer rather than a hidden static one.
+    given: |
+      sockaddr_in addr;   // addr.sin_addr is set
+    hint: "`inet_ntop` — \"network to presentation\"; the older `inet_ntoa` returns a pointer to a static."
+    solution: |
+      char text[INET_ADDRSTRLEN];
+      inet_ntop(AF_INET, &addr.sin_addr, text, sizeof(text));
+    note: |
+      `inet_ntoa` returns a pointer into one static buffer, so `printf("%s %s", inet_ntoa(a), inet_ntoa(b))` prints the *same* address twice and is a data race across threads. `inet_ntop` takes your buffer and its size; `INET_ADDRSTRLEN` is 16, which fits `255.255.255.255` plus the NUL.
+    requires:
+      - say: "declares a char buffer named text, sized with INET_ADDRSTRLEN"
+        match: 'char text [ INET_ADDRSTRLEN ] ;'
+      - say: "formats the IPv4 address into it, passing the buffer size"
+        match: 'inet_ntop ( AF_INET , & addr . sin_addr , text , \( sizeof ( text ) \| sizeof text \| INET_ADDRSTRLEN \) ) ;'
+    forbids:
+      - say: "inet_ntoa — it returns a shared static buffer"
+        match: inet_ntoa
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        sockaddr_in addr{};
+        inet_pton(AF_INET, "10.20.30.40", &addr.sin_addr);
+        {{ANSWER}}
+        std::printf("%s\n", text);
+      }
+    expect: 10.20.30.40
+    bad:
+      - |
+        char text[8];
+        inet_ntop(AF_INET, &addr.sin_addr, text, sizeof(text));
+      - |
+        char text[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, addr.sin_addr, text, sizeof(text));
+      - |
+        char *text = inet_ntoa(addr.sin_addr);
+      - |
+        char text[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &addr.sin_addr, sizeof(text), text);
+
+  - id: pton-parse
+    prompt: |
+      Parse the text `"127.0.0.1"` into `addr.sin_addr`, using the call that reports success with `1`.
+    given: |
+      sockaddr_in addr{};
+    hint: "`inet_pton` — \"presentation to network\". It also writes the result in network byte order for you."
+    solution: |
+      inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    note: |
+      `inet_pton` returns 1 on success, 0 if the text isn't a valid address, and -1 for an unknown family — three outcomes, which is why `if (inet_pton(...) != 1)` is the check, not `<= 0`. It is also the modern replacement for the long-deprecated `inet_addr`, whose error value `INADDR_NONE` collides with the valid address 255.255.255.255.
+    requires:
+      - say: "calls inet_pton for IPv4 with the text 127.0.0.1"
+        match: 'inet_pton ( AF_INET , $str=127.0.0.1 ,'
+      - say: "writing into the address field (not the whole struct)"
+        match: 'inet_pton ( AF_INET , $str=127.0.0.1 , & addr . sin_addr ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        sockaddr_in addr{};
+        {{ANSWER}}
+        std::printf("%08x\n", ntohl(addr.sin_addr.s_addr));
+      }
+    expect: 7f000001
+    bad:
+      - 'inet_pton(AF_INET, "127.0.0.1", &addr);'
+      - 'inet_pton(AF_INET, "127.0.0.1", addr.sin_addr);'
+      - 'inet_pton("127.0.0.1", AF_INET, &addr.sin_addr);'
+      - 'inet_pton(AF_INET, "127.0.0.2", &addr.sin_addr);'
