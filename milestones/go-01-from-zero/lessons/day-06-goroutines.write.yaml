@@ -1,0 +1,254 @@
+lang: go
+challenges:
+  - id: make-chans
+    prompt: |
+      Create two channels: `done`, an **unbuffered** channel of `string`, and `jobs`, a **buffered** channel of `int` with room for 3 values.
+    hint: Both come from the same built-in as slices and maps; the optional second argument is the buffer size.
+    solution: |
+      done := make(chan string)
+      jobs := make(chan int, 3)
+    note: |
+      An unbuffered channel is a rendezvous — a send blocks until a receiver is ready, so it synchronises the two goroutines as well as moving data. A buffer decouples them only up to its capacity, after which the sender blocks again.
+    requires:
+      - say: "done: an unbuffered channel of string"
+        match: 'done \( := \| = \) make ( chan string )'
+      - say: "jobs: a channel of int with capacity 3"
+        match: 'jobs \( := \| = \) make ( chan int , 3 )'
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	{{ANSWER}}
+      	fmt.Println(cap(done), cap(jobs))
+      }
+    expect: 0 3
+    bad:
+      - |
+        done := make(chan string, 1)
+        jobs := make(chan int, 3)
+      - |
+        done := make(chan string)
+        jobs := make(chan int)
+      - |
+        done := make(string)
+        jobs := make(chan int, 3)
+      - |
+        done := make([]chan string)
+        jobs := make(chan int, 3)
+
+  - id: goroutine-send
+    prompt: |
+      Start a goroutine that sends `"worker finished"` on `done`, then receive that value in `main` and print it. Use `go` with a function literal.
+    given: |
+      done := make(chan string)
+    hint: "`go` in front of a call runs it concurrently; `done <- v` sends and `<-done` receives. The receive is what keeps `main` from exiting early."
+    solution: |
+      go func() {
+      	done <- "worker finished"
+      }()
+      fmt.Println(<-done)
+    note: |
+      The receive does double duty: it fetches the value *and* blocks `main` until the worker has produced it. Without it `main` would return and the program would end with the goroutine unfinished — Go does not wait for goroutines on exit.
+    requires:
+      - say: "starts a goroutine from a function literal that sends on done"
+        match: 'go func ( ) { done <- $str=worker } ( )'
+      - say: "after starting it, receives from done and prints what came back"
+        then:
+          - 'go func'
+          - '\( fmt . Println ( <- done ) \| $v := <- done fmt . Println ( $v ) \)'
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	done := make(chan string)
+      	{{ANSWER}}
+      }
+    expect: worker finished
+    good:
+      - |
+        go func() {
+        	done <- "worker finished"
+        }()
+        msg := <-done
+        fmt.Println(msg)
+    bad:
+      - |
+        done <- "worker finished"
+        fmt.Println(<-done)
+      - |
+        func() {
+        	done <- "worker finished"
+        }()
+        fmt.Println(<-done)
+      - |
+        go func() {
+        	fmt.Println(<-done)
+        }()
+
+  - id: close-comma-ok
+    prompt: |
+      `ch` is a buffered channel that already holds one value. Close it, then receive one value using the form that also reports whether the value was real, and print both on one line.
+    given: |
+      ch := make(chan int, 3)
+      ch <- 1
+    hint: A receive can be used as an expression with two results.
+    solution: |
+      close(ch)
+      v, ok := <-ch
+      fmt.Println(v, ok)
+    note: |
+      Closing a channel does not discard what is buffered — receivers drain it first. Only once it is empty does a receive return the zero value immediately, with `ok == false`; that second result is how `for v := range ch` knows when to stop. Closing is the *sender's* job, and sending on a closed channel panics.
+    requires:
+      - say: "closes the channel"
+        match: close ( ch )
+      - say: "receives with the two-value form, after closing"
+        then:
+          - close ( ch )
+          - '$v , $ok \( := \| = \) <- ch'
+      - say: "prints the value and the ok flag"
+        match: fmt . Println ( $v , $ok )
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	ch := make(chan int, 3)
+      	ch <- 1
+      	{{ANSWER}}
+      }
+    expect: 1 true
+    bad:
+      - |
+        v := <-ch
+        fmt.Println(v)
+      - |
+        v, ok := <-ch
+        close(ch)
+        fmt.Println(v, ok)
+      - |
+        close(ch)
+        v := <-ch
+        fmt.Println(v, true)
+
+  - id: waitgroup
+    prompt: |
+      Use the `sync.WaitGroup` `wg` so that `main` waits for one goroutine that prints `working`. Register the work **before** starting the goroutine, and have the goroutine mark itself finished on the way out.
+    given: |
+      var wg sync.WaitGroup
+    hint: A WaitGroup is a counter — add to it, subtract from it, wait for zero.
+    solution: |
+      wg.Add(1)
+      go func() {
+      	defer wg.Done()
+      	fmt.Println("working")
+      }()
+      wg.Wait()
+    note: |
+      `Add` must happen in the *parent*, before the `go` statement — if the goroutine called it, `Wait` could run first, see zero and return early. And `defer wg.Done()` guarantees the counter drops even if the goroutine panics or returns early.
+    requires:
+      - say: "adds one to the group, then starts the goroutine, then waits"
+        then:
+          - wg . Add ( 1 )
+          - go func ( ) {
+          - wg . Wait ( )
+      - say: "the goroutine calls Done (deferred, so it always runs)"
+        match: 'go func ( ) { defer wg . Done ( ) fmt . Println ( $str=working ) } ( )'
+    harness: |
+      package main
+
+      import (
+      	"fmt"
+      	"sync"
+      )
+
+      func main() {
+      	var wg sync.WaitGroup
+      	{{ANSWER}}
+      }
+    expect: working
+    bad:
+      - |
+        go func() {
+        	wg.Add(1)
+        	defer wg.Done()
+        	fmt.Println("working")
+        }()
+        wg.Wait()
+      - |
+        wg.Add(1)
+        go func() {
+        	fmt.Println("working")
+        }()
+        wg.Wait()
+      - |
+        wg.Add(1)
+        go func() {
+        	defer wg.Done()
+        	fmt.Println("working")
+        }()
+
+  - id: mutex-defer
+    prompt: |
+      Write the two lines that go at the top of a function so that `mu` is held for the rest of it and is released on **every** way out of the function.
+    given: |
+      var mu sync.Mutex
+      var count int
+
+      func inc() {
+      	// your two lines
+      	count++
+      }
+    hint: Acquire, then immediately schedule the release.
+    solution: |
+      mu.Lock()
+      defer mu.Unlock()
+    note: |
+      Putting the `defer` straight after the `Lock` means a later `return` or panic can't leak the lock — the same reason C++ has `std::lock_guard`. It costs almost nothing on modern Go (the compiler inlines the open-coded defer), which is why the old "defer is slow" advice is out of date.
+    requires:
+      - say: "locks mu, then defers the unlock"
+        then:
+          - mu . Lock ( )
+          - defer mu . Unlock ( )
+    harness: |
+      package main
+
+      import (
+      	"fmt"
+      	"sync"
+      )
+
+      var mu sync.Mutex
+      var count int
+
+      func inc() {
+      	{{ANSWER}}
+      	count++
+      }
+
+      func main() {
+      	inc()
+      	inc()
+      	fmt.Println(count)
+      }
+    expect: "2"
+    good:
+      - |
+        mu.Lock()
+        defer mu.Unlock()
+    bad:
+      - |
+        mu.Lock()
+      - |
+        defer mu.Unlock()
+        mu.Lock()
+      - |
+        mu.Lock()
+        mu.Unlock()
+      - |
+        mu.Lock
+        defer mu.Unlock

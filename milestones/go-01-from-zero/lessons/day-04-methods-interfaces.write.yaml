@@ -1,0 +1,205 @@
+lang: go
+challenges:
+  - id: pointer-receiver
+    prompt: |
+      Define a struct type `Counter` with one `int` field `n`, and a method `Bump` that increments `n` **in place**, so that calling it twice on a `Counter` variable leaves `n` at 2.
+    hint: A method that has to change the value it is called on needs a receiver that points at it.
+    solution: |
+      type Counter struct {
+      	n int
+      }
+
+      func (c *Counter) Bump() {
+      	c.n++
+      }
+    note: |
+      A value receiver gets a *copy* of the struct, so `c.n++` bumps the copy and the caller sees nothing — no error, no warning. Rule of thumb: if any method needs a pointer receiver, give them all one.
+    requires:
+      - say: "declares struct Counter with an int field n"
+        match: 'type Counter struct { n int }'
+      - say: "declares method Bump on a *pointer* receiver, taking and returning nothing"
+        match: 'func ( $c * Counter ) Bump ( ) {'
+      - say: "increments n through the receiver"
+        match: '\( $c . n ++ \| $c . n += 1 \| $c . n = $c . n + 1 \)'
+    harness: |
+      package main
+
+      import "fmt"
+
+      {{ANSWER}}
+
+      func main() {
+      	var c Counter
+      	c.Bump()
+      	c.Bump()
+      	fmt.Println(c.n)
+      }
+    expect: "2"
+    good:
+      - |
+        type Counter struct{ n int }
+
+        func (c *Counter) Bump() { c.n += 1 }
+    bad:
+      - |
+        type Counter struct{ n int }
+
+        func (c Counter) Bump() { c.n++ }
+      - |
+        type Counter struct{ n int }
+
+        func (c *Counter) Bump() { n++ }
+      - |
+        type Counter struct{ n float64 }
+
+        func (c *Counter) Bump() { c.n++ }
+
+  - id: stringer
+    prompt: |
+      Define `type Celsius float64` and give it a `String` method so that `fmt.Println(Celsius(36.6))` prints `36.6°C` — one decimal place, then `°C`.
+    hint: "`fmt.Println` looks for a method with this exact name and signature, and calls it for you."
+    solution: |
+      type Celsius float64
+
+      func (c Celsius) String() string {
+      	return fmt.Sprintf("%.1f°C", float64(c))
+      }
+    note: |
+      There is no `implements` keyword: a type satisfies `fmt.Stringer` just by having `String() string`. (Converting back with `float64(c)` is the habit that matters — `%v` on a `Celsius` would call `String` again and recurse forever.)
+    requires:
+      - say: "declares Celsius with underlying type float64"
+        match: type Celsius float64
+      - say: "declares a method named String on Celsius returning string"
+        match: func ( $c Celsius ) String ( ) string {
+      - say: "returns the value formatted with Sprintf and a one-decimal verb"
+        match: 'return fmt . Sprintf ( $str=%.1f , \( float64 ( $c ) \| $c \) )'
+    harness: |
+      package main
+
+      import "fmt"
+
+      {{ANSWER}}
+
+      func main() {
+      	fmt.Println(Celsius(36.6))
+      }
+    expect: 36.6°C
+    good:
+      - |
+        type Celsius float64
+
+        func (c Celsius) String() string {
+        	return fmt.Sprintf("%.1f°C", c)
+        }
+    bad:
+      - |
+        type Celsius float64
+
+        func (c Celsius) String() {
+        	fmt.Sprintf("%.1f°C", float64(c))
+        }
+      - |
+        type Celsius float64
+
+        func (c Celsius) ToString() string {
+        	return fmt.Sprintf("%.1f°C", float64(c))
+        }
+      - |
+        type Celsius int
+
+        func (c Celsius) String() string {
+        	return fmt.Sprintf("%.1f°C", float64(c))
+        }
+
+  - id: interface-decl
+    prompt: |
+      Declare an interface `Greeter` with a single method `Greet` that takes no arguments and returns a `string`.
+    hint: An interface is a `type` whose underlying type is the keyword `interface` followed by a list of method signatures.
+    solution: |
+      type Greeter interface {
+      	Greet() string
+      }
+    note: |
+      Interfaces are satisfied implicitly, by shape, which is why they are best defined by the code that *uses* them and kept small — the standard library's most useful ones (`io.Reader`, `error`, `fmt.Stringer`) have one method each.
+    requires:
+      - say: "declares type Greeter as an interface"
+        match: type Greeter interface {
+      - say: "with a method Greet that takes nothing and returns string"
+        match: type Greeter interface { Greet ( ) string }
+    harness: |
+      package main
+
+      import "fmt"
+
+      {{ANSWER}}
+
+      type English struct{ Name string }
+
+      func (e English) Greet() string { return "Hello, " + e.Name }
+
+      func main() {
+      	var g Greeter = English{Name: "world"}
+      	fmt.Println(g.Greet())
+      }
+    expect: Hello, world
+    bad:
+      - |
+        type Greeter struct {
+        	Greet() string
+        }
+      - |
+        type Greeter interface {
+        	Greet() int
+        }
+      - |
+        type Greeter interface {
+        	Greet(name string) string
+        }
+      - |
+        interface Greeter {
+        	Greet() string
+        }
+
+  - id: compile-time-check
+    prompt: |
+      `English` is meant to satisfy `Greeter`. Write the single package-level line that makes the **build fail** if it ever stops doing so, without keeping a usable variable around.
+    given: |
+      type Greeter interface{ Greet() string }
+
+      type English struct{ Name string }
+
+      func (e English) Greet() string { return "Hello, " + e.Name }
+    hint: A package-level `var` can be declared with the blank identifier as its name.
+    solution: |
+      var _ Greeter = English{}
+    note: |
+      Because satisfaction is implicit, nothing tells you when a refactor quietly breaks it — until some far-away assignment fails. This idiom moves the failure to the type's own file. For a pointer-receiver type, the allocation-free spelling is `var _ Greeter = (*Spanish)(nil)`.
+    requires:
+      - say: "a package-level var named _ of type Greeter"
+        match: var _ Greeter =
+      - say: "assigned a value of the type being checked"
+        match: 'var _ Greeter = \( English { } \| ( * English ) ( nil ) \)'
+    harness: |
+      package main
+
+      import "fmt"
+
+      type Greeter interface{ Greet() string }
+
+      type English struct{ Name string }
+
+      func (e English) Greet() string { return "Hello, " + e.Name }
+
+      {{ANSWER}}
+
+      func main() {
+      	fmt.Println("ok")
+      }
+    expect: ok
+    good:
+      - "var _ Greeter = (*English)(nil)"
+    bad:
+      - "var g Greeter = English{}"
+      - "var _ English = Greeter{}"
+      - "_ = English{}"
+      - "var _ Greeter"

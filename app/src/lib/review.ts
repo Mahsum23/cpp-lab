@@ -302,6 +302,9 @@ export function dueCards(deck: CardRef[], state: ReviewState, on: string): CardR
  * that aren't due at all, which is the whole "ask me when I'm not ready" idea: the
  * schedule decides what you *owe*, not what you can be asked.
  */
+/** How often a reorder card sits out a deal when other kinds are available. */
+export const PARSONS_SKIP = 0.5;
+
 export function pickNext(
   deck: CardRef[],
   state: ReviewState,
@@ -317,6 +320,12 @@ export function pickNext(
   // is meant to mix. It is a preference, not a rule: with only one kind left, deal it.
   const varied = avoid ? pool.filter((c) => c.kind !== avoid) : pool;
   if (varied.length) pool = varied;
+  // Putting lines back in order trains sequence, not recall, and it is the cheapest card to
+  // produce — so it used to flood the deck. Half the time, leave it out whenever there is
+  // anything that makes you type from memory instead.
+  if (pool.some((c) => c.kind === 'parsons') && pool.some((c) => c.kind !== 'parsons') && rng() < PARSONS_SKIP) {
+    pool = pool.filter((c) => c.kind !== 'parsons');
+  }
 
   const due = pool.filter((c) => isDue(state.cards[c.id], on));
   const resting = pool.filter((c) => !isDue(state.cards[c.id], on));

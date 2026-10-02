@@ -715,6 +715,29 @@ engine; isolation between runs; the engine's answers against a real PostgreSQL 1
 `tools/check-write-cards.py` (every solution on a real server) and Chromium (a wrong answer,
 a syntax error, a runaway query, a different correct spelling, offline).
 
+### 8.9a Go and C++: judged by shape
+
+The same card kind for the other two tracks, without an engine — because there is no honest one.
+I built and rejected **yaegi** (a Go interpreter in WebAssembly): against a corpus of the
+lesson's own programs it got `defer` argument evaluation, the per-iteration loop variable,
+`%T`, `errors.As`, `recover` and `min` wrong, and a card that marks a correct answer wrong
+because the interpreter disagrees with `go` teaches the wrong thing. A C++ compiler in the browser
+is tens of megabytes and the sockets lessons could not run in it anyway.
+
+So `shapecheck.ts` judges *shape*: tokenize (comments and whitespace gone), normalise (C++
+`std::`, a leading `::`, `struct` before a name), check the brackets balance, then require each
+thing the card names as a token pattern. Patterns bind identifiers (`$name`), allow equally right
+spellings (`\( a \| b \)`), and a pattern starting with a name never matches the tail of
+`x.name` / `ns::name`. A requirement can be an ordered `then` list; `forbids` are the plausible
+wrong answers. After a check the learner sees each requirement ticked or crossed, in words that
+describe it. The first check counts for the schedule, exactly as for SQL.
+
+What makes shape trustworthy is the authoring check, not the judge: `scripts/check-shape-cards.mjs`
+runs every reference answer, alternative and wrong example through the real `go`/`g++` in a
+harness (C++ ones on real sockets), then mutation-tests the patterns. Verified: 53 cards (27 Go,
+26 C++), 2,451 mutants, no false accepts; `test-shape.mjs` covers the judge itself; Chromium
+covers dealing, a wrong check, a right one, hint and give-up.
+
 ## 9. Offline & local storage
 
 - **Content cache:** Cache API / IndexedDB — loaded weeks fully offline.

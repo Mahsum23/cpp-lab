@@ -1,0 +1,160 @@
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+challenges:
+  - id: accept-peer
+    prompt: |
+      `listen_fd` is listening and a client is waiting. Accept one connection into an `int` named `conn`, and capture who connected in a zero-initialised `sockaddr_in` named `peer`. The length variable, `len`, must start out as the size of `peer`.
+    given: |
+      int listen_fd;   // bound and listening
+    hint: "`accept` takes the address buffer *and* a pointer to its length — and the length is both input and output."
+    solution: |
+      sockaddr_in peer{};
+      socklen_t len = sizeof(peer);
+      int conn = accept(listen_fd, reinterpret_cast<sockaddr *>(&peer), &len);
+    note: |
+      `len` is a value-result argument: you tell the kernel how much room you have, it tells you how much it used. Leave it uninitialised and you've told the kernel your buffer is a random size — often 0, in which case `accept` succeeds and quietly hands you back no address at all.
+    requires:
+      - say: "declares peer zero-initialised"
+        match: 'sockaddr_in peer \( { } ; \| = { } ; \)'
+      - say: "declares len as a socklen_t holding the size of peer"
+        match: 'socklen_t len = \( sizeof ( peer ) \| sizeof peer \| sizeof ( sockaddr_in ) \) ;'
+      - say: "accepts on listen_fd into conn, passing peer (cast) and the address of len"
+        match: '\( int \| auto \) conn = accept ( listen_fd , \( reinterpret_cast < sockaddr * > ( & peer ) \| ( sockaddr * ) & peer \| ( sockaddr * ) ( & peer ) \) , & len ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bind(listen_fd, reinterpret_cast<sockaddr *>(&a), sizeof(a));
+        listen(listen_fd, 8);
+        socklen_t al = sizeof(a);
+        getsockname(listen_fd, reinterpret_cast<sockaddr *>(&a), &al);
+        int c = socket(AF_INET, SOCK_STREAM, 0);
+        connect(c, reinterpret_cast<sockaddr *>(&a), sizeof(a));
+        sockaddr_in me{};
+        socklen_t ml = sizeof(me);
+        getsockname(c, reinterpret_cast<sockaddr *>(&me), &ml);
+
+        {{ANSWER}}
+
+        std::printf("%d %d\n", conn >= 0, peer.sin_port == me.sin_port && len == sizeof(peer));
+      }
+    expect: 1 1
+    bad:
+      - |
+        sockaddr_in peer{};
+        socklen_t len;
+        int conn = accept(listen_fd, reinterpret_cast<sockaddr *>(&peer), &len);
+      - |
+        sockaddr_in peer{};
+        socklen_t len = sizeof(peer);
+        int conn = accept(listen_fd, reinterpret_cast<sockaddr *>(&peer), len);
+      - |
+        sockaddr_in peer{};
+        socklen_t len = sizeof(peer);
+        int conn = accept(listen_fd, &peer, &len);
+      - |
+        sockaddr_in peer{};
+        socklen_t len = sizeof(peer);
+        int conn = accept(conn, reinterpret_cast<sockaddr *>(&peer), &len);
+
+  - id: accept4-cloexec
+    prompt: |
+      Accept a connection on `listen_fd` into an `int` named `conn` when you **don't care who it is** (pass no address buffer at all), and have the kernel mark the new descriptor close-on-exec in the same call.
+    given: |
+      int listen_fd;   // bound and listening
+    hint: There is a four-argument sibling of `accept` whose last argument takes flags.
+    solution: |
+      int conn = accept4(listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
+    note: |
+      Passing null for the address and length is allowed and means "don't tell me". `accept4` is Linux-specific (BSDs and macOS have no such call), which is the price of closing the fork/exec race atomically.
+    requires:
+      - say: "calls accept4 on listen_fd into conn, passing no address buffer and the close-on-exec flag"
+        match: '\( int \| auto \) conn = accept4 ( listen_fd , \( nullptr \| NULL \| 0 \) , \( nullptr \| NULL \| 0 \) , SOCK_CLOEXEC ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bind(listen_fd, reinterpret_cast<sockaddr *>(&a), sizeof(a));
+        listen(listen_fd, 8);
+        socklen_t al = sizeof(a);
+        getsockname(listen_fd, reinterpret_cast<sockaddr *>(&a), &al);
+        int c = socket(AF_INET, SOCK_STREAM, 0);
+        connect(c, reinterpret_cast<sockaddr *>(&a), sizeof(a));
+
+        {{ANSWER}}
+
+        std::printf("%d %d\n", conn >= 0, conn >= 0 && (fcntl(conn, F_GETFD) & FD_CLOEXEC) != 0);
+      }
+    expect: 1 1
+    good:
+      - "int conn = accept4(listen_fd, NULL, NULL, SOCK_CLOEXEC);"
+    bad:
+      - "int conn = accept(listen_fd, nullptr, nullptr);"
+      - "int conn = accept4(listen_fd, nullptr, nullptr, 0);"
+      - "int conn = accept(listen_fd, nullptr, nullptr, SOCK_CLOEXEC);"
+      - "int conn = accept4(listen_fd, SOCK_CLOEXEC, nullptr, nullptr);"
+
+  - id: peer-text
+    prompt: |
+      `peer` is the `sockaddr_in` that `accept` filled in. Print the client as `client ip:port` — exactly `printf("client %s:%u\n", …)` — with the address as dotted-quad text in a buffer `ip` and the port in host byte order.
+    given: |
+      sockaddr_in peer;   // filled in by accept()
+    hint: Two conversions, one per field; the text one needs a buffer of the right size first.
+    solution: |
+      char ip[INET_ADDRSTRLEN];
+      inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+      std::printf("client %s:%u\n", ip, ntohs(peer.sin_port));
+    note: |
+      Both fields arrive in network byte order, so both need converting on the way out — but with different functions, because one is text-formatting a 32-bit address and the other is byte-swapping a 16-bit integer. Forget `ntohs` and a client on port 4242 prints as 37392.
+    requires:
+      - say: "declares a buffer ip sized with INET_ADDRSTRLEN"
+        match: 'char ip [ INET_ADDRSTRLEN ] ;'
+      - say: "formats peer's IPv4 address into it, passing the buffer's size"
+        match: 'inet_ntop ( AF_INET , & peer . sin_addr , ip , \( sizeof ( ip ) \| sizeof ip \| INET_ADDRSTRLEN \) ) ;'
+      - say: "prints the text and the port converted to host order"
+        match: 'printf ( $str=client , ip , ntohs ( peer . sin_port ) ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        sockaddr_in peer{};
+        peer.sin_family = AF_INET;
+        peer.sin_port = htons(4242);
+        inet_pton(AF_INET, "127.0.0.1", &peer.sin_addr);
+        {{ANSWER}}
+      }
+    expect: client 127.0.0.1:4242
+    bad:
+      - |
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+        std::printf("client %s:%u\n", ip, peer.sin_port);
+      - |
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+        std::printf("client %s:%u\n", ip, htonl(peer.sin_port));
+      - |
+        char ip[INET_ADDRSTRLEN];
+        std::printf("client %s:%u\n", ip, ntohs(peer.sin_port));
+      - |
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &peer, ip, sizeof(ip));
+        std::printf("client %s:%u\n", ip, ntohs(peer.sin_port));

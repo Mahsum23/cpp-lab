@@ -70,6 +70,7 @@ const weeksDir = new URL('../public/content/weeks/', import.meta.url).pathname;
 const cards = [];
 for (const f of readdirSync(weeksDir)) {
   for (const day of JSON.parse(readFileSync(join(weeksDir, f), 'utf8')).days) {
+    if ((day.write?.lang ?? 'sql') !== 'sql') continue; // Go and C++ cards are judged by shape: test-shape.mjs and check-shape-cards.mjs
     for (const c of day.write?.challenges ?? []) cards.push({ day: day.id, setup: day.write.setup, ...c });
   }
 }

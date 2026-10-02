@@ -578,5 +578,16 @@ key or network needed. Things the build turned up:
   and defeated the point of the card; caught by reading the output (4 rows expected, 3 given).
 - The browser engine is PostgreSQL 18, the lessons are 16; every card's answer was compared
   with a real 16 and all 38 agree. Cards avoid plan text, ids and sizes for that reason.
-The deck also no longer deals the same kind of card twice in a row. Not done: the same card
-for Go and C++ (needs model grading), and a setting to hold off the 5 MB download on mobile data.
+The deck also no longer deals the same kind of card twice in a row. Not done: a setting to hold off the 5 MB download on mobile data.
+
+**Write-it cards for Go and C++ (2026-10-02).** "Do the same for Go and C++": 27 Go cards
+(days 1–6) and 26 C++ cards (days 1–8), `day-NN-<slug>.write.yaml`. They cannot be run in a
+browser (yaegi was built and rejected: it gets `defer`, loop variables, `%T`, `errors.As` and
+`recover` wrong), so they are judged by *shape* — `shapecheck.ts` checks the answer contains
+each required piece, and the screen says it is not running your code. The weight is carried by
+`app/scripts/check-shape-cards.mjs`, which runs every reference and wrong example through the
+real `go` / `g++` (the socket ones on real sockets) and mutation-tests the patterns. What it found:
+a statement without its `;` accepted, `anything::printf(` satisfying `printf(`, a grouped import
+that did not contain all three packages, code inside `**bold**` showing literal asterisks. Reorder
+cards now sit out about half of the deals. Not done: SQL days 1–3 and every C++ day still lack
+drills.

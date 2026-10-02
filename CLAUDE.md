@@ -558,8 +558,40 @@ once the engine is cached. Rules that keep the cards honest:
 
 The first run of a card is what the schedule hears (wrong, an error, a hint, or "show answer"
 is a miss); fixing it afterwards is free. The deck never deals the same kind of card twice
-in a row when another kind exists. Go and C++ have no equivalent yet; the obvious route is
-model-graded write cards.
+in a row when another kind exists, and a reorder (Parsons) card sits out about half of the
+deals when anything else is on offer: it trains sequence, not recall.
+
+**Go and C++ write cards are judged by shape, and say so.** Neither can be run faithfully in a
+browser (a Go interpreter small enough to ship gets `defer` argument evaluation and the loop-
+variable rule wrong, which is worse than not judging; a C++ compiler is tens of MB and could not
+open a socket), so `shapecheck.ts` tokenizes the answer (comments and whitespace gone, `std::`
+and `struct` ignored in C++) and requires each thing the card asks for as a token pattern, with
+`$name` binding an identifier, `\( a \| b \)` for equally right spellings, `$*` for a balanced
+run, and `@name` for fragments shared in the file's `defs`. The card file is
+`lang: go|cpp`, with per challenge `prompt`, `given` (code already in place), `solution`, `hint`,
+`note` (the reason, shown after answering), `requires` (each a `say` plus `match` or an ordered
+`then`) and `forbids`. Rules that keep it honest:
+
+- **`say` describes, it does not spell.** It is what the learner sees ticked or crossed after a
+  check, so "sets the port to 9000, in network byte order" and not "`htons(9000)`".
+- **Patterns cover whole statements.** A `$*` that can swallow half a call lets a typo through.
+  C++ patterns end in `;`. Holes are for genuinely free choices (a variable's name, `sizeof(x)`
+  against `sizeof x`).
+- **Every card is run against the real toolchain before it ships.** `harness` is a real program
+  with `{{PRELUDE}}`, `{{GIVEN}}` and `{{ANSWER}}` holes, `expect` its output (`exit`/`expectErr`
+  for failure paths; sockets use `socketpair` or loopback). `node app/scripts/check-shape-cards.mjs`
+  requires the solution and every `good` alternative to pass the judge *and* the real `go run` /
+  `g++`, every `bad` example to be rejected, and then mutates the solution one token at a time:
+  a mutant the judge accepts but the compiler or harness rejects is a false accept and fails the
+  check (it is how a missing `;`, an unconstrained `ns::printf` and an import group that did not
+  contain all three packages were found). Rejections of mutants that still pass are reported as
+  over-strict and are information, not failure.
+- **Be honest on screen.** The card says it checks shape, not behaviour; the harness proves the
+  reference is real code and the mutation test proves the patterns are tight, but an accepted
+  answer is only known to contain the right pieces.
+- `harness`, `expect`, `exit`, `expectErr`, `good`, `bad` and `prelude` are authoring-only and
+  are not shipped (`build-content.mjs` lists the keys that are). Prompts must not put code in
+  `**bold**` (renders as literal asterisks); the build warns.
 
 Quiz, drill and checklist text may use `code`, **bold** and *emphasis*, and nothing else:
 `inline.ts` renders exactly those, escaped. `test-inline.mjs` fails if any string the app

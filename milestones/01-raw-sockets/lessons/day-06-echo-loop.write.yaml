@@ -1,0 +1,254 @@
+lang: cpp
+prelude: |
+  #include <arpa/inet.h>
+  #include <fcntl.h>
+  #include <netinet/in.h>
+  #include <netinet/tcp.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <cerrno>
+  #include <csignal>
+  #include <cstdint>
+  #include <cstdio>
+  #include <cstdlib>
+  #include <cstring>
+  [[maybe_unused]] static const int kAlarm = (alarm(5), 0);
+defs:
+  bufsz: 'sizeof ( buf ) \| sizeof buf \| 1024'
+challenges:
+  - id: echo-loop
+    prompt: |
+      `conn` is a connected socket. Write the echo loop as a *single* `while` whose condition does the `recv` (no flags, into `buf`, assigning to `n`) and tests that it returned more than zero; inside, send back exactly the `n` bytes you received (no flags).
+    given: |
+      char buf[1024];
+      ssize_t n;
+    hint: An assignment is an expression, so the read can live inside the loop condition.
+    solution: |
+      while ((n = recv(conn, buf, sizeof(buf), 0)) > 0) {
+          send(conn, buf, n, 0);
+      }
+    note: |
+      The loop ends on 0 (the peer closed) and on -1 (an error) with the same test — and that is exactly why this version is too short for real use: it never checks what `send` returned. The next card is that fix.
+    requires:
+      - say: "loops while recv on conn into buf, assigned to n, returns more than 0"
+        match: 'while ( ( n = recv ( conn , buf , \( @bufsz \) , 0 ) ) > 0 ) {'
+      - say: "echoes back the n bytes it received, from the same buffer"
+        match: 'while ( $* ) { send ( conn , buf , n , 0 ) ; }'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int conn = sv[0];
+        if (write(sv[1], "ping", 4) != 4) return 2;
+        shutdown(sv[1], SHUT_WR);
+        char buf[1024];
+        ssize_t n;
+        {{ANSWER}}
+        char out[16];
+        ssize_t r = read(sv[1], out, sizeof out);
+        std::printf("%.*s\n", static_cast<int>(r), out);
+      }
+    expect: ping
+    bad:
+      - |
+        while ((n = recv(conn, buf, sizeof(buf), 0)) >= 0) {
+            send(conn, buf, n, 0);
+        }
+      - |
+        while (n = recv(conn, buf, sizeof(buf), 0) > 0) {
+            send(conn, buf, n, 0);
+        }
+      - |
+        while ((n = recv(conn, buf, sizeof(buf), 0)) > 0) {
+            send(conn, buf, sizeof(buf), 0);
+        }
+      - |
+        if ((n = recv(conn, buf, sizeof(buf), 0)) > 0) {
+            send(conn, buf, n, 0);
+        }
+
+  - id: send-all
+    prompt: |
+      `send` may accept fewer bytes than you offered. Write the loop that sends *all* `n` bytes of `buf` on `conn`: a `size_t sent` that starts at 0, a `while` that runs until `sent` reaches `n`, `send` called on the *remaining* bytes (no flags), a `break` if it fails, and `sent` advanced by what `send` reported (cast to `size_t`).
+    given: |
+      char buf[1024];
+      size_t n;   // how many bytes of buf to send
+    hint: "Each pass sends from `buf + sent`, for `n - sent` bytes."
+    solution: |
+      size_t sent = 0;
+      while (sent < n) {
+          ssize_t k = send(conn, buf + sent, n - sent, 0);
+          if (k < 0) {
+              break;
+          }
+          sent += static_cast<size_t>(k);
+      }
+    note: |
+      On a stream socket `send` returns how much the kernel *accepted*, which can be less than you asked for whenever the send buffer is nearly full or a signal arrived mid-call. Ignoring the return value works on localhost with small messages for years and then truncates one in a million replies — the classic "works on my machine" network bug. (A fuller version retries on `EINTR` instead of giving up.)
+    requires:
+      - say: "starts a counter of bytes sent at zero"
+        match: 'size_t sent = 0 ;'
+      - say: "loops while the counter is below n"
+        match: 'while ( sent < n ) {'
+      - say: "each pass sends only the remaining bytes, starting where the last one stopped"
+        match: '\( ssize_t \| auto \) $k = send ( conn , buf + sent , n - sent , 0 ) ;'
+      - say: "stops on failure instead of looping forever"
+        match: 'if ( $k < 0 ) { break ; }'
+      - say: "advances the counter by what send reported"
+        match: 'sent += \( static_cast < size_t > ( $k ) \| $k \) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int conn = sv[0];
+        char buf[1024] = "hello, world";
+        size_t n = 12;
+        {{ANSWER}}
+        close(conn);
+        char out[64];
+        ssize_t r = read(sv[1], out, sizeof out);
+        std::printf("%.*s %zu\n", static_cast<int>(r), out, sent);
+      }
+    expect: hello, world 12
+    good:
+      - |
+        size_t sent = 0;
+        while (sent < n) {
+            ssize_t k = send(conn, buf + sent, n - sent, 0);
+            if (k < 0) {
+                break;
+            }
+            sent += k;
+        }
+    bad:
+      - |
+        size_t sent = 0;
+        while (sent < n) {
+            ssize_t k = send(conn, buf, n, 0);
+            if (k < 0) {
+                break;
+            }
+            sent += static_cast<size_t>(k);
+        }
+      - |
+        size_t sent = 0;
+        while (sent < n) {
+            ssize_t k = send(conn, buf + sent, n - sent, 0);
+            sent += static_cast<size_t>(k);
+        }
+      - |
+        size_t sent = 0;
+        while (sent <= n) {
+            ssize_t k = send(conn, buf + sent, n - sent, 0);
+            if (k < 0) {
+                break;
+            }
+            sent += static_cast<size_t>(k);
+        }
+      - |
+        size_t sent = 0;
+        ssize_t k = send(conn, buf, n, 0);
+
+  - id: no-sigpipe-flag
+    prompt: |
+      The peer may already be gone. Send `n` bytes of `buf` on `conn` into `ssize_t k` with **no flags other than** the one that makes a closed peer return `-1` with `EPIPE` instead of killing your process with a signal.
+    given: |
+      char buf[1024];
+      size_t n;
+    hint: "The flag has `NOSIGNAL` in its name."
+    solution: |
+      ssize_t k = send(conn, buf, n, MSG_NOSIGNAL);
+    note: |
+      Writing to a connection the peer has closed raises `SIGPIPE`, whose default action *terminates the process* — no error return, no log line, a server that simply vanishes the first time a client hangs up mid-reply. `MSG_NOSIGNAL` is the per-call fix; ignoring the signal process-wide is the next card. (Famously, Go's runtime does the process-wide version for you; C++ hands you the footgun.)
+    requires:
+      - say: "sends n bytes of buf on conn with the flag that suppresses SIGPIPE"
+        match: '\( ssize_t \| auto \) k = send ( conn , buf , n , MSG_NOSIGNAL ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        int conn = sv[0];
+        close(sv[1]);
+        char buf[1024] = "hello";
+        size_t n = 5;
+        {{ANSWER}}
+        std::printf("%zd %d\n", k, errno == EPIPE);
+      }
+    expect: -1 1
+    bad:
+      - "ssize_t k = send(conn, buf, n, 0);"
+      - "ssize_t k = send(conn, buf, n, MSG_DONTWAIT);"
+      - "ssize_t k = send(conn, buf, n, SIGPIPE);"
+      - "ssize_t k = send(conn, buf, n);"
+
+  - id: ignore-sigpipe
+    prompt: |
+      Make the **whole process** survive writes to closed connections: one line, using `std::signal`, that tells the system to ignore `SIGPIPE`.
+    hint: The disposition that means "ignore" has `IGN` in its name.
+    solution: |
+      std::signal(SIGPIPE, SIG_IGN);
+    note: |
+      Disposition is per-process, so this one line covers every `send` in the program, including those inside libraries you didn't write — which is why servers usually do it once at the top of `main`. The cost: the *signal* stops telling you about the dead peer, so you must check `send`'s return value for `EPIPE` instead.
+    requires:
+      - say: "ignores SIGPIPE"
+        match: 'signal ( SIGPIPE , SIG_IGN ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int sv[2];
+        socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+        close(sv[1]);
+        {{ANSWER}}
+        ssize_t k = send(sv[0], "hello", 5, 0);
+        std::printf("survived %zd\n", k);
+      }
+    expect: survived -1
+    bad:
+      - "std::signal(SIGPIPE, SIG_DFL);"
+      - "std::signal(SIG_IGN, SIGPIPE);"
+      - "std::signal(SIGINT, SIG_IGN);"
+      - "std::signal(SIGPIPE, SIG_IGN)"
+
+  - id: tcp-nodelay
+    prompt: |
+      Turn off Nagle's algorithm on the TCP socket `conn`: use a local `int yes = 1` and `setsockopt`, naming the option's level and name correctly.
+    given: |
+      int conn = socket(AF_INET, SOCK_STREAM, 0);
+    hint: This option belongs to the protocol, not to the socket layer — the level is not `SOL_SOCKET`.
+    solution: |
+      int yes = 1;
+      setsockopt(conn, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+    note: |
+      Nagle's algorithm holds small writes back to coalesce them, which interacts with the receiver's delayed ACK to add ~40 ms of latency to request/response protocols. `TCP_NODELAY` lives at level `IPPROTO_TCP`; the classic mistake is `SOL_SOCKET`, which fails with `ENOPROTOOPT` — and an unchecked `setsockopt` makes that silent.
+    requires:
+      - say: "declares an int yes holding 1"
+        match: 'int yes \( = 1 \| { 1 } \) ;'
+      - say: "sets TCP_NODELAY at the TCP protocol level on conn, by address and with its size"
+        match: 'setsockopt ( conn , IPPROTO_TCP , TCP_NODELAY , & yes , \( sizeof ( yes ) \| sizeof yes \| sizeof ( int ) \) ) ;'
+    harness: |
+      {{PRELUDE}}
+      int main() {
+        int conn = socket(AF_INET, SOCK_STREAM, 0);
+        {{ANSWER}}
+        int v = 0;
+        socklen_t len = sizeof v;
+        getsockopt(conn, IPPROTO_TCP, TCP_NODELAY, &v, &len);
+        std::printf("%d\n", v != 0);
+      }
+    expect: "1"
+    bad:
+      - |
+        int yes = 1;
+        setsockopt(conn, SOL_SOCKET, TCP_NODELAY, &yes, sizeof(yes));
+      - |
+        int yes = 1;
+        setsockopt(conn, IPPROTO_TCP, SO_REUSEADDR, &yes, sizeof(yes));
+      - |
+        int yes = 0;
+        setsockopt(conn, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+      - |
+        int yes = 1;
+        setsockopt(conn, IPPROTO_TCP, TCP_NODELAY, yes, sizeof(yes));

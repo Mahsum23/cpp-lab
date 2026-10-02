@@ -1,0 +1,167 @@
+lang: go
+challenges:
+  - id: make-cap
+    prompt: |
+      Create a slice of `int` named `s` with length 0 and capacity 1000, in one statement.
+    hint: The built-in that allocates slices, maps and channels takes the type, then a length, then an optional capacity.
+    solution: |
+      s := make([]int, 0, 1000)
+    note: |
+      Pre-sizing with `make([]T, 0, n)` avoids the repeated grow-and-copy that `append` does when it runs out of room; the capacity is a promise about how many appends are free.
+    requires:
+      - say: "assigns the result to s"
+        match: \( s := \| s = \| var s $* = \) make (
+      - say: "makes a []int with length 0 and capacity 1000"
+        match: make ( [ ] int , 0 , 1000 )
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	{{ANSWER}}
+      	fmt.Println(len(s), cap(s))
+      }
+    expect: 0 1000
+    good:
+      - "var s = make([]int, 0, 1000)"
+    bad:
+      - "s := make([]int, 1000)"
+      - "s := make([]int, 1000, 0)"
+      - "s := []int{0, 1000}"
+
+  - id: append-assign
+    prompt: |
+      `s` holds `1, 2, 3`. Add `4` to it so that `s` itself holds four elements afterwards.
+    given: |
+      s := []int{1, 2, 3}
+    hint: "`append` returns the slice to use from now on — it can't update your variable for you."
+    solution: |
+      s = append(s, 4)
+    note: |
+      `append` may have to allocate a new, bigger array, so it hands back a new slice header and the caller decides what to do with it. Calling it and discarding the result is a compile error — the language refuses to let the call silently do nothing.
+    requires:
+      - say: "appends 4 to s"
+        match: append ( $s , 4 )
+      - say: "stores the result back into s"
+        match: $s = append ( $s , 4 )
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	s := []int{1, 2, 3}
+      	{{ANSWER}}
+      	fmt.Println(len(s), s)
+      }
+    expect: 4 [1 2 3 4]
+    bad:
+      - "append(s, 4)"
+      - "s.append(4)"
+      - "s[3] = 4"
+
+  - id: three-index
+    prompt: |
+      `head` should be the first two elements of `full`, but appending to `head` must **never** overwrite `full[2]`. Define `head` with a *full slice expression* (the three-index form).
+    given: |
+      full := []int{1, 2, 3, 4, 5}
+    hint: "`s[low:high:max]` — the third number caps the capacity."
+    solution: |
+      head := full[:2:2]
+    note: |
+      A plain `full[:2]` has capacity 5, so `append(head, 99)` writes into `full`'s third slot. The third index sets the capacity to `max-low`, so the next append has no room and copies into a fresh array instead.
+    requires:
+      - say: "defines head from full with a three-index slice"
+        match: 'head \( := \| = \) full [ \( 0 \| \) : 2 : 2 ]'
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	full := []int{1, 2, 3, 4, 5}
+      	{{ANSWER}}
+      	head = append(head, 99)
+      	fmt.Println(full)
+      }
+    expect: "[1 2 3 4 5]"
+    good:
+      - "head := full[0:2:2]"
+    bad:
+      - "head := full[:2]"
+      - "head := full[:2:5]"
+      - "head := full[2:2:2]"
+      - "head := full[:2][:2]"
+
+  - id: detach-copy
+    prompt: |
+      `firstLine` should be the first 60 bytes of `data`, in a **brand-new array**, so that `data` (which may be huge) can be garbage-collected. Use only built-ins — no imports.
+    given: |
+      data := make([]byte, 100)
+    hint: One idiom appends the bytes onto a nil slice; another allocates exactly 60 and copies into it.
+    solution: |
+      firstLine := append([]byte(nil), data[:60]...)
+    note: |
+      A sub-slice is a window onto the *same* array, so a 60-byte slice of a 500 MB file keeps all 500 MB alive. Copying is how you let the big one go; Go 1.21 added `slices.Clone` for the same job.
+    requires:
+      - say: "builds firstLine as a fresh copy of the first 60 bytes"
+        match: '\( firstLine := append ( [ ] byte ( nil ) , data [ \( 0 \| \) : 60 ] ... ) \| firstLine := make ( [ ] byte , 60 ) $* copy ( firstLine , data $* ) \)'
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	data := make([]byte, 100)
+      	{{ANSWER}}
+      	data[0] = 9
+      	fmt.Println(firstLine[0], len(firstLine))
+      }
+    expect: 0 60
+    good:
+      - |
+        firstLine := make([]byte, 60)
+        copy(firstLine, data[:60])
+    bad:
+      - "firstLine := data[:60]"
+      - "firstLine := data[:60:60]"
+      - "firstLine := append([]byte(nil), data[:60])"
+
+  - id: nil-slice
+    prompt: |
+      Declare `s` as a `[]int` that is **nil** — no `make`, no literal — then append `1` to it.
+    hint: A slice's zero value is already usable with append.
+    solution: |
+      var s []int
+      s = append(s, 1)
+    note: |
+      A nil slice has length 0, capacity 0 and no array behind it, and `append` on it just works. That is why Go code almost never initialises a slice before appending.
+    requires:
+      - say: "declares s as a nil []int"
+        match: var s [ ] int
+      - say: "then appends 1 and keeps the result"
+        match: s = append ( s , 1 )
+    forbids:
+      - say: "make or a literal — it should stay nil until the append"
+        match: \( make \| { \)
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	{{ANSWER}}
+      	fmt.Println(len(s), cap(s))
+      }
+    expect: 1 1
+    bad:
+      - |
+        s := make([]int, 0)
+        s = append(s, 1)
+      - |
+        var s []int
+        append(s, 1)
+      - |
+        var s [1]int
+        s = append(s, 1)

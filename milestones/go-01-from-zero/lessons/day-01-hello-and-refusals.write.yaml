@@ -1,0 +1,172 @@
+# Write-it cards for Go day 1. Judged by shape in the app; checked against the real `go` by
+# `node app/scripts/check-shape-cards.mjs` (harness / expect / good / bad are never shipped).
+lang: go
+challenges:
+  - id: hello
+    prompt: |
+      Write a complete Go program, from the first line, that prints `hello from Go` and exits.
+    hint: A file that builds an executable belongs to one particular package, and something has to be imported before it can print.
+    solution: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	fmt.Println("hello from Go")
+      }
+    note: |
+      Only package `main` produces an executable, and `main` takes no arguments and returns nothing — the exit code is `os.Exit`'s job, not a return value.
+    requires:
+      - say: "declares package main"
+        match: package main
+      - say: "imports fmt"
+        match: import \( "fmt" \| ( "fmt" ) \)
+      - say: "defines func main with no parameters and no result"
+        match: func main ( ) {
+      - say: "prints the text from inside main"
+        match: fmt . \( Println \| Print \| Printf \) ( $str=hello
+    harness: "{{ANSWER}}"
+    expect: hello from Go
+    good:
+      - |
+        package main
+
+        import (
+        	"fmt"
+        )
+
+        func main() {
+        	fmt.Print("hello from Go")
+        }
+    bad:
+      - |
+        import "fmt"
+
+        func main() {
+        	fmt.Println("hello from Go")
+        }
+      - |
+        package main
+
+        func main() {
+        	fmt.Println("hello from Go")
+        }
+      - |
+        package main
+
+        import "fmt"
+
+        func main(args []string) {
+        	fmt.Println("hello from Go")
+        }
+
+  - id: silence-var
+    prompt: |
+      The build fails with `declared and not used: count`. Add the one line that makes it build *without deleting* the variable and without printing it.
+    given: |
+      func main() {
+      	count := 42
+      	fmt.Println("hi")
+      	// your line goes here
+      }
+    hint: There is an assignment whose target is the identifier that means "discard".
+    solution: |
+      _ = count
+    note: |
+      The blank identifier is the compiler's "yes, I know". It is deliberately ugly so that it doesn't survive a code review by accident — and note the rule is the `gc` toolchain's, not the language's: the spec only says a compiler *may* reject unused variables.
+    requires:
+      - say: "assigns count to the blank identifier"
+        match: \( _ = \| var _ = \) count
+    harness: |
+      package main
+
+      import "fmt"
+
+      func main() {
+      	count := 42
+      	fmt.Println("hi")
+      	{{ANSWER}}
+      }
+    expect: hi
+    good:
+      - "var _ = count"
+    bad:
+      - "count = 42"
+      - "_ := count"
+      - "// count"
+
+  - id: blank-import
+    prompt: |
+      Write the import line that pulls in `net/http/pprof` purely for the side effects of its `init` function, so the compiler does not complain that it is unused.
+    hint: One character goes where the package's local name would normally go.
+    solution: |
+      import _ "net/http/pprof"
+    note: |
+      This is the standard way to register something with a program you never call into directly — importing `net/http/pprof` is how a live profiler gets bolted onto a running server.
+    requires:
+      - say: "an import declaration"
+        match: import
+      - say: "of net/http/pprof, under the blank name"
+        match: _ "net/http/pprof"
+    harness: |
+      package main
+
+      import "fmt"
+
+      {{ANSWER}}
+
+      func main() {
+      	fmt.Println("ok")
+      }
+    expect: ok
+    good:
+      - |
+        import (
+        	_ "net/http/pprof"
+        )
+    bad:
+      - 'import "net/http/pprof"'
+      - 'import pprof "net/http/pprof"'
+      - 'import . "net/http/pprof"'
+
+  - id: grouped-imports
+    prompt: |
+      Write the *grouped* import declaration that brings in `fmt`, `os` and `strings` with a single `import` keyword.
+    hint: The grouped form is the same keyword followed by a parenthesised list, one path per line.
+    solution: |
+      import (
+      	"fmt"
+      	"os"
+      	"strings"
+      )
+    note: |
+      `gofmt` sorts the paths inside a group alphabetically and keeps them separated from third-party imports by a blank line. Every one of them must be used, or the build fails.
+    requires:
+      - say: "imports fmt, inside one parenthesised group"
+        match: import ( $* "fmt" $* )
+      - say: "imports os, inside the same group"
+        match: import ( $* "os" $* )
+      - say: "imports strings, inside the same group"
+        match: import ( $* "strings" $* )
+    harness: |
+      package main
+
+      {{ANSWER}}
+
+      func main() {
+      	fmt.Println(strings.ToUpper("ok"))
+      	os.Exit(0)
+      }
+    expect: OK
+    bad:
+      - |
+        import "fmt"
+        import "os"
+        import "strings"
+      - |
+        import (
+        	"fmt"
+        	"os"
+        )
+      - |
+        import "fmt", "os", "strings"

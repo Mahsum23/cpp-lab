@@ -1,3 +1,5 @@
+import type { ShapeForbid, ShapeRequire } from "./shapecheck";
+
 // The contract with content built by app/scripts/build-content.mjs.
 
 /**
@@ -63,21 +65,37 @@ export interface Day {
   topic?: string;
 }
 
-/** A query to write from memory. The reference answer is run, never compared as text. */
+/**
+ * Something to write from memory. A SQL card is judged by running the query; a Go or C++
+ * card, which cannot be run in a browser, is judged by shape (`shapecheck.ts`) — in either
+ * case the reference answer is never compared as text.
+ */
 export interface WriteChallenge {
   id: string;
   prompt: string;
   solution: string;
   hint: string | null;
-  /** A statement run after your answer whose rows are what is compared (for DDL/DML). */
+  /** SQL: a statement run after your answer whose rows are what is compared (for DDL/DML). */
   verify: string | null;
-  /** Whether row order is part of the answer; null decides from the solution's ORDER BY. */
+  /** SQL: whether row order is part of the answer; null decides from the solution's ORDER BY. */
   ordered: boolean | null;
+  /** Go/C++: code already in place, shown above the editor so the answer can be short. */
+  given: string | null;
+  /** Go/C++: what to take away once the card is answered — the reason, not a restatement. */
+  note: string | null;
+  /** Go/C++: what the answer must contain, each described rather than spelled. */
+  requires: ShapeRequire[];
+  /** Go/C++: things that look right and are not. */
+  forbids: ShapeForbid[];
 }
 
 export interface WriteSet {
-  /** Creates and fills the tables. Run fresh for every attempt. */
+  /** The language the answers are written in; absent means SQL. */
+  lang: 'sql' | 'go' | 'cpp';
+  /** SQL: creates and fills the tables. Run fresh for every attempt. */
   setup: string;
+  /** Go/C++: named pattern fragments the challenges' patterns may use as `@name`. */
+  defs: Record<string, string>;
   challenges: WriteChallenge[];
 }
 
