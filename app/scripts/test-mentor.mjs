@@ -17,7 +17,7 @@ const out = await build({
 });
 const file = join(tmpdir(), 'cpp-lab-mentor.mjs');
 writeFileSync(file, out.outputFiles[0].text);
-const { streamReply, looksComplete, withFocus, hasHint, stripMarkers, reviewStanding, reviewGraderPrompt, withStanding, MAX_HINTS, MAX_REVIEW_MESSAGES, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey, taskReviewPrompt, taskSubmission, parseItems, stripItems, gradeOf, reviewFocus, MAX_SUBMISSION_CHARS } = await import(file);
+const { streamReply, looksComplete, withFocus, hasHint, stripMarkers, reviewStanding, reviewGraderPrompt, withStanding, MAX_HINTS, MAX_REVIEW_MESSAGES, listModels, systemPrompt, examinerPrompt, parseVerdict, stripVerdict, PROVIDERS, MentorError, BusyError, ModelGoneError, normalizeKey, taskReviewPrompt, taskSubmission, parseItems, stripItems, gradeOf, reviewFocus, MAX_SUBMISSION_CHARS, forgePrompt, forgeData } = await import(file);
 
 let fails = 0;
 const ok = (label, cond, extra = '') => {
@@ -618,6 +618,17 @@ script([{ status: 200, body: sse([{ candidates: [{ content: { parts: [{ text: 'x
 await drain(ask({ model: 'gemini-2.5-pro' }));
 cfg = JSON.parse(seen.body).generationConfig;
 ok('a non-Flash model is not sent thinkingConfig', cfg.thinkingConfig === undefined, JSON.stringify(cfg));
+
+console.log('\n— a generated challenge must be answerable from what is on screen —');
+const sqlDay = { id: 'sql-day-04', title: 'Order', theoryMarkdown: 'x', write: { lang: 'sql', setup: 'CREATE TABLE orders (id int);\nINSERT INTO orders VALUES (1);', defs: {}, challenges: [] } };
+const sqlWeek = { id: 'track-sql', track: 'sql', title: 'SQL' };
+ok('a SQL day with data tells the model which tables exist', forgePrompt({ week: sqlWeek, day: sqlDay }).includes('CREATE TABLE orders'));
+ok('...and that the reader is shown them', /shows exactly this to the reader/.test(forgePrompt({ week: sqlWeek, day: sqlDay })));
+ok('the practice bank\'s data is preferred when it has its own', forgeData('sql', { ...sqlDay, practice: { write: { setup: 'CREATE TABLE users (id int);' } } }) === 'CREATE TABLE users (id int);');
+ok('a SQL day with no data offers none (the challenge must carry its own)', forgeData('sql', { ...sqlDay, write: null }) === null);
+ok('Go and C++ never get a DATA block', forgeData('go', sqlDay) === null && !/DATA —/.test(forgePrompt({ week: { track: 'cpp', title: 'C++' }, day: sqlDay })));
+ok('the rule against unseen tables is in the prompt', /ON THE SCREEN/.test(forgePrompt({ week: sqlWeek, day: sqlDay })) && /Do not invent a\s+table/.test(forgePrompt({ week: sqlWeek, day: sqlDay })));
+ok('a Go challenge is about Go, not C++', /Go language/.test(forgePrompt({ week: { track: 'go', title: 'Go' }, day: sqlDay })));
 
 console.log(fails ? `\n  ${fails} FAILING` : '\n  all mentor cases pass');
 process.exit(fails ? 1 : 0);

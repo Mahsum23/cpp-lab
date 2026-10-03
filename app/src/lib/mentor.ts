@@ -1021,7 +1021,9 @@ const forger = (track: Track | undefined) => {
   return `You write single, short recall challenges about ${
     track === 'sql'
       ? 'SQL and how a database engine executes it'
-      : 'low-level C++ and POSIX systems programming'
+      : track === 'go'
+        ? 'the Go language and its runtime'
+        : 'low-level C++ and POSIX systems programming'
   }, for someone revising material they studied days or weeks ago.
 
 You will be given the material from one lesson. Write ONE challenge drawn from it.
@@ -1033,6 +1035,13 @@ Rules:
   lines or fewer; "this call returns N — what happened?"; "what breaks if you remove
   this line".
 - It must be answerable from memory in under a minute, with no compiler to hand.
+- It must be answerable from what is ON THE SCREEN. The reader has not seen the lesson's
+  tables, variables or files since the lesson: never refer to one they cannot see ("the
+  orders table", "the query above", "the earlier function"). Either put what you need
+  inside the challenge — the few rows, the declaration — or, for SQL, use only the tables
+  under DATA below, which the app shows the reader above your challenge. Do not invent a
+  table, column or row that is in neither. A question whose answer depends on data nobody
+  can see is not a challenge, it is a guess.
 - Any code goes in a \`\`\`${s.lang} fence and stays under about eight lines.
 - Ask about something the material actually covered. Do not invent API behaviour.
 - Output the challenge only. No preamble, no answer, no hints, no "here is a
@@ -1104,7 +1113,23 @@ const materialFor = (context: { week: Week; day: Day }): string => {
 
 /** System prompt for inventing a challenge from one day's material. */
 export function forgePrompt(context: { week: Week; day: Day }): string {
-  return `${forger(context.week.track)}\n\n---\n\n${materialFor(context)}`;
+  const data = forgeData(context.week.track, context.day);
+  const dataBlock = data
+    ? `DATA — these tables exist, and the app shows exactly this to the reader above your challenge:\n\n\`\`\`sql\n${data}\n\`\`\`\n\n---\n\n`
+    : '';
+  return `${forger(context.week.track)}\n\n---\n\n${dataBlock}${materialFor(context)}`;
+}
+
+/**
+ * The tables a SQL challenge may be about: the setup the day's own write cards run against.
+ * The review screen shows the same text above the challenge, so the question and the data
+ * it is about are never separated. Null when there is nothing — the challenge then has to
+ * carry its own data.
+ */
+export function forgeData(track: Track | undefined, day: Day): string | null {
+  if (track !== 'sql') return null;
+  const setup = (day.practice?.write?.setup || day.write?.setup || '').trim();
+  return setup || null;
 }
 
 /**
