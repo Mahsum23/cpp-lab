@@ -35,7 +35,7 @@
   import ResultGrid from '../components/ResultGrid.svelte';
   import { today } from '../lib/date';
   import {
-    collect, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripMarkers,
+    collect, forgeData, forgePrompt, looksComplete, parseVerdict, reviewGraderPrompt, streamReply, stripMarkers,
     MAX_REVIEW_MESSAGES, ModelGoneError, withStanding, type ChatMessage, type MentorFocus,
   } from '../lib/mentor';
   import { TRACKS, type Day, type DrillStep, type QuizQuestion, type Track, type Week, type WriteChallenge, type WriteSet } from '../lib/types';
@@ -591,6 +591,11 @@
     }
   }
 
+  /** The data a generated SQL challenge is about, shown with it so the question is answerable. */
+  const forgeTables = $derived(
+    card?.kind === 'forge' && context ? forgeData(context.week.track as Track | undefined, context.day) : null,
+  );
+
   const prompt = $derived(
     card?.kind === 'forge' ? challenge : (context?.day.teachBack ?? ''),
   );
@@ -1065,6 +1070,12 @@
     {:else if graded}
       <div class="card">
         {#if prompt}
+          {#if forgeTables}
+            <details class="tables" open>
+              <summary>The tables this is about</summary>
+              <pre class="ref"><code>{@html highlight(forgeTables, 'sql')}</code></pre>
+            </details>
+          {/if}
           <div class="q"><Markdown source={prompt} /></div>
         {:else}
           <p class="q">This card needs the mentor, and it isn't reachable right now.</p>
@@ -1638,6 +1649,27 @@
 
   .roundend .link {
     margin-top: 12px;
+  }
+
+  .tables {
+    margin: 0 0 12px;
+  }
+
+  .tables summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  .tables .ref {
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    max-height: 260px;
+    overflow: auto;
+    font-size: 12.5px;
   }
 
   .given code {
